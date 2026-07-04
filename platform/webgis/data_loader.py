@@ -11,16 +11,15 @@
     store.photo_index / store.photo_map
     store.drawing_index / store.drawing_map
     store.geojson_points / store.geojson_polygons
-    store.township_stats / store.survey_routes / store.village_coverage
-    store.pdf_map
+    store.archive_map
     store.load() / store.get_relic() / store.get_photos() / store.get_drawings()
     store.get_relics_summary() / store.compute_stats()
 
 DB 模式专用接口：
-    store.query_bbox(...)        视口查询(极简 8 字段)
+    store.query_bbox(...)        视口查询(极简字段)
     store.search_fulltext(...)   FTS5 全文搜索
     store.get_relic_full(code)   单条完整详情(含 extra_json 合并)
-    store.polygon_of(code)       单条多边形几何
+    store.polygons_of(code)      两线范围面(保护范围/建控地带)
 """
 from __future__ import annotations
 
@@ -42,9 +41,6 @@ if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
 
 from data_serializers import row_to_legacy  # noqa: E402
-from survey_coverage import compute_village_coverage, load_survey_routes  # noqa: E402
-import data_admin_queries  # noqa: E402
-import data_admin_stats  # noqa: E402
 
 
 
@@ -59,12 +55,10 @@ class DataStore:
         self.photo_map: dict[str, list[dict]] = {}
         self.drawing_index: list[dict] = []
         self.drawing_map: dict[str, list[dict]] = {}
-        self.pdf_map: dict[str, str] = {}
+        # 普查档案 PDF: {code: {"sanpu": [relpath...], "sipu": [relpath...]}}
+        self.archive_map: dict[str, dict[str, list[str]]] = {}
         self.geojson_points: dict = {}
         self.geojson_polygons: dict = {}
-        self.township_stats: list[dict] = []
-        self.survey_routes: dict[str, list[dict]] = {}
-        self.village_coverage: dict = {}
         self._bounds: Optional[tuple[float, float, float, float]] = None
 
         self._use_db: bool = False
@@ -78,9 +72,7 @@ class DataStore:
         self,
         dataset_dir: str | Path,
         *,
-        village_geojson: str | Path = "",
-        pdf_dir: str | Path = "",
-        survey_gps_csv: str | Path = "",
+        archive_docs_dir: str | Path = "",
         bounds: Optional[tuple[float, float, float, float]] = None,
     ) -> None:
         """一次性加载所有数据源。检测到 relics.db 则用 DB 模式,否则回退 JSON。"""
@@ -92,28 +84,20 @@ class DataStore:
             self._open_db(db_file)
             log.info("[数据] DB 模式: %s", db_file)
         else:
-            log.warning("[数据] 未找到 relics.db，回退 JSON 模式。建议运行 step07_build_db.py")
+            log.warning("[数据] 未找到 relics.db，回退 JSON 模式。建议运行 step03_build_db.py")
 
-        # PDF 文件名列表未入库,仍通过扫目录获得。
-        if pdf_dir:
-            self._load_pdf_index(Path(pdf_dir))
+        # 档案 PDF 未入库,扫目录获得。
+        if archive_docs_dir:
+            self._load_archive_docs(Path(archive_docs_dir))
 
         if self._use_db:
             self._populate_legacy_from_db()
             self._load_geojson(dp)
-            self._load_township_stats(dp / "township_stats.csv")
         else:
             self._load_relics(dp / "relics_full.json")
             self._load_photo_index(dp / "photo_index.csv")
             self._load_drawing_index(dp / "drawing_index.csv")
             self._load_geojson(dp)
-            self._load_township_stats(dp / "township_stats.csv")
-
-        if survey_gps_csv and Path(survey_gps_csv).exists():
-            self._load_survey_routes(Path(survey_gps_csv))
-
-        if village_geojson and Path(village_geojson).exists() and self.survey_routes:
-            self._compute_village_coverage(Path(village_geojson))
 
     # ── SQLite 连接管理 ─────────────────────────────────────
     def _open_db(self, db_path: Path) -> None:
@@ -164,9 +148,6 @@ class DataStore:
                 except json.JSONDecodeError:
                     pass
             d = row_to_legacy(row, extra)
-            if self.pdf_map.get(row["code"]):
-                d["has_pdf"] = True
-                d["pdf_path"] = self.pdf_map[row["code"]]
             self.relics.append(d)
             self.relics_map[row["code"]] = d
 
@@ -226,39 +207,30 @@ class DataStore:
             with open(polys, "r", encoding="utf-8") as f:
                 self.geojson_polygons = json.load(f)
 
-    def _load_township_stats(self, path: Path) -> None:
-        if path.exists():
-            self.township_stats = self._read_csv(path)
-
-    def _load_pdf_index(self, pdf_dir: Path) -> None:
-        if not pdf_dir.exists():
-            log.warning("[PDF] 目录不存在: %s", pdf_dir)
+    def _load_archive_docs(self, docs_dir: Path) -> None:
+        """扫描 {code}/{sanpu|sipu}/*.pdf,建立档案索引(相对 docs_dir 的路径)。"""
+        if not docs_dir.exists():
             return
-        for sub in pdf_dir.iterdir():
+        n = 0
+        for sub in docs_dir.iterdir():
             if not sub.is_dir():
                 continue
-            pdfs = sorted(sub.glob("*.pdf"))
-            if pdfs:
-                self.pdf_map[sub.name] = f"{sub.name}/{pdfs[0].name}"
-        log.info("[PDF] %d 个档案 PDF 已索引", len(self.pdf_map))
-
-    def _load_survey_routes(self, path: Path) -> None:
-        self.survey_routes = load_survey_routes(
-            path=path,
-            bounds=self._bounds,
-            read_csv=self._read_csv,
-            log=log,
-        )
-
-    def _compute_village_coverage(self, village_path: Path) -> None:
-        coverage = compute_village_coverage(
-            village_path=village_path,
-            survey_routes=self.survey_routes,
-            relics=self.relics,
-            log=log,
-        )
-        if coverage is not None:
-            self.village_coverage = coverage
+            entry: dict[str, list[str]] = {}
+            for kind in ("sanpu", "sipu"):
+                d = sub / kind
+                if not d.exists():
+                    continue
+                files = sorted(
+                    f"{sub.name}/{kind}/{p.name}"
+                    for p in d.iterdir()
+                    if p.is_file() and p.suffix.lower() == ".pdf"
+                )
+                if files:
+                    entry[kind] = files
+            if entry:
+                self.archive_map[sub.name] = entry
+                n += 1
+        log.info("[档案] %d 处文物的普查档案已索引", n)
 
     # ── 兼容旧接口 ───────────────────────────────────────────
     def get_relic(self, code: str) -> Optional[dict]:
@@ -274,26 +246,28 @@ class DataStore:
         """不含简介/边界点的精简列表,用于地图打点与列表渲染。"""
         fields = [
             "archive_code", "name", "category_main", "category_sub",
-            "era", "era_stats", "heritage_level", "township", "address",
+            "era", "era_stats", "heritage_level", "county", "township", "address",
             "center_lat", "center_lng", "center_alt",
-            "has_boundary", "area", "condition_level", "risk_score",
+            "has_boundary", "area", "condition_level", "tier",
             "ownership_type", "has_3d", "model_3d_path",
             "photo_count", "drawing_count",
-            "survey_type", "industry", "risk_factors",
+            "has_archive_spu", "has_archive_fpu", "last_patrol_at",
         ]
         result = []
         for r in self.relics:
             item = {k: r.get(k) for k in fields}
-            pdf = self.pdf_map.get(r.get("archive_code", ""))
-            item["has_pdf"] = pdf is not None
-            item["pdf_path"] = pdf or ""
+            arch = self.archive_map.get(r.get("archive_code", ""))
+            if arch:
+                item["has_archive_spu"] = item["has_archive_spu"] or bool(arch.get("sanpu"))
+                item["has_archive_fpu"] = item["has_archive_fpu"] or bool(arch.get("sipu"))
             result.append(item)
         return result
 
     def compute_stats(self) -> dict:
         total = len(self.relics)
         by_category: dict[str, int] = {}
-        by_township: dict[str, int] = {}
+        by_county: dict[str, int] = {}
+        by_rank: dict[str, int] = {}
         by_condition: dict[str, int] = {}
         by_era: dict[str, int] = {}
         has_3d_count = 0
@@ -301,7 +275,8 @@ class DataStore:
 
         for r in self.relics:
             by_category[r.get("category_main", "未知")] = by_category.get(r.get("category_main", "未知"), 0) + 1
-            by_township[r.get("township", "未知")] = by_township.get(r.get("township", "未知"), 0) + 1
+            by_county[r.get("county") or "未知"] = by_county.get(r.get("county") or "未知", 0) + 1
+            by_rank[r.get("heritage_level") or "未知"] = by_rank.get(r.get("heritage_level") or "未知", 0) + 1
             by_condition[r.get("condition_level", "未知")] = by_condition.get(r.get("condition_level", "未知"), 0) + 1
             by_era[r.get("era_stats", "未知")] = by_era.get(r.get("era_stats", "未知"), 0) + 1
             if r.get("has_3d"):
@@ -314,7 +289,8 @@ class DataStore:
             "has_3d_count": has_3d_count,
             "has_boundary_count": has_boundary_count,
             "by_category": by_category,
-            "by_township": by_township,
+            "by_county": by_county,
+            "by_rank": by_rank,
             "by_condition": by_condition,
             "by_era": by_era,
         }
@@ -329,11 +305,13 @@ class DataStore:
         *,
         categories: Optional[Iterable[str]] = None,
         ranks: Optional[Iterable[str]] = None,
+        county: Optional[str] = None,
         township: Optional[str] = None,
-        search_type: Optional[str] = None,
+        tier: Optional[str] = None,
+        condition: Optional[str] = None,
         limit: int = 2000,
     ) -> list[dict]:
-        """视口 + 多条件筛选。返回 id/name/code/lng/lat/category/rank/has_3d 8 字段。
+        """视口 + 多条件筛选。返回极简字段(含保存状况,供巡查地图着色)。
 
         bbox 的 buffer 扩展由调用方处理(见 routers/relics.py);
         categories/ranks 支持多选,None 或空值表示不筛选。
@@ -341,11 +319,13 @@ class DataStore:
         if not self._use_db:
             return self._query_bbox_memory(min_lng, min_lat, max_lng, max_lat,
                                             categories=categories, ranks=ranks,
-                                            township=township, search_type=search_type,
+                                            county=county, township=township,
+                                            tier=tier, condition=condition,
                                             limit=limit)
 
         sql = [
-            "SELECT r.id, r.code, r.name, r.category, r.rank, r.lng, r.lat, r.has_3d",
+            "SELECT r.id, r.code, r.name, r.category, r.rank, r.lng, r.lat,"
+            "       r.has_3d, r.county, r.condition, r.tier",
             "FROM relics_rtree AS s",
             "JOIN relics_rtree_map AS m ON m.id_int = s.id_int",
             "JOIN relics AS r ON r.id = m.relic_id",
@@ -365,12 +345,18 @@ class DataStore:
             if rl:
                 sql.append(f"  AND r.rank IN ({','.join('?' for _ in rl)})")
                 params.extend(rl)
+        if county:
+            sql.append("  AND r.county = ?")
+            params.append(county)
         if township:
             sql.append("  AND r.township = ?")
             params.append(township)
-        if search_type:
-            sql.append("  AND r.search_type = ?")
-            params.append(str(search_type))
+        if tier:
+            sql.append("  AND r.tier = ?")
+            params.append(str(tier))
+        if condition:
+            sql.append("  AND r.condition = ?")
+            params.append(str(condition))
 
         sql.append("LIMIT ?")
         params.append(int(limit))
@@ -387,16 +373,19 @@ class DataStore:
                 "category": r["category"],
                 "rank": r["rank"],
                 "has_3d": bool(r["has_3d"]),
+                "county": r["county"] or "",
+                "condition": r["condition"] or "",
+                "tier": r["tier"] or "city",
             }
             for r in rows
         ]
 
     def _query_bbox_memory(
         self, min_lng, min_lat, max_lng, max_lat,
-        *, categories, ranks, township, search_type, limit,
+        *, categories, ranks, county, township, tier, condition, limit,
     ) -> list[dict]:
         """JSON 模式下的视口查询 fallback。全量遍历,性能仅足以支撑千条级。"""
-        from codes import normalize_category, normalize_rank, normalize_search_type
+        from codes import normalize_category, normalize_rank
 
         rank_set = {str(v) for v in ranks} if ranks else None
         cat_set = {str(v) for v in categories} if categories else None
@@ -414,14 +403,17 @@ class DataStore:
                 continue
             cat_code = normalize_category(r.get("category_main"))
             rk_code = normalize_rank(r.get("heritage_level"))
-            st_code = normalize_search_type(r.get("survey_type"))
             if cat_set and cat_code not in cat_set:
                 continue
             if rank_set and rk_code not in rank_set:
                 continue
+            if county and r.get("county") != county:
+                continue
             if township and r.get("township") != township:
                 continue
-            if search_type and st_code != search_type:
+            if tier and (r.get("tier") or "city") != tier:
+                continue
+            if condition and r.get("condition_level") != condition:
                 continue
             out.append({
                 "id": r.get("archive_code"),
@@ -432,6 +424,9 @@ class DataStore:
                 "category": cat_code,
                 "rank": rk_code,
                 "has_3d": bool(r.get("has_3d")),
+                "county": r.get("county") or "",
+                "condition": r.get("condition_level") or "",
+                "tier": r.get("tier") or "city",
             })
             if len(out) >= limit:
                 break
@@ -450,7 +445,7 @@ class DataStore:
         conn = self._thread_conn()
         if len(kw) >= 3:
             sql = (
-                "SELECT r.id, r.code, r.name, r.category, r.rank, r.lng, r.lat, r.has_3d "
+                "SELECT r.id, r.code, r.name, r.category, r.rank, r.lng, r.lat, r.has_3d, r.county "
                 "FROM relics_fts f "
                 "JOIN relics_rtree_map m ON m.id_int = f.rowid "
                 "JOIN relics r ON r.id = m.relic_id "
@@ -462,7 +457,7 @@ class DataStore:
             rows = conn.execute(sql, (f'"{safe_kw}"', int(limit))).fetchall()
         else:
             sql = (
-                "SELECT id, code, name, category, rank, lng, lat, has_3d "
+                "SELECT id, code, name, category, rank, lng, lat, has_3d, county "
                 "FROM relics WHERE status = 1 AND name LIKE ? LIMIT ?"
             )
             rows = conn.execute(sql, (f"%{kw}%", int(limit))).fetchall()
@@ -473,6 +468,7 @@ class DataStore:
                 "lng": r["lng"], "lat": r["lat"],
                 "category": r["category"], "rank": r["rank"],
                 "has_3d": bool(r["has_3d"]),
+                "county": r["county"] or "",
             }
             for r in rows
         ]
@@ -512,36 +508,46 @@ class DataStore:
             d = row_to_legacy(row, extra)
             d["photos"] = self.get_photos(code)
             d["drawings"] = self.get_drawings(code)
-            if self.pdf_map.get(code):
-                d["has_pdf"] = True
-                d["pdf_path"] = self.pdf_map[code]
+            arch = self.archive_map.get(code) or {}
+            d["archives"] = arch
+            if arch.get("sanpu"):
+                d["has_archive_spu"] = True
+            if arch.get("sipu"):
+                d["has_archive_fpu"] = True
             return d
-        return self.relics_map.get(code)
+        d = self.relics_map.get(code)
+        if d is not None:
+            d = dict(d)
+            d["archives"] = self.archive_map.get(code) or {}
+        return d
 
-    def polygon_of(self, code: str) -> Optional[dict]:
-        """单条文物的多边形几何 (GeoJSON),仅 DB 模式有效。"""
+    def polygons_of(self, code: str) -> list[dict]:
+        """单条文物的两线范围面 [{kind, geometry}],仅 DB 模式有效。"""
         if not self._use_db:
-            return None
+            return []
         conn = self._thread_conn()
-        row = conn.execute(
-            "SELECT geom_geojson FROM polygons WHERE relic_code = ?", (code,)
-        ).fetchone()
-        if not row:
-            return None
-        try:
-            return json.loads(row["geom_geojson"])
-        except json.JSONDecodeError:
-            return None
+        rows = conn.execute(
+            "SELECT kind, geom_geojson FROM polygons WHERE relic_code = ? ORDER BY kind DESC",
+            (code,),
+        ).fetchall()
+        out = []
+        for row in rows:
+            try:
+                out.append({"kind": row["kind"], "geometry": json.loads(row["geom_geojson"])})
+            except json.JSONDecodeError:
+                continue
+        return out
 
     # ── 写入接口 (Admin) ─────────────────────────────────────
     # 乐观锁:UPDATE 必须匹配 expected_version,成功后 version += 1。
     # 所有写操作落 audit_log,记录 before_json / after_json 以便回溯。
 
-    # 允许通过 admin 写入的列白名单(防止通过列名注入)。
+    # 允许写入的列白名单(防止通过列名注入)。
     _WRITABLE = {
-        "name", "category", "rank", "search_type",
-        "lng", "lat", "alt", "township", "village", "address",
-        "era", "era_stats", "has_3d", "has_pdf", "has_photo",
+        "name", "category", "rank",
+        "lng", "lat", "alt", "county", "township", "village", "address",
+        "era", "era_stats", "tier", "condition",
+        "has_3d", "has_archive_spu", "has_archive_fpu", "has_photo",
         "has_boundary", "photo_count", "drawing_count",
         "brief", "extra_json", "status",
     }
@@ -596,13 +602,14 @@ class DataStore:
     def _fts_upsert(self, conn: sqlite3.Connection, row: dict) -> None:
         conn.execute("DELETE FROM relics_fts WHERE code = ?", (row["code"],))
         conn.execute(
-            "INSERT INTO relics_fts (code, name, brief, era, township, village) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
+            "INSERT INTO relics_fts (code, name, brief, era, county, township, village) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
             (
                 row.get("code", ""),
                 row.get("name", ""),
                 row.get("brief") or "",
                 row.get("era") or "",
+                row.get("county") or "",
                 row.get("township") or "",
                 row.get("village") or "",
             ),
@@ -637,23 +644,27 @@ class DataStore:
         try:
             conn.execute(
                 """INSERT INTO relics (
-                    id, code, name, category, rank, search_type,
-                    lng, lat, alt, township, village, address,
-                    era, era_stats, has_3d, has_pdf, has_photo, has_boundary,
+                    id, code, name, category, rank,
+                    lng, lat, alt, county, township, village, address,
+                    era, era_stats, tier, condition,
+                    has_3d, has_archive_spu, has_archive_fpu, has_photo, has_boundary,
                     photo_count, drawing_count, brief, extra_json,
                     status, version, created_at, updated_at
-                ) VALUES (?,?,?,?,?,?, ?,?,?,?,?,?, ?,?,?,?,?,?, ?,?,?,?, ?,?,?,?)""",
+                ) VALUES (?,?,?,?,?, ?,?,?,?,?,?,?, ?,?,?,?, ?,?,?,?,?, ?,?,?,?, ?,?,?,?)""",
                 (
                     relic_id, code, name,
                     str(payload.get("category") or "0600"),
                     str(payload.get("rank") or "5"),
-                    payload.get("search_type"),
                     lng, lat,
                     float(payload["alt"]) if payload.get("alt") not in (None, "") else None,
+                    payload.get("county"),
                     payload.get("township"), payload.get("village"), payload.get("address"),
                     payload.get("era"), payload.get("era_stats"),
+                    payload.get("tier") or "city",
+                    payload.get("condition"),
                     1 if payload.get("has_3d") else 0,
-                    1 if payload.get("has_pdf") else 0,
+                    1 if payload.get("has_archive_spu") else 0,
+                    1 if payload.get("has_archive_fpu") else 0,
                     1 if payload.get("has_photo") else 0,
                     1 if payload.get("has_boundary") else 0,
                     int(payload.get("photo_count") or 0),
@@ -669,6 +680,7 @@ class DataStore:
                 "code": code, "name": name,
                 "brief": payload.get("brief"),
                 "era": payload.get("era"),
+                "county": payload.get("county"),
                 "township": payload.get("township"),
                 "village": payload.get("village"),
             })
@@ -730,10 +742,11 @@ class DataStore:
             row = conn.execute("SELECT * FROM relics WHERE code = ?", (code,)).fetchone()
             if ("lng" in patch) or ("lat" in patch):
                 self._rtree_upsert(conn, row["id"], row["lng"], row["lat"])
-            if any(k in patch for k in ("name", "brief", "era", "township", "village")):
+            if any(k in patch for k in ("name", "brief", "era", "county", "township", "village")):
                 self._fts_upsert(conn, {
                     "code": row["code"], "name": row["name"],
                     "brief": row["brief"], "era": row["era"],
+                    "county": row["county"],
                     "township": row["township"], "village": row["village"],
                 })
             after = self._row_to_dict(row)
@@ -870,167 +883,6 @@ class DataStore:
             return {"ok": True, "action_taken": "update", "code": code}
 
         raise ValueError(f"不支持回滚的 action: {action}")
-
-    def admin_neighbors(
-        self,
-        code: str,
-        *,
-        radius_m: float = 2000.0,
-        limit: int = 20,
-    ) -> list[dict]:
-        return data_admin_queries.admin_neighbors(
-            self, code, radius_m=radius_m, limit=limit
-        )
-
-    # ── 后台分页查询（给 /api/admin/relics 用） ─────────────────
-    def admin_list_relics(
-        self,
-        *,
-        page: int = 1,
-        size: int = 20,
-        search: Optional[str] = None,
-        categories: Optional[Iterable[str]] = None,
-        ranks: Optional[Iterable[str]] = None,
-        township: Optional[str] = None,
-        search_type: Optional[str] = None,
-        status: Optional[int] = None,
-        bbox: Optional[tuple] = None,
-        order_by: str = "updated_at_desc",
-    ) -> dict:
-        return data_admin_queries.admin_list_relics(
-            self,
-            page=page,
-            size=size,
-            search=search,
-            categories=categories,
-            ranks=ranks,
-            township=township,
-            search_type=search_type,
-            status=status,
-            bbox=bbox,
-            order_by=order_by,
-        )
-
-    def _admin_list_legacy(
-        self, *, page, size, search, categories, ranks,
-        township, search_type,
-    ) -> dict:
-        return data_admin_queries._admin_list_legacy(
-            self,
-            page=page,
-            size=size,
-            search=search,
-            categories=categories,
-            ranks=ranks,
-            township=township,
-            search_type=search_type,
-        )
-
-    # ── 批量操作（后台多选工具用）───────────────────────
-    def admin_bulk_update(
-        self,
-        codes: Iterable[str],
-        patch: dict,
-        *,
-        actor: str = "",
-    ) -> dict:
-        """批量同字段更新。每条独立读版本 → 写回,冲突/缺失/异常逐条记录不中断。
-
-        字段受 `_WRITABLE` 约束;空 patch 抛 ValueError。
-        返回 {updated, not_found:[...], failed:[{code,error}...]}。
-        """
-        if not self._use_db:
-            raise RuntimeError("admin_bulk_update 仅在 DB 模式可用")
-        clean = {k: v for k, v in (patch or {}).items() if k in self._WRITABLE}
-        if not clean:
-            raise ValueError("没有可更新的字段")
-
-        updated = 0
-        not_found: list[str] = []
-        failed: list[dict] = []
-        conn = self._thread_conn()
-        for raw_code in codes or []:
-            code = str(raw_code or "").strip()
-            if not code:
-                continue
-            row = conn.execute(
-                "SELECT version FROM relics WHERE code = ?", (code,)
-            ).fetchone()
-            if not row:
-                not_found.append(code)
-                continue
-            try:
-                self.update_relic(
-                    code, dict(clean),
-                    expected_version=int(row["version"]), actor=actor,
-                )
-                updated += 1
-            except ValueError as e:
-                failed.append({"code": code, "error": str(e)})
-            except Exception as e:  # pragma: no cover
-                failed.append({"code": code, "error": str(e)})
-        return {"updated": updated, "not_found": not_found, "failed": failed}
-
-    def admin_bulk_delete(
-        self, codes: Iterable[str], *, actor: str = "",
-    ) -> dict:
-        """批量软删除,错一条不中断其余。"""
-        if not self._use_db:
-            raise RuntimeError("admin_bulk_delete 仅在 DB 模式可用")
-        deleted = 0
-        not_found: list[str] = []
-        failed: list[dict] = []
-        for raw_code in codes or []:
-            code = str(raw_code or "").strip()
-            if not code:
-                continue
-            try:
-                self.delete_relic(code, actor=actor)
-                deleted += 1
-            except ValueError as e:
-                msg = str(e)
-                if "不存在" in msg:
-                    not_found.append(code)
-                else:
-                    failed.append({"code": code, "error": msg})
-            except Exception as e:  # pragma: no cover
-                failed.append({"code": code, "error": str(e)})
-        return {"deleted": deleted, "not_found": not_found, "failed": failed}
-
-    def admin_export_relics(
-        self,
-        *,
-        search: Optional[str] = None,
-        categories: Optional[Iterable[str]] = None,
-        ranks: Optional[Iterable[str]] = None,
-        township: Optional[str] = None,
-        search_type: Optional[str] = None,
-        status: Optional[int] = None,
-        codes: Optional[Iterable[str]] = None,
-        bbox: Optional[tuple] = None,
-        order_by: str = "code_asc",
-    ) -> Iterable[dict]:
-        return data_admin_queries.admin_export_relics(
-            self,
-            search=search,
-            categories=categories,
-            ranks=ranks,
-            township=township,
-            search_type=search_type,
-            status=status,
-            codes=codes,
-            bbox=bbox,
-            order_by=order_by,
-        )
-
-    def admin_stats_overview(self) -> dict:
-        return data_admin_stats.admin_stats_overview(self)
-
-    def _admin_stats_legacy(self) -> dict:
-        return data_admin_stats._admin_stats_legacy(self)
-
-    def admin_list_townships(self) -> list[str]:
-        return data_admin_queries.admin_list_townships(self)
 
     # ── 工具 ────────────────────────────────────────────────
     @staticmethod

@@ -5,13 +5,16 @@ config.yaml
 .env.*
 *.key
 
-# Large runtime artifacts under data/output
+# Generated artifacts under data/output (rebuild via generate_demo_data.py + run_pipeline.py)
+data/output/dataset/
+data/output/photos/
+data/output/drawings/
+data/output/boundaries/
+data/output/patrol/
 data/output/tile_cache/
-data/output/worklog_pdf/
-data/output/worklog_pdfs/
-data/output/3dtiles/
-data/output/models_3d/
+data/output/logs/
 data/output/dem/
+data/Get3D/
 *.log
 
 # Python
@@ -29,7 +32,6 @@ node_modules/
 *.tsbuildinfo
 
 # Frontend build outputs
-platform/admin-vue/dist/
 platform/webgis-react/dist/
 .vite/
 .vite_cache/

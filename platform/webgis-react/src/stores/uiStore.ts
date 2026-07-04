@@ -12,13 +12,13 @@ export type RenderQuality = "standard" | "hd" | "ultra";
 
 interface UIState {
   filterPanelOpen: boolean;
-  routePanelOpen: boolean;
   chatPanelOpen: boolean;
   settingsPanelOpen: boolean;
   helpPanelOpen: boolean;
   tileDownloadOpen: boolean;
   boundaryDownloadOpen: boolean;
-  worklogOpen: boolean;
+  /** 巡查规划面板。开启后地图点击进入"选点组线"模式。 */
+  patrolPanelOpen: boolean;
 
   baseLayer: BaseLayerType;
   baseLayerAlpha: number;
@@ -42,7 +42,6 @@ interface UIState {
   activeGroup: string;
 
   selectedRelic: RelicSummary | null;
-  worklogDate: string | null;
 
   // 坐标系显示设置
   /** 屏幕底部坐标读数主显示 CRS。其他系统在 inspector 面板里看。 */
@@ -79,13 +78,12 @@ let toastT: ReturnType<typeof setTimeout> | null = null;
 
 export const useUIStore = create<UIState>((set, get) => ({
   filterPanelOpen: false,
-  routePanelOpen: false,
   chatPanelOpen: false,
   settingsPanelOpen: false,
   helpPanelOpen: false,
   tileDownloadOpen: false,
   boundaryDownloadOpen: false,
-  worklogOpen: false,
+  patrolPanelOpen: false,
 
   baseLayer: "arcgis_sat",
   baseLayerAlpha: 90,
@@ -113,7 +111,6 @@ export const useUIStore = create<UIState>((set, get) => ({
   activeGroup: "category_main",
 
   selectedRelic: null,
-  worklogDate: null,
 
   displayCrs: ((): CrsId => {
     const v = localStorage.getItem("displayCrs");

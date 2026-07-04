@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>文物巡查</title>
+<style>
+  :root {
+    --bg: #f2f4f8; --card: #fff; --ink: #1c2733; --sub: #7a8699;
+    --accent: #1668dc; --green: #22a06b; --orange: #e8871a; --red: #d64541;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; background: var(--bg); color: var(--ink); padding-bottom: 40px; }
+  .hero { background: linear-gradient(135deg, #14396e, #1668dc); color: #fff; padding: 22px 18px 18px; }
+  .hero h1 { font-size: 19px; font-weight: 600; }
+  .hero .meta { margin-top: 6px; font-size: 13px; opacity: .85; }
+  .hero .prog { margin-top: 12px; background: rgba(255,255,255,.2); border-radius: 8px; height: 8px; overflow: hidden; }
+  .hero .prog i { display: block; height: 100%; background: #ffd666; border-radius: 8px; transition: width .3s; }
+  .navbtn { display: block; margin: 14px 16px 0; padding: 14px; text-align: center; background: var(--accent);
+            color: #fff; font-size: 16px; font-weight: 600; border-radius: 12px; border: none; width: calc(100% - 32px);
+            box-shadow: 0 4px 14px rgba(22,104,220,.35); }
+  .navbtn:active { transform: scale(.98); }
+  .hint { margin: 10px 18px 0; font-size: 12px; color: var(--sub); text-align: center; }
+  .list { margin: 14px 12px; }
+  .stop { background: var(--card); border-radius: 14px; padding: 14px; margin-bottom: 12px; box-shadow: 0 1px 4px rgba(16,32,64,.06); }
+  .stop .row1 { display: flex; align-items: center; gap: 8px; }
+  .seq { width: 24px; height: 24px; border-radius: 50%; background: #e8f0fe; color: var(--accent);
+         font-size: 13px; font-weight: 700; display: flex; align-items: center; justify-content: center; flex: none; }
+  .stop.done .seq { background: var(--green); color: #fff; }
+  .nm { font-size: 16px; font-weight: 600; flex: 1; }
+  .badge { font-size: 11px; padding: 2px 8px; border-radius: 20px; background: #eef1f6; color: var(--sub); flex: none; }
+  .badge.c差 { background: #fdecea; color: var(--red); }
+  .badge.c较差 { background: #fdf3e7; color: var(--orange); }
+  .badge.c一般 { background: #fffbe6; color: #ad8b00; }
+  .badge.c较好, .badge.c好 { background: #e8f7f0; color: var(--green); }
+  .addr { margin: 6px 0 0 32px; font-size: 12.5px; color: var(--sub); }
+  .state { margin: 6px 0 0 32px; font-size: 12.5px; }
+  .state.ok { color: var(--green); }
+  .state.warn { color: var(--orange); }
+  .state.bad { color: var(--red); }
+  .ops { display: flex; gap: 10px; margin: 12px 0 0 32px; }
+  .op { flex: 1; padding: 10px 0; border-radius: 10px; text-align: center; font-size: 14px; font-weight: 500; border: none; }
+  .op.nav { background: #e8f0fe; color: var(--accent); }
+  .op.cam { background: var(--green); color: #fff; }
+  .op.cam:disabled { opacity: .6; }
+  .op:active { transform: scale(.97); }
+  .toast { position: fixed; left: 50%; bottom: 60px; transform: translateX(-50%); background: rgba(20,30,45,.92);
+           color: #fff; padding: 12px 18px; border-radius: 12px; font-size: 14px; max-width: 84vw; text-align: center;
+           z-index: 99; display: none; line-height: 1.5; }
+  .mask { position: fixed; inset: 0; background: rgba(10,18,30,.45); z-index: 50; display: none;
+          align-items: center; justify-content: center; }
+  .mask .box { background: #fff; border-radius: 16px; padding: 24px 20px; width: 78vw; max-width: 340px; text-align: center; }
+  .mask .icon { font-size: 42px; }
+  .mask h3 { margin: 10px 0 6px; font-size: 17px; }
+  .mask p { font-size: 13.5px; color: var(--sub); line-height: 1.6; }
+  .mask button { margin-top: 16px; width: 100%; padding: 12px; border: none; border-radius: 10px;
+                 background: var(--accent); color: #fff; font-size: 15px; }
+  .loading { text-align: center; padding: 60px 20px; color: var(--sub); }
+</style>
+</head>
+<body>
+  <div id="app"><div class="loading">正在加载巡查路线…</div></div>
+  <div class="toast" id="toast"></div>
+  <div class="mask" id="mask">
+    <div class="box">
+      <div class="icon" id="mkIcon">✅</div>
+      <h3 id="mkTitle"></h3>
+      <p id="mkText"></p>
+      <button onclick="document.getElementById('mask').style.display='none'">知道了</button>
+    </div>
+  </div>
+  <input type="file" accept="image/*" capture="environment" id="file" style="display:none">
+
+<script>
+var TOKEN = "{{TOKEN}}";
+var DATA = null;
+var pendingCode = null;
+
+function $(id){ return document.getElementById(id); }
+function toast(msg, ms){
+  var t = $('toast'); t.textContent = msg; t.style.display = 'block';
+  clearTimeout(t._t); t._t = setTimeout(function(){ t.style.display = 'none'; }, ms || 2600);
+}
+
+function load(){
+  fetch('/api/m/route/' + TOKEN).then(function(r){
+    if(!r.ok) throw new Error('路线不存在');
+    return r.json();
+  }).then(function(d){ DATA = d; render(); }).catch(function(e){
+    $('app').innerHTML = '<div class="loading">' + e.message + '</div>';
+  });
+}
+
+function render(){
+  var d = DATA;
+  var done = d.stops.filter(function(s){ return s.checked; }).length;
+  var pct = d.stops.length ? Math.round(done / d.stops.length * 100) : 0;
+  var h = '';
+  h += '<div class="hero"><h1>' + esc(d.name) + '</h1>';
+  h += '<div class="meta">计划日期 ' + esc(d.plan_date || '—') + ' · 共 ' + d.stops.length + ' 站 · 已打卡 ' + done + ' 站</div>';
+  h += '<div class="prog"><i style="width:' + pct + '%"></i></div></div>';
+  h += '<button class="navbtn" onclick="navAll()">开启导航（请安装高德地图）</button>';
+  h += '<div class="hint">微信内如无法跳转，请点右上角 ··· 选择「在浏览器打开」</div>';
+  h += '<div class="list">';
+  d.stops.forEach(function(s, i){
+    h += '<div class="stop' + (s.checked ? ' done' : '') + '">';
+    h += '<div class="row1"><span class="seq">' + (s.checked ? '✓' : (i + 1)) + '</span>';
+    h += '<span class="nm">' + esc(s.name) + '</span>';
+    if (s.condition) h += '<span class="badge c' + esc(s.condition) + '">' + esc(s.condition) + '</span>';
+    h += '</div>';
+    h += '<div class="addr">' + esc(s.address || (s.county + ' ' + s.township)) + '</div>';
+    if (s.checked) {
+      if (s.verified) h += '<div class="state ok">已打卡 · 定位核验通过（距文物 ' + fmtDist(s.distance_m) + '）</div>';
+      else if (s.distance_m != null) h += '<div class="state warn">已打卡 · 定位偏差 ' + fmtDist(s.distance_m) + '，待人工复核</div>';
+      else h += '<div class="state warn">已打卡 · 未获取定位，待人工复核</div>';
+    }
+    h += '<div class="ops">';
+    h += '<button class="op nav" onclick="navTo(' + i + ')">导航到此</button>';
+    h += '<button class="op cam" onclick="shoot(\'' + s.code + '\')">' + (s.checked ? '重新拍照' : '拍照打卡') + '</button>';
+    h += '</div></div>';
+  });
+  h += '</div>';
+  $('app').innerHTML = h;
+}
+
+function esc(s){ return String(s == null ? '' : s).replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+function fmtDist(m){ if (m == null) return '—'; return m >= 1000 ? (m/1000).toFixed(1) + ' 公里' : Math.round(m) + ' 米'; }
+
+function navAll(){ if (DATA && DATA.nav_uri_full) window.location.href = DATA.nav_uri_full; }
+function navTo(i){ var s = DATA.stops[i]; if (s && s.nav_uri) window.location.href = s.nav_uri; }
+
+function shoot(code){
+  pendingCode = code;
+  $('file').value = '';
+  $('file').click();
+}
+
+$('file').addEventListener('change', function(){
+  var f = this.files && this.files[0];
+  if (!f || !pendingCode) return;
+  toast('正在获取定位并上传…', 8000);
+  // 浏览器定位作为 EXIF 缺失时的兜底(http 环境可能被拒绝,忽略失败)
+  getPos(2500).then(function(pos){ upload(f, pendingCode, pos); })
+              .catch(function(){ upload(f, pendingCode, null); });
+});
+
+function getPos(timeout){
+  return new Promise(function(res, rej){
+    if (!navigator.geolocation) return rej();
+    var t = setTimeout(function(){ rej(); }, timeout);
+    navigator.geolocation.getCurrentPosition(function(p){
+      clearTimeout(t); res({ lat: p.coords.latitude, lng: p.coords.longitude });
+    }, function(){ clearTimeout(t); rej(); }, { enableHighAccuracy: true, timeout: timeout, maximumAge: 30000 });
+  });
+}
+
+function upload(file, code, pos){
+  var fd = new FormData();
+  fd.append('relic_code', code);
+  fd.append('photo', file, 'checkin.jpg');
+  if (pos) { fd.append('client_lat', pos.lat); fd.append('client_lng', pos.lng); }
+  fetch('/api/m/route/' + TOKEN + '/checkin', { method: 'POST', body: fd })
+    .then(function(r){ return r.json().then(function(j){ return { ok: r.ok, j: j }; }); })
+    .then(function(rr){
+      if (!rr.ok) throw new Error(rr.j.detail || '上传失败');
+      showVerdict(rr.j);
+      load();
+    })
+    .catch(function(e){ toast('上传失败：' + e.message); });
+}
+
+function showVerdict(r){
+  var icon, title, text;
+  var d = r.distance_m == null ? '—' : fmtDist(r.distance_m);
+  if (r.verdict === 'verified') {
+    icon = '✅'; title = '打卡成功 · 已核验到场';
+    text = '照片定位与「' + r.relic_name + '」相距 ' + d + '，在 ' + Math.round(r.verify_radius_m) + ' 米核验半径内。';
+  } else if (r.verdict === 'near') {
+    icon = '⚠️'; title = '已打卡 · 定位偏差较大';
+    text = '照片定位距文物 ' + d + '，超出核验半径，记录已保存，待管理端人工复核。';
+  } else if (r.verdict === 'far') {
+    icon = '❌'; title = '定位与文物位置不符';
+    text = '照片定位距「' + r.relic_name + '」' + d + '，请确认是否在现场拍摄。记录已保存并标记异常。';
+  } else {
+    icon = 'ℹ️'; title = '已打卡 · 未获取到定位';
+    text = '照片不含 GPS 信息且浏览器定位不可用。建议用手机相机开启定位后拍摄原图上传。';
+  }
+  $('mkIcon').textContent = icon;
+  $('mkTitle').textContent = title;
+  $('mkText').textContent = text;
+  $('toast').style.display = 'none';
+  $('mask').style.display = 'flex';
+}
+
+load();
+</script>
+</body>
+</html>

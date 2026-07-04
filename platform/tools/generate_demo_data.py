@@ -1,797 +1,527 @@
-"""一键生成公开演示数据集,用于替换 `data/output/` 下的真实数据。
+"""生成演示数据集:济宁市在级文物保护单位(基础层) + 嘉祥县全量不可移动文物(全量层)。
 
-产物完全虚构:
-- 1 个演示县(990101)、1 个示范街道、8 个虚构村
-- 15 处不可移动文物,坐标落在 120.00~120.20E × 30.00~30.20N
-- 所有人名均为角色代号("调查员A"等);档案编号使用 990101- 前缀
+    python platform/tools/generate_demo_data.py            # 生成
+    python platform/tools/generate_demo_data.py --wipe     # 先清空 output 再生成
 
-生成文件覆盖 markdown/dataset/boundaries 三大目录。
-用法: `python platform/tools/generate_demo_data.py`。
+产出(直接写入 data/output,不经过 step01):
+    dataset/relics_full.json         约 1370 条(基础层 804 + 嘉祥全量 568)
+    dataset/relics_points.geojson
+    dataset/relics_polygons.geojson  在级单位的两线范围面(演示用八边形缓冲)
+    dataset/photo_index.csv + photos/{code}/*.jpg  占位照片
+    data/templates/relics_import_template.csv      真实数据导入模板(仅表头)
+
+之后运行 `python platform/scripts/run_pipeline.py --only 03` 灌库。
+
+说明:
+- 所有坐标、名称、状况均为演示虚构(少量知名文保单位使用公开的大致位置),
+  data_source 请在 config.yaml 保持"演示数据"字样,替换真实数据后再修改。
+- 级别构成:国保 41 / 省保 247 / 市保 260 / 县保 360,合计 908 处在级;
+  嘉祥县 568 处 = 其在级 104 处 + 未定级 464 处,全部标记 tier=full。
 """
 from __future__ import annotations
 
+import argparse
 import csv
 import json
+import math
 import random
 import shutil
-from collections import Counter, defaultdict
+import sys
 from pathlib import Path
 
-# ── 路径 ────────────────────────────────────────────────────
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-DATA_OUTPUT = PROJECT_ROOT / "data" / "output"
-MARKDOWN_DIR = DATA_OUTPUT / "markdown" / "01示范街道"
-DATASET_DIR = DATA_OUTPUT / "dataset"
-BY_TOWNSHIP_DIR = DATASET_DIR / "by_township"
-BOUNDARIES_DIR = DATA_OUTPUT / "boundaries"
-LOGS_DIR = DATA_OUTPUT / "logs"
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
-# ── 配置 ────────────────────────────────────────────────────
-# 固定 seed,保证复跑结果一致。
-random.seed(20260421)
+from _common import get_paths  # noqa: E402
+from codes import normalize_category, normalize_rank  # noqa: E402
 
-PROVINCE = "示范省"
-CITY = "演示市"
-COUNTY = "演示县"
-COUNTY_CODE = "990101"
-TOWNSHIP = "示范街道"
-TOWNSHIP_CODE = "99010100"
+random.seed(20260708)
 
-# 虚构地理矩形
-WEST, SOUTH = 120.000, 30.000
-EAST, NORTH = 120.200, 30.200
+# ── 行政区划(中心点 + 散布半径,单位度) ─────────────────────
+COUNTIES: dict[str, dict] = {
+    "任城区":  {"center": (116.595, 35.407), "r": 0.13, "weight": 9},
+    "兖州区":  {"center": (116.828, 35.552), "r": 0.10, "weight": 6},
+    "曲阜市":  {"center": (116.987, 35.581), "r": 0.13, "weight": 14},
+    "邹城市":  {"center": (117.007, 35.402), "r": 0.16, "weight": 13},
+    "微山县":  {"center": (117.129, 34.807), "r": 0.20, "weight": 7},
+    "鱼台县":  {"center": (116.650, 35.012), "r": 0.10, "weight": 4},
+    "金乡县":  {"center": (116.311, 35.066), "r": 0.11, "weight": 5},
+    "嘉祥县":  {"center": (116.342, 35.408), "r": 0.13, "weight": 10},
+    "汶上县":  {"center": (116.497, 35.732), "r": 0.11, "weight": 7},
+    "泗水县":  {"center": (117.251, 35.664), "r": 0.14, "weight": 7},
+    "梁山县":  {"center": (116.096, 35.802), "r": 0.12, "weight": 6},
+}
 
-# 8 个村按 4×2 网格切分街道范围。
-VILLAGES = [
-    {"name": "V01村", "col": 0, "row": 1},
-    {"name": "V02村", "col": 1, "row": 1},
-    {"name": "V03村", "col": 2, "row": 1},
-    {"name": "V04村", "col": 3, "row": 1},
-    {"name": "V05村", "col": 0, "row": 0},
-    {"name": "V06村", "col": 1, "row": 0},
-    {"name": "V07村", "col": 2, "row": 0},
-    {"name": "V08村", "col": 3, "row": 0},
+COUNTY_CODE = {
+    "任城区": "RC", "兖州区": "YZ", "曲阜市": "QF", "邹城市": "ZC",
+    "微山县": "WS", "鱼台县": "YT", "金乡县": "JX2", "嘉祥县": "JX",
+    "汶上县": "WSH", "泗水县": "SS", "梁山县": "LS",
+}
+
+JIAXIANG_TOWNSHIPS = [
+    "嘉祥街道", "卧龙山街道", "万张街道", "梁宝寺镇", "疃里镇", "马村镇",
+    "金屯镇", "大张楼镇", "老僧堂镇", "仲山镇", "满硐镇", "纸坊镇",
+    "马集镇", "孟姑集镇", "黄垙镇",
 ]
 
-COL_W = (EAST - WEST) / 4  # 0.05°
-ROW_H = (NORTH - SOUTH) / 2  # 0.10°
+GENERIC_TOWNSHIP_SUFFIX = ["镇", "镇", "镇", "街道", "乡"]
 
+SURNAMES = ("王张李刘陈杨黄赵吴周徐孙马朱胡郭何高林罗郑梁谢宋唐许韩冯邓曹彭曾"
+            "肖田董袁潘于蒋蔡余杜叶程苏魏吕丁任沈姚卢姜崔钟谭陆汪范金石戴贾韦夏付方白邹孟熊秦邱侯江尹薛闫段雷龙黎史陶")
 
-def village_bbox(v: dict) -> tuple[float, float, float, float]:
-    w = WEST + v["col"] * COL_W
-    s = SOUTH + v["row"] * ROW_H
-    return w, s, w + COL_W, s + ROW_H
+VILLAGE_MID = ["家", "官", "楼", "庄", "口", "桥", "集", "堂", "营", "屯", "坊", "台", "湾", "河", "山", ""]
+VILLAGE_SUFFIX = ["村", "庄", "屯", "集", "楼", "堂"]
 
+# 类别 → (名称模板, 年代池)
+NAME_TEMPLATES: dict[str, list[str]] = {
+    "古遗址": ["{v}遗址", "{v}故城遗址", "{v}窑址", "{v}文化遗址", "{v}城址"],
+    "古墓葬": ["{v}墓群", "{v}汉墓群", "{s}氏家族墓", "{v}古墓", "{s}家林"],
+    "古建筑": ["{s}氏祠堂", "{v}关帝庙", "{v}观音堂", "{v}三官庙", "{v}泰山行宫", "{s}家大院", "{v}古桥", "{v}清真寺"],
+    "石窟寺及石刻": ["{v}石刻", "{v}摩崖造像", "{s}氏墓碑", "{v}经幢", "{v}碑刻"],
+    "近现代重要史迹及代表性建筑": ["{v}战斗遗址", "{s}氏故居", "{v}县委旧址", "{v}烈士墓", "{v}教堂", "{v}火车站旧址"],
+}
 
-# ── 文物清单(15 条,覆盖六大类与不同保护级别) ───────────────
-RELICS = [
-    # (seq, village, sub_name, category_main, category_sub, era, era_stats, level, condition, area_m2, has_poly)
-    ("0001", "V01村", "古窑址", "古遗址", "古窑址", "汉", "战汉", "", "较好", 360, True),
-    ("0002", "V01村", "古井", "古建筑", "古井", "清", "清代", "", "一般", 3, False),
-    ("0003", "V02村", "古墓群", "古墓葬", "普通墓葬", "明", "明代", "", "较差", 240, True),
-    ("0004", "V02村", "石拱桥", "古建筑", "桥梁涵洞", "清", "清代", "县级文物保护单位", "一般", 48, False),
-    ("0005", "V03村", "摩崖题刻", "石窟寺及石刻", "摩崖石刻", "唐", "隋唐", "", "较好", 6, False),
-    ("0006", "V03村", "石棺墓", "古墓葬", "土墩墓", "宋", "宋代", "", "一般", 80, True),
-    ("0007", "V04村", "文昌阁", "古建筑", "楼阁", "清", "清代", "市级文物保护单位", "一般", 120, True),
-    ("0008", "V04村", "文昌阁碑", "石窟寺及石刻", "碑刻", "清", "清代", "", "较好", 2, False),
-    ("0009", "V05村", "聚落遗址", "古遗址", "聚落址", "新石器时代", "新石器", "省级文物保护单位", "较差", 8600, True),
-    ("0010", "V05村", "汉墓", "古墓葬", "封土墓", "汉", "战汉", "", "差", 180, False),
-    ("0011", "V06村", "塔基遗址", "古遗址", "宗教遗址", "元", "元代", "", "一般", 55, False),
-    ("0012", "V07村", "革命纪念碑", "近现代重要史迹及代表性建筑", "纪念建筑", "1949年", "近现代", "县级文物保护单位", "好", 36, False),
-    ("0013", "V07村", "老民居", "近现代重要史迹及代表性建筑", "民居宅第", "民国", "近现代", "", "一般", 210, True),
-    ("0014", "V08村", "石雕造像", "石窟寺及石刻", "石刻造像", "南北朝", "三国两晋南北朝", "", "较好", 4, False),
-    ("0015", "V08村", "古树名木遗存", "其他", "古树名木", "民国", "近现代", "", "好", 1, False),
+ERA_POOLS: dict[str, list[str]] = {
+    "古遗址": ["新石器时代", "龙山文化", "大汶口文化", "商", "周", "东周", "汉", "汉、唐", "宋"],
+    "古墓葬": ["汉", "东汉", "西汉", "晋", "唐", "宋", "元", "明", "清"],
+    "古建筑": ["元", "明", "明、清", "清", "清、民国"],
+    "石窟寺及石刻": ["北魏", "东魏", "北齐", "唐", "宋", "金", "明", "清"],
+    "近现代重要史迹及代表性建筑": ["民国", "1938年", "1945年", "1948年", "1952年"],
+}
+
+CATEGORY_WEIGHTS = [
+    ("古遗址", 30), ("古墓葬", 22), ("古建筑", 26),
+    ("石窟寺及石刻", 10), ("近现代重要史迹及代表性建筑", 12),
 ]
 
-DEFAULT_LEVEL = "尚未核定公布为文物保护单位的不可移动文物"
+CONDITION_WEIGHTS = [("好", 10), ("较好", 25), ("一般", 40), ("较差", 18), ("差", 7)]
 
-# 虚构人员,统一使用角色代号。
-SURVEYORS = ["调查员A", "调查员B", "调查员C", "调查员D", "调查员E"]
-REVIEWER = "审核员A"
-PHOTOGRAPHER = "摄影师A"
-DRAFTER = "绘图员A"
+# 知名文保单位(公开信息,坐标为大致位置,演示用)
+FAMOUS: list[dict] = [
+    dict(name="曲阜孔庙及孔府", county="曲阜市", cat="古建筑", era="金至清", lng=116.9866, lat=35.5967, rank="国保", batch="第一批"),
+    dict(name="孔林", county="曲阜市", cat="古墓葬", era="东周至清", lng=116.9847, lat=35.6231, rank="国保", batch="第一批"),
+    dict(name="鲁国故城遗址", county="曲阜市", cat="古遗址", era="周至汉", lng=116.9930, lat=35.6010, rank="国保", batch="第一批"),
+    dict(name="尼山孔庙和书院", county="曲阜市", cat="古建筑", era="明、清", lng=117.2050, lat=35.4890, rank="国保", batch="第六批"),
+    dict(name="孟庙及孟府", county="邹城市", cat="古建筑", era="金至清", lng=116.9737, lat=35.3990, rank="国保", batch="第三批"),
+    dict(name="铁山摩崖石刻", county="邹城市", cat="石窟寺及石刻", era="北周", lng=116.9580, lat=35.4160, rank="国保", batch="第三批"),
+    dict(name="明鲁王墓", county="邹城市", cat="古墓葬", era="明", lng=117.0730, lat=35.4420, rank="国保", batch="第六批"),
+    dict(name="武氏墓群石刻", county="嘉祥县", cat="石窟寺及石刻", era="东汉", lng=116.3690, lat=35.3430, rank="国保", batch="第一批"),
+    dict(name="青山寺", county="嘉祥县", cat="古建筑", era="明、清", lng=116.2920, lat=35.3760, rank="国保", batch="第七批"),
+    dict(name="曾庙", county="嘉祥县", cat="古建筑", era="明、清", lng=116.3280, lat=35.3190, rank="国保", batch="第六批"),
+    dict(name="崇觉寺铁塔", county="任城区", cat="古建筑", era="北宋", lng=116.5930, lat=35.4110, rank="国保", batch="第三批"),
+    dict(name="济宁东大寺", county="任城区", cat="古建筑", era="明、清", lng=116.5720, lat=35.4020, rank="国保", batch="第六批"),
+    dict(name="太白楼", county="任城区", cat="古建筑", era="明", lng=116.5810, lat=35.4030, rank="省保", batch="第一批"),
+    dict(name="兴隆塔", county="兖州区", cat="古建筑", era="北宋", lng=116.8330, lat=35.5540, rank="国保", batch="第七批"),
+    dict(name="宝相寺塔(太子灵踪塔)", county="汶上县", cat="古建筑", era="北宋", lng=116.4890, lat=35.7330, rank="国保", batch="第七批"),
+    dict(name="光善寺塔", county="金乡县", cat="古建筑", era="唐", lng=116.3110, lat=35.0680, rank="省保", batch="第二批"),
+    dict(name="伏羲庙", county="微山县", cat="古建筑", era="宋至清", lng=117.0690, lat=35.0220, rank="省保", batch="第三批"),
+    dict(name="梁山青龙山摩崖", county="梁山县", cat="石窟寺及石刻", era="唐", lng=116.1010, lat=35.7940, rank="市保", batch="第二批"),
+    dict(name="卞桥", county="泗水县", cat="古建筑", era="金", lng=117.3760, lat=35.7150, rank="国保", batch="第七批"),
+    dict(name="旧城海子遗址", county="鱼台县", cat="古遗址", era="唐、宋", lng=116.6300, lat=34.9890, rank="省保", batch="第四批"),
+]
 
-# ── 文本模板（生成简介/备注） ───────────────────────────────
-INTRO_TEMPLATE = (
-    "{name}位于{prov}{city}{county}{township}{village}内，"
-    "是一处{era_stats}时期的{cat_sub}，占地约{area}平方米。"
-    "本条目为演示数据集中的{cat_main}类样本，"
-    "用于展示平台的文物档案、三维地图与多维统计功能。"
-    "{state_desc}"
-    "2024年第四次全国文物普查对其进行了{survey_type}，"
-    "数据真实与否不影响平台原型功能的体验。"
-    "⚠️ 注意：本条目为公开仓库的演示数据，名称、坐标、简介均为随机生成，"
-    "不对应任何真实文物。"
-)
-
-STATE_DESC_BY_COND = {
-    "好": "文物本体保存状况良好，周边环境整洁，具备初步保护条件。",
-    "较好": "文物本体基本完整，表面存在轻度风化痕迹，整体保存状况较好。",
-    "一般": "文物本体存在一定程度的自然侵蚀与人为影响，需加强日常巡查。",
-    "较差": "文物本体已出现明显病害，周边环境受生产活动影响，亟待保护。",
-    "差": "文物本体损毁严重，部分结构缺失，存在较高的灭失风险。",
-}
-
-SURVEY_TYPES = ["复查", "新发现"]
-
-REMARK_TEMPLATE = (
-    "本条目数据由 generate_demo_data.py 在 {date} 随机生成，"
-    "仅用于公开演示，不具备档案学意义。"
-)
-
-# 影响因素按保存现状选择。
-RISK_FACTORS_POOL = {
-    "好": "",
-    "较好": "雨雪",
-    "一般": "雨雪，生产生活活动",
-    "较差": "雨雪，生产生活活动，其他因素",
-    "差": "雨雪，生产生活活动，人为破坏，其他因素",
-}
-
-OWNERSHIP_BY_CAT = {
-    "古遗址": ("国家所有", "", "{village}村民委员会", "{township}办事处", "农业"),
-    "古墓葬": ("国家所有", "", "{village}村民委员会", "{township}办事处", "农业"),
-    "古建筑": ("集体所有", "{village}村民委员会", "{village}村民委员会", "{township}办事处", "文化"),
-    "石窟寺及石刻": ("集体所有", "{village}村民委员会", "{village}村民委员会", "{township}办事处", "文化"),
-    "近现代重要史迹及代表性建筑": ("集体所有", "{village}村民委员会", "{village}村民委员会", "{township}办事处", "文化"),
-    "其他": ("集体所有", "{village}村民委员会", "{village}村民委员会", "{township}办事处", "林业"),
+RANK_BATCH = {
+    "国保": ["第五批", "第六批", "第七批", "第八批"],
+    "省保": ["第二批", "第三批", "第四批", "第五批"],
+    "市保": ["第一批", "第二批", "第三批", "第四批"],
+    "县保": ["第一批", "第二批", "第三批"],
 }
 
 
-# ── 坐标工具 ────────────────────────────────────────────────
-def decimal_to_dms(value: float) -> str:
-    """十进制度 → 度°分′秒″,秒保留 4 位小数。"""
-    deg = int(value)
-    remainder = (value - deg) * 60
-    minute = int(remainder)
-    second = (remainder - minute) * 60
-    return f"{deg}°{minute}′{second:.4f}″"
+def _pick_weighted(pairs: list[tuple[str, int]]) -> str:
+    total = sum(w for _, w in pairs)
+    x = random.uniform(0, total)
+    acc = 0.0
+    for v, w in pairs:
+        acc += w
+        if x <= acc:
+            return v
+    return pairs[-1][0]
 
 
-def random_point_in(w: float, s: float, e: float, n: float, pad: float = 0.005) -> tuple[float, float]:
-    lng = round(random.uniform(w + pad, e - pad), 8)
-    lat = round(random.uniform(s + pad, n - pad), 8)
-    return lng, lat
+def _village() -> str:
+    s = random.choice(SURNAMES)
+    mid = random.choice(VILLAGE_MID)
+    suf = random.choice(VILLAGE_SUFFIX)
+    name = f"{s}{mid}{suf}" if mid else f"{s}{suf}"
+    return name
 
 
-def build_polygon_around(center_lng: float, center_lat: float, area_m2: float) -> list[tuple[float, float]]:
-    """根据面积估算近似正方形的 4 个角点。
-    粗略换算:1° 纬度 ≈ 111 km,30°N 附近 1° 经度 ≈ 96 km。"""
-    side_m = max(area_m2, 16) ** 0.5
-    d_lat = side_m / 111320.0
-    d_lng = side_m / 96600.0
-    dx = d_lng / 2
-    dy = d_lat / 2
-    return [
-        (round(center_lng - dx, 8), round(center_lat - dy, 8)),
-        (round(center_lng + dx, 8), round(center_lat - dy, 8)),
-        (round(center_lng + dx, 8), round(center_lat + dy, 8)),
-        (round(center_lng - dx, 8), round(center_lat + dy, 8)),
+def _township_for(county: str) -> str:
+    if county == "嘉祥县":
+        return random.choice(JIAXIANG_TOWNSHIPS)
+    s = random.choice(SURNAMES)
+    style = random.choice(GENERIC_TOWNSHIP_SUFFIX)
+    if style == "街道":
+        return f"{s}桥{style}" if random.random() < 0.4 else f"{s}店{style}"
+    return f"{s}{random.choice(['家', '集', '楼', '店', '桥', '村'])}{style}"
+
+
+def _make_name(cat: str, village: str) -> str:
+    tpl = random.choice(NAME_TEMPLATES[cat])
+    return tpl.format(v=village.rstrip("村庄屯集楼堂"), s=random.choice(SURNAMES))
+
+
+def _jitter_point(county: str) -> tuple[float, float]:
+    c = COUNTIES[county]
+    lng0, lat0 = c["center"]
+    r = c["r"]
+    ang = random.uniform(0, 2 * math.pi)
+    dist = abs(random.gauss(0, r * 0.55))
+    dist = min(dist, r)
+    return (round(lng0 + dist * math.cos(ang), 6), round(lat0 + dist * math.sin(ang) * 0.85, 6))
+
+
+def _octagon(lng: float, lat: float, radius_m: float) -> list[list[float]]:
+    pts = []
+    for i in range(8):
+        a = math.pi / 8 + i * math.pi / 4
+        dlng = radius_m * math.cos(a) / (111320.0 * math.cos(math.radians(lat)))
+        dlat = radius_m * math.sin(a) / 110540.0
+        pts.append([round(lng + dlng, 7), round(lat + dlat, 7)])
+    pts.append(pts[0])
+    return pts
+
+
+def _brief(name: str, county: str, township: str, cat: str, era: str, cond: str) -> str:
+    templates = [
+        "{name}位于济宁市{county}{township}境内，为{era}时期{cat}。遗存本体保存{cond}，"
+        "具有较高的历史、艺术和科学价值，是研究当地历史沿革与社会生活的重要实物资料。",
+        "{name}地处{county}{township}，年代为{era}，属{cat}类不可移动文物。"
+        "现状保存{cond}，周边环境总体稳定，已纳入日常巡查管理范围。",
+        "{name}系{era}时期{cat}，坐落于{county}{township}。文物本体格局清晰，保存状况{cond}，"
+        "对研究鲁西南地区{cat}的形制演变具有代表性意义。",
     ]
+    return random.choice(templates).format(
+        name=name, county=county, township=township, cat=cat, era=era, cond=cond)
 
 
-# ── 构造完整 record ─────────────────────────────────────────
-def build_records() -> list[dict]:
-    records: list[dict] = []
-    village_map = {v["name"]: v for v in VILLAGES}
+def _protection_texts(name: str) -> tuple[str, str]:
+    r1 = random.choice([30, 50, 60, 80, 100])
+    r2 = r1 + random.choice([50, 100, 150])
+    ps = f"以{name}本体外缘为基线，四周各外扩{r1}米。"
+    cz = f"自保护范围边界线四周各外扩{r2}米，建控地带内新建建筑高度不得超过9米。"
+    return ps, cz
 
-    for idx, (seq, vil_name, sub, cat_main, cat_sub, era, era_stats, level_raw, cond, area, has_poly) in enumerate(RELICS):
-        vil = village_map[vil_name]
-        vw, vs, ve, vn = village_bbox(vil)
-        center_lng, center_lat = random_point_in(vw, vs, ve, vn, pad=0.008)
-        boundary_pts: list[dict] = []
-        if has_poly:
-            corners = build_polygon_around(center_lng, center_lat, area)
-            for k, (lng, lat) in enumerate(corners):
-                boundary_pts.append({
-                    "type": "边界点",
-                    "lat": lat,
-                    "lng": lng,
-                    "alt": 30.0,
-                    "desc": f"边界{k + 1}",
-                })
 
-        archive_code = f"{COUNTY_CODE}-{seq}"
-        name = f"{vil_name}{sub}"
-        level = level_raw or DEFAULT_LEVEL
+def _last_patrol(cond: str) -> str:
+    """按状况生成'上次巡查'日期(演示):状况越差越可能逾期。"""
+    import datetime as dt
+    days = {
+        "差": random.randint(20, 120),
+        "较差": random.randint(30, 150),
+        "一般": random.randint(30, 200),
+        "较好": random.randint(60, 300),
+        "好": random.randint(60, 360),
+    }[cond]
+    return (dt.date.today() - dt.timedelta(days=days)).isoformat()
 
-        ownership_type, owner_tpl, user_tpl, mgr_tpl, industry = OWNERSHIP_BY_CAT[cat_main]
-        owner = owner_tpl.format(village=vil_name)
-        user = user_tpl.format(village=vil_name)
-        managing_org = mgr_tpl.format(township=TOWNSHIP)
-        address = f"{PROVINCE}{CITY}{COUNTY}{TOWNSHIP}{vil_name}村内"
 
-        survey_type = random.choice(SURVEY_TYPES)
-        surveyors = "，".join(random.sample(SURVEYORS, k=random.randint(3, 5)))
-        survey_date = f"2024.{random.randint(9, 11):02d}.{random.randint(1, 28):02d}"
-        review_date = f"2025.{random.randint(1, 6):02d}.{random.randint(1, 28):02d}"
+def _gen_units() -> tuple[list[dict], list[dict]]:
+    """返回 (relics, polygon_features)。"""
+    relics: list[dict] = []
+    polys: list[dict] = []
+    seq: dict[str, int] = {}
 
-        risk_factors = RISK_FACTORS_POOL[cond]
-        # 约半数条目有保护措施,制造差异化样本。
-        prot_measures = random.choice(["", "", "围栏", "说明牌", "围栏、说明牌"])
+    def next_code(county: str) -> str:
+        cc = COUNTY_CODE[county]
+        seq[cc] = seq.get(cc, 0) + 1
+        return f"JN-{cc}-{seq[cc]:04d}"
 
-        # 风险评分与 step02 保持一致。
-        risk_map = {"差": 5, "较差": 4, "一般": 2, "较好": 1, "好": 0}
-        risk_score = risk_map.get(cond, 0)
-        if not prot_measures:
-            risk_score += 3
-        if "全国重点" in level:
-            risk_score += 2
-        elif "省级" in level:
-            risk_score += 1
+    def add(county: str, rank_zh: str, tier: str, *, famous: dict | None = None,
+            force_cat: str | None = None) -> dict:
+        if famous:
+            cat = famous["cat"]
+            name = famous["name"]
+            lng, lat = famous["lng"], famous["lat"]
+            era = famous["era"]
+            township = _township_for(county)
+            village = _village()
+            batch = famous.get("batch", "")
+        else:
+            cat = force_cat or _pick_weighted(CATEGORY_WEIGHTS)
+            village = _village()
+            name = _make_name(cat, village)
+            lng, lat = _jitter_point(county)
+            era = random.choice(ERA_POOLS[cat])
+            township = _township_for(county)
+            batch = random.choice(RANK_BATCH.get(rank_zh, [""])) if rank_zh != "未定级" else ""
 
-        has_prot_zone = "是" if "省级" in level or "市级" in level or "县级" in level else "否"
-        has_ctrl_zone = "是" if "省级" in level else "否"
-
-        drawing_count = 2
-        photo_count = random.randint(4, 8)
-
-        intro = INTRO_TEMPLATE.format(
-            name=name,
-            prov=PROVINCE,
-            city=CITY,
-            county=COUNTY,
-            township=TOWNSHIP,
-            village=vil_name,
-            era_stats=era_stats,
-            cat_sub=cat_sub,
-            cat_main=cat_main,
-            area=area,
-            survey_type=survey_type,
-            state_desc=STATE_DESC_BY_COND[cond],
-        )
-        remark = REMARK_TEMPLATE.format(date="2026-04-21")
-
-        record = {
-            "archive_code": archive_code,
+        cond = _pick_weighted(CONDITION_WEIGHTS)
+        code = next_code(county)
+        r = {
+            "archive_code": code,
             "name": name,
-            "survey_type": survey_type,
-            "category_main": cat_main,
-            "category_sub": cat_sub,
+            "category_main": cat,
+            "category_code": normalize_category(cat),
+            "heritage_level": {
+                "国保": "全国重点文物保护单位", "省保": "省级文物保护单位",
+                "市保": "市级文物保护单位", "县保": "县级文物保护单位",
+                "未定级": "尚未核定公布为文物保护单位的不可移动文物",
+            }[rank_zh],
+            "rank_code": normalize_rank(rank_zh),
+            "county": county,
+            "township": township,
+            "village": village,
+            "address": f"济宁市{county}{township}{village}",
+            "center_lng": lng,
+            "center_lat": lat,
+            "center_alt": round(random.uniform(35, 120), 1),
             "era": era,
-            "era_stats": era_stats,
-            "heritage_level": level,
-            "province": PROVINCE,
-            "city": CITY,
-            "county": COUNTY,
-            "township": TOWNSHIP,
-            "address": address,
-            "center_lat": center_lat,
-            "center_lng": center_lng,
-            "center_alt": 30.0,
-            "has_boundary": has_poly,
-            "boundary_count": len(boundary_pts),
-            "area": f"{area}平方米",
-            "area_numeric": float(area),
-            "prot_unit": "",
-            "has_prot_zone": has_prot_zone,
-            "has_ctrl_zone": has_ctrl_zone,
-            "ownership_type": ownership_type,
-            "owner": owner,
-            "user": user,
-            "managing_org": managing_org,
-            "industry": industry,
-            "is_open": "开放",
-            "usage": random.choice(["无人使用", "开放参观", "农业生产"]),
-            "is_relocated": "否",
-            "is_changed": "否",
+            "era_stats": era.split("、")[0].split("至")[0],
             "condition_level": cond,
-            "prot_measures": prot_measures,
-            "risk_factors": risk_factors,
-            "audit_result": "资料翔实，数据准确，填写规范，符合要求。",
-            "surveyors": surveyors,
-            "survey_date": survey_date,
-            "reviewer": REVIEWER,
-            "review_date": review_date,
-            "drawing_count": drawing_count,
-            "photo_count": photo_count,
-            "risk_score": risk_score,
-            "intro": intro,
-            "remark": remark,
+            "tier": tier,
+            "intro": _brief(name, county, township, cat, era, cond),
+            "ownership_type": random.choice(["国家所有", "集体所有", "集体所有", "私人所有"]),
+            "last_patrol_at": _last_patrol(cond),
+            "photo_count": 0,
+            "drawing_count": 0,
             "has_3d": False,
-            "model_3d_path": "",
-            "source_file": f"{archive_code}_{name}_20260421120000.md",
-            "_boundary_points": boundary_pts,
-            "_village": vil_name,
+            "has_archive_spu": False,
+            "has_archive_fpu": False,
         }
-        records.append(record)
-    return records
+        if batch:
+            r["batch"] = f"{rank_zh}{batch}"
+
+        if rank_zh != "未定级":
+            ps, cz = _protection_texts(name)
+            r["protection_scope"] = ps
+            r["control_zone"] = cz
+            r["has_boundary"] = True
+            rad = random.choice([60, 80, 100, 120, 150])
+            polys.append({
+                "type": "Feature",
+                "properties": {"archive_code": code, "kind": "protection", "name": name},
+                "geometry": {"type": "Polygon", "coordinates": [_octagon(lng, lat, rad)]},
+            })
+            polys.append({
+                "type": "Feature",
+                "properties": {"archive_code": code, "kind": "control", "name": name},
+                "geometry": {"type": "Polygon", "coordinates": [_octagon(lng, lat, rad * 2.1)]},
+            })
+        relics.append(r)
+        return r
+
+    # 1) 知名单位入库
+    famous_by_county: dict[str, int] = {}
+    for f in FAMOUS:
+        tier = "full" if f["county"] == "嘉祥县" else "city"
+        add(f["county"], f["rank"], tier, famous=f)
+        famous_by_county[f["county"]] = famous_by_county.get(f["county"], 0) + 1
+
+    # 2) 在级单位配额:国保 41 / 省保 247 / 市保 260 / 县保 360 = 908
+    #    嘉祥县在级 104(国2 省12 市30 县60),其余按县区权重分摊。
+    quota = {"国保": 41, "省保": 247, "市保": 260, "县保": 360}
+    jiaxiang_quota = {"国保": 2, "省保": 12, "市保": 30, "县保": 60}
+    famous_rank_count: dict[str, int] = {}
+    for f in FAMOUS:
+        famous_rank_count[f["rank"]] = famous_rank_count.get(f["rank"], 0) + 1
+        if f["county"] == "嘉祥县":
+            jiaxiang_quota[f["rank"]] -= 1
+
+    other_counties = [c for c in COUNTIES if c != "嘉祥县"]
+    weights = [COUNTIES[c]["weight"] for c in other_counties]
+
+    for rank_zh, total in quota.items():
+        remain = total - famous_rank_count.get(rank_zh, 0)
+        jx_n = max(0, jiaxiang_quota.get(rank_zh, 0))
+        for _ in range(jx_n):
+            add("嘉祥县", rank_zh, "full")
+        remain -= jx_n
+        for _ in range(max(0, remain)):
+            county = random.choices(other_counties, weights=weights, k=1)[0]
+            add(county, rank_zh, "city")
+
+    # 3) 嘉祥县未定级,补足全县 568 处
+    jx_now = sum(1 for r in relics if r["county"] == "嘉祥县")
+    for _ in range(max(0, 568 - jx_now)):
+        add("嘉祥县", "未定级", "full")
+
+    # 4) 嘉祥全量层数据要素:三维模型约 400 个、三普/四普档案标记
+    jx = [r for r in relics if r["county"] == "嘉祥县"]
+    random.shuffle(jx)
+    for i, r in enumerate(jx):
+        r["has_archive_fpu"] = True                       # 四普档案全覆盖
+        r["has_archive_spu"] = random.random() < 0.62     # 三普在册约六成
+        if i < 400:
+            r["has_3d"] = True
+
+    return relics, polys
 
 
-# ── Markdown 渲染 ───────────────────────────────────────────
-MD_TEMPLATE = """# {name}
+# ── 占位照片 ─────────────────────────────────────────────────
+_CAT_COLOR = {
+    "古遗址": (128, 106, 66), "古墓葬": (96, 84, 110), "古建筑": (150, 74, 58),
+    "石窟寺及石刻": (90, 98, 105), "近现代重要史迹及代表性建筑": (70, 96, 88),
+}
 
-## 基本信息
-
-| 字段 | 内容 |
-|------|------|
-| 档案编号 | {archive_code} |
-| 普查性质 | {survey_type} |
-| 文物大类 | {category_main} |
-| 省份 | {province} |
-| 地级市 | {city} |
-| 县区 | {county} |
-| 调查人 | {surveyors} |
-| 调查日期 | {survey_date} |
-| 审定人 | {reviewer} |
-| 审定日期 | {review_date} |
-| 抽查人 | （无） |
-| 抽查日期 | （无） |
-
-## 位置信息
-
-| 字段 | 内容 |
-|------|------|
-| 详细地址 | {address} |
-| 是否整体迁移 | {is_relocated} |
-| 是否变更或消失 | {is_changed} |
-
-## 坐标数据
-
-| 序号 | 分组 | 测点类型 | 纬度 | 经度 | 海拔(m) | 测点说明 | 备注 |
-|------|------|---------|------|------|---------|---------|------|
-{coord_rows}
-
-## 文物属性
-
-| 字段 | 内容 |
-|------|------|
-| 总面积 | {area} |
-| 文物级别 | {heritage_level} |
-| 所属文物保护单位名称 | {prot_unit_display} |
-| 已公布保护范围 | {has_prot_zone} |
-| 已公布建设控制地带 | {has_ctrl_zone} |
-| 年代 | {era} |
-| 统计年代 | {era_stats} |
-| 类别（大类） | {category_main} |
-| 类别（细分） | {category_sub} |
-
-## 权属与使用
-
-| 字段 | 内容 |
-|------|------|
-| 所有权性质 | {ownership_type} |
-| 产权单位或人 | {owner_display} |
-| 使用单位或人 | {user_display} |
-| 上级管理机构 | {managing_org} |
-| 所属行业或系统 | {industry} |
-| 开放状况 | {is_open} |
-| 使用用途 | {usage} |
-
-## 文物构成
-
-### 本体文物
-
-| 序号 | 分组 | 名称 | 类别 | 面积或数量 |
-|------|------|------|------|-----------|
-| 1 | （无） | {name}({category_main}) | （无） | {area}(1) |
-
-### 附属文物
-
-| 序号 | 分组 | 名称或类别 | 面积或数量 |
-|------|------|-----------|-----------|
-| （无） | （无） | （无） | （无） |
-
-## 简介
-
-{intro}
-
-## 保存现状
-
-| 字段 | 内容 |
-|------|------|
-| 现状评估 | {condition_level} |
-| 已完成保护措施 | {prot_measures_display} |
-| 主要影响因素 | {risk_factors_display} |
-
-## 专题与名录
-
-| 名录类别 | 是否列入 |
-|---------|---------|
-| 革命文物名录 | 否 |
-| 世界文化遗产 | 否 |
-| 大运河规划体系 | 否 |
-| 长城资源系统 | 否 |
-| 中国重要农业文化遗产 | 否 |
-| 中华老字号 | 否 |
-| 国家工业遗产 | 否 |
-| 中央企业工业文化遗产 | 否 |
-
-## 审核信息
-
-| 字段 | 内容 |
-|------|------|
-| 审核意见 | {audit_result} |
-| 抽查结论 | （无） |
-
-## 备注
-
-{remark}
-
-## 图纸清单
-
-| 序号 | 图纸编号 | 图纸名称 | 图号 | 比例 | 绘制人 | 绘制时间 | 总页数 |
-|------|---------|---------|------|------|------|---------|------|
-| 1 | {archive_code}-T00001 | {name}地理位置图 | T001 | 1:20000 | {drafter} | 2025.06.20 | （无） |
-| 2 | {archive_code}-T00002 | {name}平面示意图 | T002 | 1:1000 | {drafter} | 2025.06.20 | （无） |
-
-## 照片清单
-
-| 序号 | 照片编号 | 照片名称 | 照片号 | 摄影者 | 拍摄时间 | 拍摄方位 | 文字说明 | 总页数 |
-|------|---------|---------|------|------|---------|---------|---------|------|
-{photo_rows}
-"""
-
-
-def render_markdown(record: dict) -> str:
-    def _or_none(value: str) -> str:
-        return value if value else "（无）"
-
-    coord_lines = []
-    coord_idx = 1
-    coord_lines.append(
-        f"| {coord_idx} | （无） | 中心点 | "
-        f"{decimal_to_dms(record['center_lat'])} | {decimal_to_dms(record['center_lng'])} | "
-        f"{record['center_alt']} | 中心点 | （无） |"
-    )
-    coord_idx += 1
-    for pt in record["_boundary_points"]:
-        coord_lines.append(
-            f"| {coord_idx} | （无） | 边界点 | "
-            f"{decimal_to_dms(pt['lat'])} | {decimal_to_dms(pt['lng'])} | "
-            f"{pt['alt']} | {pt['desc']} | （无） |"
-        )
-        coord_idx += 1
-
-    photo_lines = []
-    for i in range(1, record["photo_count"] + 1):
-        photo_lines.append(
-            f"| {i} | {record['archive_code']}-Z{i:05d} | {record['name']} | Z{i:03d} | "
-            f"{PHOTOGRAPHER} | {record['survey_date']} | 由东向西 | 四普现状照片 | （无） |"
-        )
-
-    return MD_TEMPLATE.format(
-        name=record["name"],
-        archive_code=record["archive_code"],
-        survey_type=record["survey_type"],
-        category_main=record["category_main"],
-        category_sub=record["category_sub"],
-        province=record["province"],
-        city=record["city"],
-        county=record["county"],
-        surveyors=record["surveyors"],
-        survey_date=record["survey_date"],
-        reviewer=record["reviewer"],
-        review_date=record["review_date"],
-        address=record["address"],
-        is_relocated=record["is_relocated"],
-        is_changed=record["is_changed"],
-        coord_rows="\n".join(coord_lines),
-        area=record["area"],
-        heritage_level=record["heritage_level"],
-        prot_unit_display=_or_none(record["prot_unit"]),
-        has_prot_zone=record["has_prot_zone"],
-        has_ctrl_zone=record["has_ctrl_zone"],
-        era=record["era"],
-        era_stats=record["era_stats"],
-        ownership_type=record["ownership_type"],
-        owner_display=_or_none(record["owner"]),
-        user_display=_or_none(record["user"]),
-        managing_org=record["managing_org"],
-        industry=record["industry"],
-        is_open=record["is_open"],
-        usage=record["usage"],
-        intro=record["intro"],
-        condition_level=record["condition_level"],
-        prot_measures_display=_or_none(record["prot_measures"]),
-        risk_factors_display=_or_none(record["risk_factors"]),
-        audit_result=record["audit_result"],
-        remark=record["remark"],
-        photo_rows="\n".join(photo_lines),
-        drafter=DRAFTER,
-    )
-
-
-# ── Dataset 输出（对齐 step02 的 schema） ───────────────────
-CSV_FIELDS = [
-    "archive_code", "name", "survey_type",
-    "category_main", "category_sub",
-    "era", "era_stats", "heritage_level",
-    "province", "city", "county", "township", "address",
-    "center_lat", "center_lng", "center_alt",
-    "has_boundary", "boundary_count",
-    "area", "area_numeric",
-    "prot_unit", "has_prot_zone", "has_ctrl_zone",
-    "ownership_type", "owner", "user",
-    "managing_org", "industry", "is_open", "usage",
-    "is_relocated", "is_changed",
-    "condition_level", "prot_measures", "risk_factors",
-    "audit_result",
-    "surveyors", "survey_date", "reviewer", "review_date",
-    "drawing_count", "photo_count", "risk_score",
-    "intro", "remark",
-    "has_3d", "model_3d_path",
-    "source_file",
+_FONT_CANDIDATES = [
+    "/System/Library/Fonts/PingFang.ttc",
+    "/System/Library/Fonts/STHeiti Light.ttc",
+    "C:/Windows/Fonts/msyh.ttc",
+    "C:/Windows/Fonts/simhei.ttf",
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
 ]
 
 
-def write_csv(path: Path, records: list[dict], fields: list[str] = CSV_FIELDS) -> None:
+def _load_font(size: int):
+    from PIL import ImageFont
+    for p in _FONT_CANDIDATES:
+        if Path(p).exists():
+            try:
+                return ImageFont.truetype(p, size)
+            except Exception:
+                continue
+    return ImageFont.load_default()
+
+
+def _gen_photos(relics: list[dict], photos_dir: Path, index_csv: Path) -> None:
+    try:
+        from PIL import Image, ImageDraw
+    except ImportError:
+        print("[照片] 未安装 Pillow,跳过占位照片生成")
+        return
+
+    font_big = _load_font(40)
+    font_small = _load_font(22)
+    rows: list[dict] = []
+    n_img = 0
+
+    for r in relics:
+        # 在级单位 2 张、未定级 1 张
+        n = 2 if r["rank_code"] != "5" else 1
+        code = r["archive_code"]
+        color = _CAT_COLOR.get(r["category_main"], (100, 100, 100))
+        for i in range(1, n + 1):
+            rel = f"{code}/{i:02d}.jpg"
+            dst = photos_dir / rel
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            if not dst.exists():
+                shade = tuple(min(255, c + (i - 1) * 25) for c in color)
+                img = Image.new("RGB", (640, 428), shade)
+                d = ImageDraw.Draw(img)
+                d.rectangle([12, 12, 628, 416], outline=(255, 255, 255), width=2)
+                d.text((32, 150), r["name"][:12], fill=(255, 255, 255), font=font_big)
+                d.text((32, 220), f"{code} · 演示照片{i}", fill=(235, 235, 235), font=font_small)
+                d.text((32, 260), f"{r['county']} {r['township']}", fill=(220, 220, 220), font=font_small)
+                img.save(dst, "JPEG", quality=72)
+                n_img += 1
+            rows.append({"archive_code": code, "path": rel})
+        r["photo_count"] = n
+
+    with index_csv.open("w", encoding="utf-8-sig", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=["archive_code", "path"])
+        w.writeheader()
+        w.writerows(rows)
+    print(f"[照片] 新生成 {n_img} 张,索引 {len(rows)} 条")
+
+
+def _gen_archive_docs(relics: list[dict], docs_dir: Path, max_units: int = 80) -> None:
+    """给部分嘉祥全量层文物生成占位普查档案 PDF(sanpu/sipu),供档案查看功能演示。
+
+    只生成前 max_units 处,避免演示包体积过大;has_archive_* 标记仍代表
+    纸质档案在库情况,PDF 是其中已电子化的部分。
+    """
+    try:
+        from PIL import Image, ImageDraw
+    except ImportError:
+        print("[档案] 未安装 Pillow,跳过占位档案生成")
+        return
+
+    font_big = _load_font(36)
+    font_small = _load_font(20)
+    jx = [r for r in relics if r["tier"] == "full"][:max_units]
+    n_pdf = 0
+
+    for r in jx:
+        code = r["archive_code"]
+        kinds = ["sipu"] + (["sanpu"] if r.get("has_archive_spu") else [])
+        for kind in kinds:
+            dst = docs_dir / code / kind / f"{code}_{kind}.pdf"
+            if dst.exists():
+                n_pdf += 0
+            else:
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                label = "第三次全国文物普查档案" if kind == "sanpu" else "不可移动文物调查档案"
+                img = Image.new("RGB", (595, 842), (248, 246, 240))
+                d = ImageDraw.Draw(img)
+                d.rectangle([28, 28, 567, 814], outline=(120, 110, 90), width=2)
+                d.text((60, 120), label, fill=(60, 50, 40), font=font_big)
+                d.text((60, 210), f"文物名称: {r['name']}", fill=(60, 50, 40), font=font_small)
+                d.text((60, 250), f"档案编号: {code}", fill=(60, 50, 40), font=font_small)
+                d.text((60, 290), f"所在地: {r['county']} {r['township']}", fill=(60, 50, 40), font=font_small)
+                d.text((60, 330), f"级别: {r['heritage_level']}", fill=(60, 50, 40), font=font_small)
+                d.text((60, 410), "(演示占位档案,实际部署时替换为电子化扫描件)", fill=(150, 140, 120), font=font_small)
+                img.save(dst, "PDF", resolution=72)
+                n_pdf += 1
+    print(f"[档案] 占位 PDF 覆盖 {len(jx)} 处文物,新生成 {n_pdf} 份")
+
+
+def _write_import_template(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", newline="", encoding="utf-8-sig") as f:
-        writer = csv.DictWriter(f, fieldnames=fields, extrasaction="ignore")
-        writer.writeheader()
-        writer.writerows(records)
-
-
-def write_json(path: Path, records: list[dict]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    clean = []
-    for r in records:
-        item = {k: v for k, v in r.items() if not k.startswith("_")}
-        item["boundary_points"] = r.get("_boundary_points", [])
-        clean.append(item)
-    path.write_text(json.dumps(clean, ensure_ascii=False, indent=2), encoding="utf-8")
-
-
-def write_points_geojson(path: Path, records: list[dict]) -> None:
-    features = []
-    for r in records:
-        props = {k: v for k, v in r.items()
-                 if not k.startswith("_") and k not in ("intro", "remark")}
-        features.append({
-            "type": "Feature",
-            "geometry": {"type": "Point", "coordinates": [r["center_lng"], r["center_lat"]]},
-            "properties": props,
-        })
-    geojson = {
-        "type": "FeatureCollection",
-        "crs": {"type": "name", "properties": {"name": "EPSG:4326"}},
-        "features": features,
-    }
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(geojson, ensure_ascii=False, indent=2), encoding="utf-8")
-
-
-def write_polygons_geojson(path: Path, records: list[dict]) -> None:
-    features = []
-    for r in records:
-        pts = r.get("_boundary_points", [])
-        if len(pts) < 3:
-            continue
-        ring = [[p["lng"], p["lat"]] for p in pts]
-        ring.append(ring[0])
-        props = {k: v for k, v in r.items()
-                 if not k.startswith("_") and k not in ("intro", "remark")}
-        features.append({
-            "type": "Feature",
-            "geometry": {"type": "Polygon", "coordinates": [ring]},
-            "properties": props,
-        })
-    geojson = {
-        "type": "FeatureCollection",
-        "crs": {"type": "name", "properties": {"name": "EPSG:4326"}},
-        "features": features,
-    }
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(geojson, ensure_ascii=False, indent=2), encoding="utf-8")
-
-
-def write_high_risk(path: Path, records: list[dict], top_n: int = 50) -> None:
-    srt = sorted(records, key=lambda x: -x.get("risk_score", 0))
-    top = srt[:top_n]
-    fields = [
-        "risk_score", "archive_code", "name", "township",
-        "category_main", "era", "heritage_level",
-        "condition_level", "prot_measures", "risk_factors",
-        "ownership_type", "address",
-    ]
-    write_csv(path, top, fields)
-
-
-def write_township_stats(path: Path, records: list[dict]) -> None:
-    by_town: dict[str, list[dict]] = defaultdict(list)
-    for r in records:
-        by_town[r["township"]].append(r)
-
-    cond_levels = ["好", "较好", "一般", "较差", "差"]
-    cat_levels = [
-        "古遗址", "古墓葬", "古建筑", "石窟寺及石刻",
-        "近现代重要史迹及代表性建筑", "其他",
-    ]
-
-    rows = []
-    for township, recs in sorted(by_town.items()):
-        total = len(recs)
-        cond_count = Counter(r["condition_level"] for r in recs)
-        cat_count = Counter(r["category_main"] for r in recs)
-        no_prot = sum(1 for r in recs if not r["prot_measures"])
-        poor = sum(1 for r in recs if r["condition_level"] in ["较差", "差"])
-        poor_no_prot = sum(
-            1 for r in recs
-            if r["condition_level"] in ["较差", "差"] and not r["prot_measures"]
-        )
-        has_coord = sum(1 for r in recs if r["center_lat"] is not None)
-        row = {
-            "乡镇": township, "文物总数": total, "有坐标": has_coord,
-            "无保护措施": no_prot, "保存差或较差": poor,
-            "高风险（差且无保护）": poor_no_prot,
-        }
-        for lv in cond_levels:
-            row[f"现状_{lv}"] = cond_count.get(lv, 0)
-        for cat in cat_levels:
-            row[f"类别_{cat}"] = cat_count.get(cat, 0)
-        rows.append(row)
-
-    fields = (
-        ["乡镇", "文物总数", "有坐标", "无保护措施", "保存差或较差", "高风险（差且无保护）"]
-        + [f"现状_{lv}" for lv in cond_levels]
-        + [f"类别_{cat}" for cat in cat_levels]
-    )
-    write_csv(path, rows, fields)
-
-
-def write_category_stats(path: Path, records: list[dict]) -> None:
-    rows = []
-    total = len(records) or 1
-
-    def _append(group: str, counter: Counter, missing_label: str) -> None:
-        for val, cnt in counter.most_common():
-            rows.append({
-                "维度": group, "值": val or missing_label,
-                "数量": cnt, "占比": f"{cnt / total * 100:.1f}%",
-            })
-        rows.append({"维度": "──", "值": "", "数量": "", "占比": ""})
-
-    _append("文物大类", Counter(r["category_main"] for r in records), "未知")
-    _append("统计年代", Counter(r["era_stats"] for r in records if r.get("era_stats")), "")
-    _append("文物级别", Counter(r["heritage_level"] for r in records), "未填")
-    _append("保存现状", Counter(r["condition_level"] for r in records), "未填")
-    _append("所有权", Counter(r["ownership_type"] for r in records), "未填")
-
-    write_csv(path, rows, ["维度", "值", "数量", "占比"])
-
-
-def write_by_township(records: list[dict]) -> None:
-    by_town: dict[str, list[dict]] = defaultdict(list)
-    for r in records:
-        by_town[r["township"]].append(r)
-    for township, recs in sorted(by_town.items()):
-        write_csv(BY_TOWNSHIP_DIR / f"{township}.csv", recs)
-        write_json(BY_TOWNSHIP_DIR / f"{township}.json", recs)
-
-
-# ── 行政边界 ────────────────────────────────────────────────
-def build_rect_polygon(w: float, s: float, e: float, n: float) -> list[list[float]]:
-    return [
-        [round(w, 8), round(s, 8)],
-        [round(e, 8), round(s, 8)],
-        [round(e, 8), round(n, 8)],
-        [round(w, 8), round(n, 8)],
-        [round(w, 8), round(s, 8)],
-    ]
-
-
-def write_boundaries() -> None:
-    BOUNDARIES_DIR.mkdir(parents=True, exist_ok=True)
-
-    # 县边界:略大于街道。
-    cw, cs, ce, cn = WEST - 0.01, SOUTH - 0.01, EAST + 0.01, NORTH + 0.01
-    county_fc = {
-        "type": "FeatureCollection",
-        "features": [{
-            "type": "Feature",
-            "properties": {
-                "OBJECTID": 1,
-                "XZQDM": COUNTY_CODE,
-                "XZQMC": COUNTY,
-                "DCMJ": round((ce - cw) * (cn - cs) * 111320 * 96600, 2),
-                "BZ": "公开演示边界（非真实行政区划）",
-            },
-            "geometry": {"type": "Polygon", "coordinates": [build_rect_polygon(cw, cs, ce, cn)]},
-        }],
-    }
-    (BOUNDARIES_DIR / "county.geojson").write_text(
-        json.dumps(county_fc, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
-
-    # 街道:整个 demo 矩形。
-    township_fc = {
-        "type": "FeatureCollection",
-        "features": [{
-            "type": "Feature",
-            "properties": {
-                "OBJECTID": 1,
-                "XZQDM": TOWNSHIP_CODE,
-                "XZQMC": TOWNSHIP,
-                "DCMJ": round((EAST - WEST) * (NORTH - SOUTH) * 111320 * 96600, 2),
-                "BZ": "公开演示边界（非真实行政区划）",
-            },
-            "geometry": {"type": "Polygon", "coordinates": [build_rect_polygon(WEST, SOUTH, EAST, NORTH)]},
-        }],
-    }
-    (BOUNDARIES_DIR / "townships.geojson").write_text(
-        json.dumps(township_fc, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
-
-    # 村边界:8 个网格,data_loader 依赖 ZLDWMC + _township 字段。
-    village_features = []
-    for i, v in enumerate(VILLAGES, start=1):
-        vw, vs, ve, vn = village_bbox(v)
-        village_features.append({
-            "type": "Feature",
-            "properties": {
-                "OBJECTID": i,
-                "ZLDWDM": f"{COUNTY_CODE}00{i:03d}0000",
-                "ZLDWMC": v["name"],
-                "DCMJ": round(COL_W * ROW_H * 111320 * 96600, 2),
-                "_township": TOWNSHIP,
-                "BZ": "公开演示边界（非真实行政区划）",
-            },
-            "geometry": {"type": "Polygon", "coordinates": [build_rect_polygon(vw, vs, ve, vn)]},
-        })
-    villages_fc = {"type": "FeatureCollection", "features": village_features}
-    (BOUNDARIES_DIR / "villages.geojson").write_text(
-        json.dumps(villages_fc, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
-
-
-# ── 主流程 ──────────────────────────────────────────────────
-def clean_previous_output() -> None:
-    """清空 data/output/ 下的 step02 / step06 产物,保留目录骨架。"""
-    targets = [
-        DATA_OUTPUT / "markdown",
-        DATASET_DIR,
-        BOUNDARIES_DIR,
-        LOGS_DIR,
-    ]
-    for d in targets:
-        if d.exists():
-            shutil.rmtree(d)
+    header = ["编号", "名称", "级别", "类别", "年代", "县区", "乡镇", "村", "地址",
+              "经度", "纬度", "高程", "简介", "保存状况", "保护范围", "建设控制地带",
+              "数据层级", "公布批次", "权属"]
+    with path.open("w", encoding="utf-8-sig", newline="") as f:
+        csv.writer(f).writerow(header)
 
 
 def main() -> int:
-    print("=" * 60)
-    print("  生成公开演示数据集 (完全虚构)")
-    print("=" * 60)
-    print(f"  项目根目录: {PROJECT_ROOT}")
-    print(f"  虚构坐标范围: lng [{WEST}, {EAST}]  lat [{SOUTH}, {NORTH}]")
-    print(f"  虚构行政: {PROVINCE} / {CITY} / {COUNTY} / {TOWNSHIP}")
-    print(f"  村: {len(VILLAGES)} 个   文物: {len(RELICS)} 处")
-    print("-" * 60)
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--wipe", action="store_true", help="生成前清空 data/output 相关目录")
+    args = ap.parse_args()
 
-    print("[1/4] 清理旧输出...")
-    clean_previous_output()
+    paths = get_paths()
+    if args.wipe:
+        for d in (paths.output_dataset, paths.output_photos, paths.output_drawings):
+            if d.exists():
+                shutil.rmtree(d)
+    paths.output_dataset.mkdir(parents=True, exist_ok=True)
+    paths.output_photos.mkdir(parents=True, exist_ok=True)
 
-    print("[2/4] 构造文物记录...")
-    records = build_records()
+    relics, polys = _gen_units()
 
-    print("[3/4] 写 Markdown 档案...")
-    MARKDOWN_DIR.mkdir(parents=True, exist_ok=True)
-    for r in records:
-        md_path = MARKDOWN_DIR / r["source_file"]
-        md_path.write_text(render_markdown(r), encoding="utf-8")
-    print(f"       共 {len(records)} 个 .md 文件 → {MARKDOWN_DIR}")
+    _gen_photos(relics, paths.output_photos, paths.output_dataset / "photo_index.csv")
+    _gen_archive_docs(relics, paths.input_archive_docs)
 
-    print("[4/4] 写 dataset 与 boundaries...")
-    write_csv(DATASET_DIR / "relics_master.csv", records)
-    write_json(DATASET_DIR / "relics_full.json", records)
-    write_points_geojson(DATASET_DIR / "relics_points.geojson", records)
-    write_polygons_geojson(DATASET_DIR / "relics_polygons.geojson", records)
-    write_by_township(records)
-    write_high_risk(DATASET_DIR / "high_risk_relics.csv", records)
-    write_township_stats(DATASET_DIR / "township_stats.csv", records)
-    write_category_stats(DATASET_DIR / "category_stats.csv", records)
-    write_boundaries()
+    (paths.output_dataset / "relics_full.json").write_text(
+        json.dumps(relics, ensure_ascii=False, indent=1), encoding="utf-8")
 
-    print("-" * 60)
-    print("完成！")
-    print(f"  markdown : {MARKDOWN_DIR}")
-    print(f"  dataset  : {DATASET_DIR}")
-    print(f"  bound..  : {BOUNDARIES_DIR}")
-    print("提示：请把 config.yaml 的 project / geo.center / geo.bounds / "
-          "administrative 同步为演示值，再启动平台体验。")
+    pts = {
+        "type": "FeatureCollection",
+        "features": [
+            {
+                "type": "Feature",
+                "geometry": {"type": "Point", "coordinates": [r["center_lng"], r["center_lat"]]},
+                "properties": {"archive_code": r["archive_code"], "name": r["name"],
+                               "heritage_level": r["heritage_level"], "county": r["county"]},
+            }
+            for r in relics
+        ],
+    }
+    (paths.output_dataset / "relics_points.geojson").write_text(
+        json.dumps(pts, ensure_ascii=False), encoding="utf-8")
+
+    (paths.output_dataset / "relics_polygons.geojson").write_text(
+        json.dumps({"type": "FeatureCollection", "features": polys}, ensure_ascii=False),
+        encoding="utf-8")
+
+    with (paths.output_dataset / "drawing_index.csv").open("w", encoding="utf-8-sig", newline="") as f:
+        csv.DictWriter(f, fieldnames=["archive_code", "path"]).writeheader()
+
+    _write_import_template(paths.root / "data" / "templates" / "relics_import_template.csv")
+
+    n_city = sum(1 for r in relics if r["tier"] == "city")
+    n_full = sum(1 for r in relics if r["tier"] == "full")
+    n_jx3d = sum(1 for r in relics if r["has_3d"])
+    by_rank: dict[str, int] = {}
+    for r in relics:
+        by_rank[r["heritage_level"]] = by_rank.get(r["heritage_level"], 0) + 1
+    print(f"[演示数据] 共 {len(relics)} 条 (基础层 {n_city} / 嘉祥全量 {n_full},三维 {n_jx3d})")
+    for k, v in by_rank.items():
+        print(f"  - {k}: {v}")
+    print("下一步: python platform/scripts/run_pipeline.py --only 03")
     return 0
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    sys.exit(main())

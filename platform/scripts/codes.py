@@ -74,26 +74,6 @@ RANK_ALIASES: dict[str, str] = {
 }
 
 
-# ── 普查来源类型(四普) ─────────────────────────────────────
-# 与国家文物局资源地图 getRelicPhoto 的 searchType 一致。
-SEARCH_TYPE_CODES: dict[str, str] = {
-    "2": "三普在册",
-    "12": "县级以上公布",
-    "110301": "四普新增",
-}
-
-SEARCH_TYPE_ALIASES: dict[str, str] = {
-    "三普": "2",
-    "三普在册": "2",
-    "复查": "2",
-    "县级以上公布": "12",
-    "县级以上": "12",
-    "四普新增": "110301",
-    "新发现": "110301",
-    "新登记": "110301",
-}
-
-
 # ── 规范化入口 ───────────────────────────────────────────────
 def normalize_category(value: Optional[str]) -> str:
     """中文或编码 → 4 位编码;空值/未识别返回 '0600'。"""
@@ -123,21 +103,6 @@ def normalize_rank(value: Optional[str]) -> str:
         if zh and zh in v:
             return code
     return "5"
-
-
-def normalize_search_type(value: Optional[str]) -> str:
-    """普查来源 → 编码;默认视为"三普在册"。"""
-    if not value:
-        return "2"
-    v = str(value).strip()
-    if v in SEARCH_TYPE_CODES:
-        return v
-    if v in SEARCH_TYPE_ALIASES:
-        return SEARCH_TYPE_ALIASES[v]
-    for zh, code in SEARCH_TYPE_ALIASES.items():
-        if zh and zh in v:
-            return code
-    return "2"
 
 
 # ── 坐标规范化 ───────────────────────────────────────────────
@@ -184,10 +149,7 @@ __all__ = [
     "CATEGORY_ALIASES",
     "RANK_CODES",
     "RANK_ALIASES",
-    "SEARCH_TYPE_CODES",
-    "SEARCH_TYPE_ALIASES",
     "normalize_category",
     "normalize_rank",
-    "normalize_search_type",
     "parse_coord",
 ]

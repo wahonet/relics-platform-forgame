@@ -1,14 +1,12 @@
-"""FastAPI application entrypoint for the Relics Platform.
+"""FastAPI application entrypoint for the Relics Data-Element Platform.
 
-This module now acts as a small composition root:
-- load runtime config and datasets in lifespan
-- register middleware and API routers
-- register terrain/tile route modules
-- mount static assets and frontend build outputs
+组合根:
+- lifespan 中加载 config 与数据集、初始化 AI / 高德 / 巡查业务库
+- 注册 API 路由(文物、统计、AI 问答、巡查、数据目录、边界、坐标系)
+- 注册地形 / 瓦片路由,挂载静态资源与前端构建产物
 """
 from __future__ import annotations
 
-import json
 import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -27,7 +25,8 @@ from starlette.middleware.base import BaseHTTPMiddleware  # noqa: E402
 from _common import PROJECT_ROOT, detect_features, get_paths, load_config  # noqa: E402
 import crs as _crs_lib  # noqa: E402
 from data_loader import store  # noqa: E402
-from routers import admin, boundaries as _boundaries, chat, crs as _crs, relics, stats, survey_routes, worklog  # noqa: E402
+from routers import boundaries as _boundaries, catalog, chat, crs as _crs, patrol, relics, stats  # noqa: E402
+from services import ai_service  # noqa: E402
 from terrain_provider import load_dem  # noqa: E402
 from terrain_routes import register_terrain_routes  # noqa: E402
 from tile_routes import TILE_CACHE_DIR, register_tile_routes  # noqa: E402
@@ -37,10 +36,8 @@ _FEATURES: dict = {}
 _PATHS = get_paths()
 
 WEBGIS_DIR = Path(__file__).resolve().parent
-TEMPLATES_DIR = WEBGIS_DIR / "templates"
 STATIC_DIR = WEBGIS_DIR / "static"
 
-_ADMIN_VUE_DIST = PROJECT_ROOT / "platform" / "admin-vue" / "dist"
 _WEBGIS_REACT_DIST = PROJECT_ROOT / "platform" / "webgis-react" / "dist"
 
 
@@ -80,27 +77,16 @@ async def lifespan(app: FastAPI):
         bounds.get("north", 90.0),
     )
 
-    village_gj = _PATHS.output_boundaries / "villages.geojson"
-    village_arg = str(village_gj) if village_gj.exists() else ""
-    pdf_dir = PROJECT_ROOT / "data" / "input" / "01_archives_pdf"
-    survey_csv = _PATHS.input_worklogs / "survey_gps.csv"
-
     store.load(
         str(_PATHS.output_dataset),
-        village_geojson=village_arg,
-        pdf_dir=str(pdf_dir) if pdf_dir.exists() else "",
-        survey_gps_csv=str(survey_csv) if survey_csv.exists() else "",
+        archive_docs_dir=str(_PATHS.input_archive_docs) if _PATHS.input_archive_docs.exists() else "",
         bounds=bbox,
     )
 
     print(f"[startup] relic records: {len(store.relics)}")
     print(f"[startup] photo index: {len(store.photo_index)}")
     print(f"[startup] drawing index: {len(store.drawing_index)}")
-    print(f"[startup] archive PDFs: {len(store.pdf_map)}")
-    print(f"[startup] survey routes: {len(store.survey_routes)}")
-    if store.village_coverage:
-        vc = store.village_coverage
-        print(f"[startup] village coverage: {vc['reached']}/{vc['total']}")
+    print(f"[startup] archive docs: {len(store.archive_map)}")
 
     cached = sum(1 for _ in TILE_CACHE_DIR.rglob("*.tile"))
     print(f"[startup] tile cache: {cached} -> {TILE_CACHE_DIR}")
@@ -112,6 +98,9 @@ async def lifespan(app: FastAPI):
     else:
         print(f"[DEM] skipped (enable_dem={enable_dem}, exists={dem_dir.exists()})")
 
+    ai_service.init(_CONFIG)
+    patrol.init_patrol(_CONFIG, _PATHS)
+
     try:
         chat.init_chat()
     except Exception as e:
@@ -120,7 +109,7 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="Relics Platform", version="1.0.0", lifespan=lifespan)
+app = FastAPI(title="Relics Data-Element Platform", version="2.0.0", lifespan=lifespan)
 
 _PUBLIC_PREFIXES = (
     "/login",
@@ -130,7 +119,10 @@ _PUBLIC_PREFIXES = (
     "/api/terrain/",
     "/api/platform/config",
     "/app/",
-    "/legacy",
+    "/m/",          # 移动端巡查 H5(凭路线 token 访问)
+    "/api/m/",
+    "/patrol-photos/",
+    "/photos/",
 )
 
 
@@ -164,9 +156,9 @@ app.add_middleware(
 app.include_router(relics.router, prefix="/api")
 app.include_router(stats.router, prefix="/api")
 app.include_router(chat.router, prefix="/api")
-app.include_router(admin.router, prefix="/api")
-app.include_router(survey_routes.router, prefix="/api")
-app.include_router(worklog.router, prefix="/api")
+app.include_router(catalog.router, prefix="/api")
+app.include_router(patrol.router, prefix="/api")
+app.include_router(patrol.mobile_router)          # /m/r/{token} 与 /api/m/*
 app.include_router(_boundaries.router, prefix="/api")
 app.include_router(_crs.router, prefix="/api")
 
@@ -189,13 +181,18 @@ async def platform_config() -> JSONResponse:
 
     cesium_token = _resolved((api_cfg.get("cesium_ion") or {}).get("token", ""))
     sf = api_cfg.get("siliconflow") or {}
+    amap = api_cfg.get("amap") or {}
 
     features_resolved = {
         "ai_chat": _feature_enabled("enable_ai_chat", bool(_resolved(sf.get("key", "")))),
-        "worklog": _feature_enabled("enable_worklog", _FEATURES.get("worklogs", False)),
         "models_3d": _feature_enabled("enable_3d_model", _FEATURES.get("models_3d", False)),
         "dem": _feature_enabled("enable_dem", _FEATURES.get("dem", False)),
+        "patrol": True,
+        "catalog": True,
+        "amap_route": bool(_resolved(amap.get("web_key", ""))),
     }
+
+    n_full = sum(1 for r in store.relics if (r.get("tier") or "city") == "full")
 
     return JSONResponse({
         "project": {
@@ -207,7 +204,9 @@ async def platform_config() -> JSONResponse:
         "geo": geo,
         "administrative": {
             "county_name": admin_cfg.get("county_name", ""),
+            "counties": admin_cfg.get("counties", []),
             "townships": admin_cfg.get("townships", []),
+            "full_tier_county": admin_cfg.get("full_tier_county", ""),
         },
         "features": features_resolved,
         "cesium_ion_token": cesium_token,
@@ -218,11 +217,8 @@ async def platform_config() -> JSONResponse:
         },
         "stats": {
             "relics_total": len(store.relics),
+            "full_tier_total": n_full,
             "has_3d_count": sum(1 for r in store.relics if r.get("has_3d")),
-        },
-        "admin_ui": {
-            "available": _ADMIN_VUE_DIST.exists() and (_ADMIN_VUE_DIST / "index.html").exists(),
-            "url": "/admin-ui/",
         },
         "auth": {
             "enabled": bool((cfg.get("server") or {}).get("enable_auth", False)),
@@ -247,17 +243,10 @@ def _mount_if_exists(path_prefix: str, directory: Path, name: str, *, create: bo
 _mount_if_exists("/photos", _PATHS.output_photos, "photos", create=True)
 _mount_if_exists("/drawings", _PATHS.output_drawings, "drawings", create=True)
 _mount_if_exists("/boundaries", _PATHS.output_boundaries, "boundaries", create=True)
-_mount_if_exists("/worklog-pdfs", _PATHS.output_worklogs, "worklog_pdfs", create=True)
 _mount_if_exists("/3d", _PATHS.input_models_3d, "3d_models", create=True)
-_mount_if_exists("/pdfs", PROJECT_ROOT / "data" / "input" / "01_archives_pdf", "pdfs")
-_mount_if_exists("/survey-photos", _PATHS.input_worklogs / "survey_photos", "survey_photos")
+_mount_if_exists("/archive-docs", _PATHS.input_archive_docs, "archive_docs", create=True)
+_mount_if_exists("/patrol-photos", _PATHS.output_patrol / "photos", "patrol_photos", create=True)
 _mount_if_exists("/static", STATIC_DIR, "static")
-
-if _ADMIN_VUE_DIST.exists():
-    app.mount("/admin-ui", StaticFiles(directory=str(_ADMIN_VUE_DIST), html=True), name="admin_ui")
-    print(f"[startup] Vue admin mounted: /admin-ui/ -> {_ADMIN_VUE_DIST}")
-else:
-    print("[startup] Vue admin dist not found; skip /admin-ui/ mount")
 
 if _WEBGIS_REACT_DIST.exists():
     app.mount("/app", StaticFiles(directory=str(_WEBGIS_REACT_DIST), html=True), name="webgis_react")
@@ -266,121 +255,42 @@ else:
     print("[startup] React WebGIS dist not found; skip /app/ mount")
 
 
-def _bootstrap_script() -> str:
-    proj = (_CONFIG.get("project") or {})
-    geo = (_CONFIG.get("geo") or {})
-    adm = (_CONFIG.get("administrative") or {})
-    api = (_CONFIG.get("api") or {})
-    sf = api.get("siliconflow") or {}
-    cesium_token = (api.get("cesium_ion") or {}).get("token", "") or ""
-    if cesium_token.startswith("${") and cesium_token.endswith("}"):
-        cesium_token = ""
-
-    payload = {
-        "project": {
-            "name": proj.get("name", ""),
-            "full_name": proj.get("full_name", ""),
-            "data_cutoff": proj.get("data_cutoff", ""),
-            "data_source": proj.get("data_source", ""),
-        },
-        "geo": {
-            "center": geo.get("center") or {"lng": 116.0, "lat": 35.0, "alt": 75000},
-            "bounds": geo.get("bounds") or {},
-        },
-        "administrative": {
-            "county_name": adm.get("county_name", ""),
-            "townships": adm.get("townships", []),
-        },
-        "features": {
-            "ai_chat": _feature_enabled("enable_ai_chat", bool(sf.get("key", "").strip() and not sf.get("key", "").startswith("${"))),
-            "worklog": _feature_enabled("enable_worklog", _FEATURES.get("worklogs", False)),
-            "models_3d": _feature_enabled("enable_3d_model", _FEATURES.get("models_3d", False)),
-            "dem": _feature_enabled("enable_dem", _FEATURES.get("dem", False)),
-        },
-        "cesium_ion_token": cesium_token,
-        "stats": {
-            "relics_total": len(store.relics),
-        },
-        "admin_ui": {
-            "available": _ADMIN_VUE_DIST.exists() and (_ADMIN_VUE_DIST / "index.html").exists(),
-            "url": "/admin-ui/",
-        },
-        "auth": {
-            "enabled": bool((_CONFIG.get("server") or {}).get("enable_auth", False)),
-        },
-    }
-    js_payload = json.dumps(payload, ensure_ascii=False)
-    return (
-        "<script>\n"
-        f"window.__PLATFORM_CONFIG = {js_payload};\n"
-        "try { if (window.Cesium && window.__PLATFORM_CONFIG.cesium_ion_token) "
-        "{ Cesium.Ion.defaultAccessToken = window.__PLATFORM_CONFIG.cesium_ion_token; } } catch(e) {}\n"
-        "</script>\n"
-    )
-
-
-def _render_template(name: str) -> str:
-    path = TEMPLATES_DIR / name
-    if not path.exists():
-        return f"<h1>Template missing: {name}</h1>"
-    html = path.read_text(encoding="utf-8")
-
-    proj = (_CONFIG.get("project") or {})
-    adm = (_CONFIG.get("administrative") or {})
-    full_name = proj.get("full_name") or ""
-    county_name = adm.get("county_name") or proj.get("name") or ""
-    data_source = proj.get("data_source") or ""
-
-    for key, value in {
-        "{{ full_name }}": full_name,
-        "{{ county_name }}": county_name,
-        "{{ data_source }}": data_source,
-    }.items():
-        html = html.replace(key, value)
-
-    bootstrap = _bootstrap_script()
-    if "</head>" in html:
-        return html.replace("</head>", bootstrap + "</head>", 1)
-    return bootstrap + html
-
-
 def _react_build_exists() -> bool:
     return _WEBGIS_REACT_DIST.exists() and (_WEBGIS_REACT_DIST / "index.html").exists()
+
+
+_NO_BUILD_HTML = """<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8">
+<title>前端未构建</title></head>
+<body style="font-family:sans-serif;max-width:640px;margin:80px auto;line-height:1.8">
+<h2>前端尚未构建</h2>
+<p>请先构建 React 前端(或使用 Vite 开发服务器):</p>
+<pre style="background:#f4f4f4;padding:12px;border-radius:8px">cd platform/webgis-react
+npm install
+npm run build</pre>
+<p>开发模式: <code>npm run dev</code> 后访问 <a href="http://localhost:5173">http://localhost:5173</a></p>
+<p>API 文档: <a href="/docs">/docs</a></p>
+</body></html>"""
 
 
 @app.get("/", response_class=HTMLResponse)
 async def index():
     if _react_build_exists():
         return RedirectResponse(url="/app/", status_code=302)
-    return HTMLResponse(_render_template("index.html"))
-
-
-@app.get("/legacy", response_class=HTMLResponse)
-async def legacy_index():
-    return _render_template("index.html")
+    return HTMLResponse(_NO_BUILD_HTML)
 
 
 @app.get("/model-viewer", response_class=HTMLResponse)
 async def model_viewer(request: Request):
-    if _react_build_exists():
-        qs = request.url.query
-        target = "/app/#/model-viewer" + (("?" + qs) if qs else "")
-        return RedirectResponse(url=target, status_code=302)
-    return HTMLResponse(_render_template("model_viewer.html"))
+    qs = request.url.query
+    target = "/app/#/model-viewer" + (("?" + qs) if qs else "")
+    return RedirectResponse(url=target, status_code=302)
 
 
 @app.get("/pdf-viewer", response_class=HTMLResponse)
 async def pdf_viewer(request: Request):
-    if _react_build_exists():
-        qs = request.url.query
-        target = "/app/#/pdf-viewer" + (("?" + qs) if qs else "")
-        return RedirectResponse(url=target, status_code=302)
-    return HTMLResponse(_render_template("pdf_viewer.html"))
-
-
-@app.get("/admin")
-async def admin_page():
-    return RedirectResponse(url="/admin-ui/", status_code=302)
+    qs = request.url.query
+    target = "/app/#/pdf-viewer" + (("?" + qs) if qs else "")
+    return RedirectResponse(url=target, status_code=302)
 
 
 class _LoginBody(BaseModel):
@@ -406,16 +316,14 @@ def _login_response(username: str = "admin") -> JSONResponse:
 
 @app.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request):
-    if _react_build_exists():
-        nxt = request.query_params.get("next") or ""
-        if nxt:
-            from urllib.parse import quote
+    nxt = request.query_params.get("next") or ""
+    if nxt:
+        from urllib.parse import quote
 
-            target = f"/app/#/login?next={quote(nxt, safe='/?&=#')}"
-        else:
-            target = "/app/#/login"
-        return RedirectResponse(url=target, status_code=302)
-    return HTMLResponse(_render_template("login.html"))
+        target = f"/app/#/login?next={quote(nxt, safe='/?&=#')}"
+    else:
+        target = "/app/#/login"
+    return RedirectResponse(url=target, status_code=302)
 
 
 @app.post("/api/login")

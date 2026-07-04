@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import { useUIStore } from "../stores/uiStore";
 import { fetchPhotos, fetchDrawings, fetchRelicDetail } from "../api/relics";
-import type { Drawing, Photo, RelicSummary } from "../types";
-import { COND_CLS } from "../utils/dict";
+import { fetchRelicArchives } from "../api/stats";
+import type { Drawing, Photo, RelicSummary, RelicArchives } from "../types";
+import { COND_CLS, TIER_MAP } from "../utils/dict";
 import { Lightbox } from "./Lightbox";
 
 type TabKey = "info" | "photo" | "draw" | "intro";
@@ -14,6 +15,7 @@ export function InfoPanel() {
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [drawings, setDrawings] = useState<Drawing[]>([]);
   const [intro, setIntro] = useState<string>("");
+  const [archives, setArchives] = useState<RelicArchives | null>(null);
   const [loadingPhotos, setLoadingPhotos] = useState(false);
   const [loadingDrawings, setLoadingDrawings] = useState(false);
   const [loadingIntro, setLoadingIntro] = useState(false);
@@ -27,6 +29,7 @@ export function InfoPanel() {
     setPhotos([]);
     setDrawings([]);
     setIntro("");
+    setArchives(null);
     const code = selected.archive_code;
     setLoadingPhotos(true);
     fetchPhotos(code)
@@ -43,12 +46,18 @@ export function InfoPanel() {
       .then((full) => setIntro(full.intro || ""))
       .catch(() => setIntro(""))
       .finally(() => setLoadingIntro(false));
-  }, [selected?.archive_code]);
+    if (selected.has_archive_spu || selected.has_archive_fpu) {
+      fetchRelicArchives(code)
+        .then(setArchives)
+        .catch(() => setArchives(null));
+    }
+  }, [selected?.archive_code, selected?.has_archive_spu, selected?.has_archive_fpu]);
 
   if (!selected) return null;
 
   const r: RelicSummary = selected;
   const ccls = r.condition_level ? COND_CLS[r.condition_level] || "" : "";
+  const isFull = r.tier === "full";
 
   const open3D = () => {
     if (!r.has_3d) return;
@@ -63,10 +72,8 @@ export function InfoPanel() {
     window.open(`#/model-viewer?${params.toString()}`, "_blank");
   };
 
-  const openPdf = () => {
-    if (!r.pdf_path) return;
-    const url = `/pdfs/${r.pdf_path}`;
-    const params = new URLSearchParams({ url, name: r.name });
+  const openArchive = (url: string, label: string) => {
+    const params = new URLSearchParams({ url, name: `${r.name} · ${label}` });
     window.open(`#/pdf-viewer?${params.toString()}`, "_blank");
   };
 
@@ -105,8 +112,11 @@ export function InfoPanel() {
               {r.heritage_level && r.heritage_level.length < 20 ? (
                 <span className="tag tag-lv">{r.heritage_level}</span>
               ) : null}
+              <span className={"tag " + (isFull ? "tag-full" : "tag-city")}>
+                {TIER_MAP[r.tier || "city"] || "市级基础层"}
+              </span>
               {r.has_3d ? <span className="tag tag-3d">三维模型</span> : null}
-              {r.has_pdf ? <span className="tag tag-pdf">四普档案</span> : null}
+              {r.has_boundary ? <span className="tag tag-bnd">两线范围</span> : null}
             </div>
             <Row label="编号" value={r.archive_code} />
             <Row label="年代" value={r.era} />
@@ -117,18 +127,23 @@ export function InfoPanel() {
               }
             />
             <Row label="级别" value={r.heritage_level} />
+            <Row label="县市区" value={r.county} />
             <Row label="乡镇" value={r.township} />
             <Row label="地址" value={r.address} />
-            <Row label="面积" value={r.area} />
             <Row
-              label="现状"
+              label="保存状况"
               valueNode={<span className={ccls}>{r.condition_level || "-"}</span>}
             />
-            <Row label="风险分" value={r.risk_score != null ? String(r.risk_score) : "—"} />
             <Row label="照片" value={`${r.photo_count || 0} 张`} />
             <Row label="图纸" value={`${r.drawing_count || 0} 张`} />
+            {r.has_boundary ? (
+              <div className="pi-bnd-tip">
+                两线范围已叠加在地图上:<i className="bnd-p" />保护范围
+                <i className="bnd-c" />建设控制地带
+              </div>
+            ) : null}
 
-            {(r.has_3d || r.has_pdf) && (
+            {(r.has_3d || archives) && (
               <div className="pi-action-bar">
                 {r.has_3d && (
                   <button className="pi-act-btn pi-btn-3d" onClick={open3D}>
@@ -138,14 +153,28 @@ export function InfoPanel() {
                     3D
                   </button>
                 )}
-                {r.has_pdf && r.pdf_path && (
-                  <button className="pi-act-btn pi-btn-pdf" onClick={openPdf}>
+                {archives?.sanpu?.length ? (
+                  <button
+                    className="pi-act-btn pi-btn-pdf"
+                    onClick={() => openArchive(archives.sanpu[0], "三普档案")}
+                  >
                     <svg viewBox="0 0 24 24">
                       <path d="M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zM6 20V4h7v5h5v11H6zm2-6h8v2H8v-2zm0-3h8v2H8v-2zm0 6h5v2H8v-2z" />
                     </svg>
-                    档案
+                    三普档案
                   </button>
-                )}
+                ) : null}
+                {archives?.sipu?.length ? (
+                  <button
+                    className="pi-act-btn pi-btn-pdf"
+                    onClick={() => openArchive(archives.sipu[0], "四普档案")}
+                  >
+                    <svg viewBox="0 0 24 24">
+                      <path d="M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zM6 20V4h7v5h5v11H6zm2-6h8v2H8v-2zm0-3h8v2H8v-2zm0 6h5v2H8v-2z" />
+                    </svg>
+                    四普档案
+                  </button>
+                ) : null}
               </div>
             )}
           </div>

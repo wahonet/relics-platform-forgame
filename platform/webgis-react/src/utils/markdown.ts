@@ -12,11 +12,7 @@ export function renderChatMarkdown(text: string): string {
 
   h = h.replace(/\[\[([^\]|]+)\|([^\]]+)\]\]/g, (_, label, action) => {
     const a = String(action).replace(/&amp;/g, "&").replace(/'/g, "\\'");
-    const isLog = a.startsWith("log:");
-    const icon = isLog ? " 📋" : " 📍";
-    const tip = isLog ? "查看工作日志" : "在地图上查看";
-    const cls = isLog ? "cf cf-log" : "cf";
-    return `<a class="${cls}" data-action="${a}" title="${tip}">${label}${icon}</a>`;
+    return `<a class="cf" data-action="${a}" title="在地图上查看">${label} 📍</a>`;
   });
 
   h = h.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");

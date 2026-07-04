@@ -45,12 +45,6 @@ export const RANK_MAP: Record<string, RankEntry> = {
   },
 };
 
-export const SEARCH_TYPE_MAP: Record<string, { label: string }> = {
-  "2": { label: "三普在册" },
-  "12": { label: "县级以上公布" },
-  "110301": { label: "四普新增" },
-};
-
 const CATEGORY_ALIAS: Record<string, string> = {
   古遗址: "0100",
   古文化遗址: "0100",
@@ -142,6 +136,12 @@ export interface DimDef {
   transform?: (v: string) => string;
 }
 
+/** tier 字段的展示名。 */
+export const TIER_MAP: Record<string, string> = {
+  city: "市级基础层",
+  full: "嘉祥全量层",
+};
+
 export const DIMS: DimDef[] = [
   {
     id: "category_main",
@@ -149,6 +149,7 @@ export const DIMS: DimDef[] = [
     field: "category_main",
     transform: (v) => (v === "近现代重要史迹及代表性建筑" ? "近现代史迹" : v),
   },
+  { id: "county", label: "县区分布", field: "county" },
   {
     id: "township",
     label: "乡镇分布",
@@ -174,24 +175,18 @@ export const DIMS: DimDef[] = [
     transform: (v) =>
       v === "尚未核定公布为文物保护单位的不可移动文物" || v === "未认定" ? "未核定" : v,
   },
-  { id: "survey_type", label: "普查类型", field: "survey_type" },
-  { id: "ownership_type", label: "所有权", field: "ownership_type" },
   {
-    id: "industry",
-    label: "所属行业",
-    field: "industry",
-    transform: (v) => {
-      const m = v ? v.replace(/[,，、]/g, ",").split(",")[0].trim() : "";
-      return m || "其他";
-    },
+    id: "tier",
+    label: "数据层级",
+    field: "tier",
+    remap: (v) => TIER_MAP[v] || v || "未知",
   },
   {
     id: "condition_level",
-    label: "评估状态",
+    label: "保存状况",
     field: "condition_level",
     order: ["好", "较好", "一般", "较差", "差"],
   },
-  { id: "risk_factors", label: "影响因素", field: "risk_factors", multi: true },
 ];
 
 export function dimValue(r: Record<string, unknown>, dim: DimDef): string {

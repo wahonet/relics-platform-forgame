@@ -8,20 +8,20 @@ import run_pipeline
 
 def test_pipeline_includes_sqlite_build_step():
     ids = [step["id"] for step in run_pipeline.STEPS]
-    assert ids == ["01", "02", "03", "04", "05", "06", "07"]
-    assert run_pipeline.STEPS[-1]["script"] == "step07_build_db.py"
+    assert ids == ["01", "02", "03"]
+    assert run_pipeline.STEPS[-1]["script"] == "step03_build_db.py"
 
 
 def test_select_steps_supports_skip():
-    args = SimpleNamespace(only_id=None, from_id=None, to_id=None, skip_ids=["01", "05"])
+    args = SimpleNamespace(only_id=None, from_id=None, to_id=None, skip_ids=["02"])
     selected = run_pipeline._select_steps(args)
-    assert [step["id"] for step in selected] == ["02", "03", "04", "06", "07"]
+    assert [step["id"] for step in selected] == ["01", "03"]
 
 
 def test_select_steps_supports_range_and_skip():
-    args = SimpleNamespace(only_id=None, from_id="03", to_id="07", skip_ids=["06"])
+    args = SimpleNamespace(only_id=None, from_id="02", to_id="03", skip_ids=["02"])
     selected = run_pipeline._select_steps(args)
-    assert [step["id"] for step in selected] == ["03", "04", "05", "07"]
+    assert [step["id"] for step in selected] == ["03"]
 
 
 def test_dry_run_does_not_require_config(monkeypatch):
@@ -42,18 +42,17 @@ def test_dry_run_does_not_require_config(monkeypatch):
         "detect_features",
         lambda: SimpleNamespace(
             as_dict={
-                "archives": False,
-                "worklogs": False,
+                "relics_source": False,
+                "archive_docs": False,
                 "boundaries": False,
                 "dem": False,
-                "models_3d": False,
             }
         ),
     )
     monkeypatch.setattr(
         sys,
         "argv",
-        ["run_pipeline.py", "--dry-run", "--skip", "01", "--skip", "05"],
+        ["run_pipeline.py", "--dry-run", "--skip", "02"],
     )
 
     assert run_pipeline.main() == 0

@@ -42,17 +42,17 @@ CONFIG_EXAMPLE_PATH: Path = PROJECT_ROOT / "config.example.yaml"
 @dataclass(frozen=True)
 class Paths:
     root: Path
-    input_archives: Path       # DOCX 档案
-    input_worklogs: Path       # 外业日志 Excel
+    input_relics: Path         # 文物台账 Excel / CSV (step01 导入源)
+    input_media: Path          # photos/{code}/, drawings/{code}/ 原始媒体
+    input_archive_docs: Path   # {code}/{sanpu|sipu}/*.pdf 普查档案(嘉祥全量层)
     input_boundaries: Path     # 行政边界 Shapefile / GeoJSON
     input_dem: Path            # DEM GeoTIFF
     input_models_3d: Path      # 3D Tiles
-    output_markdown: Path      # step01
-    output_dataset: Path       # step02 / step07
-    output_photos: Path        # step03
-    output_drawings: Path      # step04
-    output_worklogs: Path      # step05 (日志 PDF)
-    output_boundaries: Path    # step06 (WGS-84 GeoJSON)
+    output_dataset: Path       # step01 / step03
+    output_photos: Path        # step01 媒体归位
+    output_drawings: Path      # step01 媒体归位
+    output_boundaries: Path    # step02 (WGS-84 GeoJSON)
+    output_patrol: Path        # 巡查业务库与打卡照片 (patrol.db, photos/)
     output_logs: Path
 
 
@@ -60,17 +60,17 @@ def get_paths() -> Paths:
     root = PROJECT_ROOT
     return Paths(
         root=root,
-        input_archives=root / "data" / "input" / "01_archives",
-        input_worklogs=root / "data" / "input" / "02_worklogs",
+        input_relics=root / "data" / "input" / "01_relics",
+        input_media=root / "data" / "input" / "02_media",
+        input_archive_docs=root / "data" / "input" / "06_archive_docs",
         input_boundaries=root / "data" / "input" / "03_boundaries",
         input_dem=root / "data" / "input" / "04_dem",
         input_models_3d=root / "data" / "input" / "05_models_3d",
-        output_markdown=root / "data" / "output" / "markdown",
         output_dataset=root / "data" / "output" / "dataset",
         output_photos=root / "data" / "output" / "photos",
         output_drawings=root / "data" / "output" / "drawings",
-        output_worklogs=root / "data" / "output" / "worklog_pdfs",
         output_boundaries=root / "data" / "output" / "boundaries",
+        output_patrol=root / "data" / "output" / "patrol",
         output_logs=root / "data" / "output" / "logs",
     )
 
@@ -187,8 +187,8 @@ def get_logger(step_name: str) -> logging.Logger:
 
 @dataclass
 class FeatureStatus:
-    has_archives: bool
-    has_worklogs: bool
+    has_relics_source: bool
+    has_archive_docs: bool
     has_boundaries: bool
     has_dem: bool
     has_3d_models: bool
@@ -196,8 +196,8 @@ class FeatureStatus:
     @property
     def as_dict(self) -> dict:
         return {
-            "archives": self.has_archives,
-            "worklogs": self.has_worklogs,
+            "relics_source": self.has_relics_source,
+            "archive_docs": self.has_archive_docs,
             "boundaries": self.has_boundaries,
             "dem": self.has_dem,
             "models_3d": self.has_3d_models,
@@ -214,8 +214,9 @@ def detect_features() -> FeatureStatus:
     """扫描 data/input 判断各功能模块是否有数据,供 auto 模式下的 feature toggle 使用。"""
     p = get_paths()
     return FeatureStatus(
-        has_archives=_non_empty(p.input_archives, ("*.docx", "*.DOCX")),
-        has_worklogs=_non_empty(p.input_worklogs, ("*.xlsx", "*.xls")),
+        has_relics_source=_non_empty(p.input_relics, ("*.xlsx", "*.xls", "*.csv"))
+        or (p.output_dataset / "relics_full.json").exists(),
+        has_archive_docs=_non_empty(p.input_archive_docs, ("*.pdf", "*.PDF")),
         has_boundaries=_non_empty(
             p.input_boundaries, ("*.shp", "*.geojson", "*.json")
         ),
@@ -246,8 +247,8 @@ def print_status() -> None:
     feat = detect_features()
     print("\n[数据] 输入检测:")
     label_map = {
-        "archives": "文物档案 DOCX",
-        "worklogs": "工作日志 Excel",
+        "relics_source": "文物台账 Excel/CSV",
+        "archive_docs": "普查档案 PDF",
         "boundaries": "行政边界",
         "dem": "DEM 栅格",
         "models_3d": "3D 模型",

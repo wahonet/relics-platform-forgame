@@ -46,12 +46,9 @@ export const DASH_MODULES: DashModuleMeta[] = [
   { id: "category_main",   title: "文物类别", supportsType: true, defaultType: "pie",  defaultDock: "left" },
   { id: "heritage_level",  title: "文物级别", supportsType: true, defaultType: "bar",  defaultDock: "left" },
   { id: "era",             title: "年代分布", supportsType: true, defaultType: "vbar", defaultDock: "left" },
-  { id: "township",        title: "乡镇分布", supportsType: true, defaultType: "bar",  defaultDock: "right" },
-  { id: "survey_type",     title: "普查类型", supportsType: true, defaultType: "pie",  defaultDock: "right" },
-  { id: "condition_level", title: "保存状态", supportsType: true, defaultType: "pie",  defaultDock: "right" },
-  { id: "ownership_type",  title: "所有权",   supportsType: true, defaultType: "pie",  defaultDock: "right" },
-  { id: "industry",        title: "所属行业", supportsType: true, defaultType: "bar",  defaultDock: "right" },
-  { id: "risk_factors",    title: "影响因素", supportsType: true, defaultType: "bar",  defaultDock: "right" },
+  { id: "county",          title: "县区分布", supportsType: true, defaultType: "bar",  defaultDock: "right" },
+  { id: "tier",            title: "数据层级", supportsType: true, defaultType: "pie",  defaultDock: "right" },
+  { id: "condition_level", title: "保存状况", supportsType: true, defaultType: "pie",  defaultDock: "right" },
 ];
 
 /** 生成"开箱即用"的默认配置。 */

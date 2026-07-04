@@ -7,12 +7,14 @@ import { PointRenderer } from "./PointRenderer";
 import { ViewportManager } from "./ViewportManager";
 import { BoundaryLayer } from "./BoundaryLayer";
 import { OfflineCoverageLayer } from "./OfflineCoverageLayer";
+import { RouteLayer, setRouteLayer } from "./RouteLayer";
 import { useUIStore } from "../stores/uiStore";
 import { useFilterStore } from "../stores/filterStore";
 import { useRelicsStore } from "../stores/relicsStore";
 import { useHomeViewStore } from "../stores/homeViewStore";
 import { useMouseCoordStore } from "../stores/mouseCoordStore";
-import { fetchRelicDetail } from "../api/relics";
+import { usePatrolStore } from "../stores/patrolStore";
+import { fetchRelicDetail, fetchPolygon } from "../api/relics";
 
 interface MapViewProps {
   onCompassRotate?: (deg: number) => void;
@@ -27,6 +29,7 @@ export function MapView({ onCompassRotate, onScaleUpdate }: MapViewProps) {
   const viewportRef = useRef<ViewportManager | null>(null);
   const boundaryRef = useRef<BoundaryLayer | null>(null);
   const offlineCoverageRef = useRef<OfflineCoverageLayer | null>(null);
+  const routeLayerRef = useRef<RouteLayer | null>(null);
 
   const baseLayer = useUIStore((s) => s.baseLayer);
   const baseLayerAlpha = useUIStore((s) => s.baseLayerAlpha);
@@ -42,9 +45,16 @@ export function MapView({ onCompassRotate, onScaleUpdate }: MapViewProps) {
   const allRelicsLen = useRelicsStore((s) => s.all.length);
   // 拆成原始值订阅,避免 selector 每次返回新对象引发无限渲染。
   const filterActiveCats = useFilterStore((s) => s.activeCats);
+  const filterCounty = useFilterStore((s) => s.county);
   const filterTownship = useFilterStore((s) => s.township);
   const filterLevel = useFilterStore((s) => s.level);
+  const filterTier = useFilterStore((s) => s.tier);
+  const filterCond = useFilterStore((s) => s.cond);
   const filterStatFilters = useFilterStore((s) => s.statFilters);
+
+  const selectedRelic = useUIStore((s) => s.selectedRelic);
+  const patrolStops = usePatrolStore((s) => s.stops);
+  const patrolPreview = usePatrolStore((s) => s.previewPolyline);
 
   const homeView = useHomeViewStore((s) => s.view);
   const offlineTick = useUIStore((s) => s.offlineCoverageTick);
@@ -57,15 +67,33 @@ export function MapView({ onCompassRotate, onScaleUpdate }: MapViewProps) {
     const viewport = new ViewportManager(viewer, renderer);
     const boundary = new BoundaryLayer(viewer);
     const offlineCoverage = new OfflineCoverageLayer(viewer);
+    const routeLayer = new RouteLayer(viewer);
 
     pointRendererRef.current = renderer;
     viewportRef.current = viewport;
     boundaryRef.current = boundary;
     offlineCoverageRef.current = offlineCoverage;
+    routeLayerRef.current = routeLayer;
+    setRouteLayer(routeLayer);
 
     renderer.setOnPick(async (code: string) => {
       try {
         const r = useRelicsStore.getState().byCode.get(code);
+        // 巡查选点模式:点击文物点 → 加入路线,不打开详情。
+        if (usePatrolStore.getState().picking) {
+          const s = r || (await fetchRelicDetail(code));
+          if (s?.center_lng != null && s?.center_lat != null) {
+            usePatrolStore.getState().addStop({
+              code: s.archive_code,
+              name: s.name,
+              lng: s.center_lng,
+              lat: s.center_lat,
+              county: s.county,
+              condition: s.condition_level,
+            });
+          }
+          return;
+        }
         if (r) {
           setUI({ selectedRelic: r });
           return;
@@ -186,6 +214,8 @@ export function MapView({ onCompassRotate, onScaleUpdate }: MapViewProps) {
       useMouseCoordStore.getState().set(null, null, null);
       viewport.stop();
       renderer.destroy();
+      routeLayer.destroy();
+      setRouteLayer(null);
       try {
         offlineCoverage.clear();
       } catch {
@@ -195,6 +225,7 @@ export function MapView({ onCompassRotate, onScaleUpdate }: MapViewProps) {
       viewportRef.current = null;
       boundaryRef.current = null;
       offlineCoverageRef.current = null;
+      routeLayerRef.current = null;
     };
   }, [viewerRef, onCompassRotate, onScaleUpdate, setUI]);
 
@@ -283,11 +314,42 @@ export function MapView({ onCompassRotate, onScaleUpdate }: MapViewProps) {
     vm.setFilters(backend);
   }, [
     filterActiveCats,
+    filterCounty,
     filterTownship,
     filterLevel,
+    filterTier,
+    filterCond,
     filterStatFilters,
     allRelicsLen,
   ]);
+
+  /** 巡查路线渲染:stops/预览折线变化时重画。 */
+  useEffect(() => {
+    const rl = routeLayerRef.current;
+    if (!rl) return;
+    rl.showRoute(patrolStops, patrolPreview);
+  }, [patrolStops, patrolPreview]);
+
+  /** 选中文物时自动叠加两线范围(保护范围红 / 建控地带黄)。 */
+  useEffect(() => {
+    const rl = routeLayerRef.current;
+    if (!rl) return;
+    if (!selectedRelic?.archive_code || !selectedRelic?.has_boundary) {
+      rl.clearBoundaries();
+      return;
+    }
+    let cancelled = false;
+    fetchPolygon(selectedRelic.archive_code)
+      .then((fc) => {
+        if (!cancelled) rl.showBoundaries(fc as { features?: [] });
+      })
+      .catch(() => {
+        if (!cancelled) rl.clearBoundaries();
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedRelic?.archive_code, selectedRelic?.has_boundary]);
 
   const homeAppliedRef = useRef(false);
   useEffect(() => {

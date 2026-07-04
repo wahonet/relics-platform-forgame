@@ -1,12 +1,14 @@
 import { create } from "zustand";
-import { categoryCode, rankCode } from "../utils/dict";
+import { categoryCode, rankCode, TIER_MAP } from "../utils/dict";
 import type { BackendFilters } from "../types";
 
 interface FilterState {
   search: string;
+  county: string;
   township: string;
   level: string;
   cond: string;
+  tier: "" | "city" | "full";
   threeD: "" | "1" | "0";
   activeCats: Set<string>;
   statFilters: Record<string, string>;
@@ -19,11 +21,21 @@ interface FilterState {
   setStatFilters: (next: Record<string, string>) => void;
 }
 
+/** 统计面板点选的 tier 展示名 → 后端 city/full。 */
+function tierFromLabel(label: string): string {
+  for (const [k, v] of Object.entries(TIER_MAP)) {
+    if (v === label) return k;
+  }
+  return label;
+}
+
 export const useFilterStore = create<FilterState>((set, get) => ({
   search: "",
+  county: "",
   township: "",
   level: "",
   cond: "",
+  tier: "",
   threeD: "",
   activeCats: new Set(),
   statFilters: {},
@@ -39,16 +51,24 @@ export const useFilterStore = create<FilterState>((set, get) => ({
     if (f.level) ranks.add(rankCode(f.level));
     if (f.statFilters.heritage_level) ranks.add(rankCode(f.statFilters.heritage_level));
     if (ranks.size) out.rank = [...ranks].join(",");
+    if (f.county) out.county = f.county;
+    else if (f.statFilters.county) out.county = f.statFilters.county;
     if (f.township) out.township = f.township;
     else if (f.statFilters.township) out.township = f.statFilters.township;
+    if (f.tier) out.tier = f.tier;
+    else if (f.statFilters.tier) out.tier = tierFromLabel(f.statFilters.tier);
+    if (f.cond) out.condition = f.cond;
+    else if (f.statFilters.condition_level) out.condition = f.statFilters.condition_level;
     return out;
   },
   reset(cats) {
     set({
       search: "",
+      county: "",
       township: "",
       level: "",
       cond: "",
+      tier: "",
       threeD: "",
       activeCats: new Set(cats),
       statFilters: {},

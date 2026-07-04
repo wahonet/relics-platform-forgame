@@ -27,50 +27,22 @@ SCRIPTS_DIR = Path(__file__).resolve().parent
 STEPS = [
     {
         "id": "01",
-        "name": "Convert DOCX archives to Markdown",
-        "script": "step01_convert_docs.py",
-        "requires": ["archives"],
+        "name": "Import relics from Excel/CSV",
+        "script": "step01_import_relics.py",
+        "requires": ["relics_source"],
         "optional": False,
     },
     {
         "id": "02",
-        "name": "Build structured dataset",
-        "script": "step02_build_dataset.py",
-        "requires": [],
-        "optional": False,
-    },
-    {
-        "id": "03",
-        "name": "Extract photos",
-        "script": "step03_extract_photos.py",
-        "requires": ["archives"],
-        "optional": False,
-    },
-    {
-        "id": "04",
-        "name": "Extract drawings",
-        "script": "step04_extract_drawings.py",
-        "requires": ["archives"],
-        "optional": False,
-    },
-    {
-        "id": "05",
-        "name": "Convert worklogs to PDF",
-        "script": "step05_convert_worklogs.py",
-        "requires": ["worklogs"],
-        "optional": True,
-    },
-    {
-        "id": "06",
         "name": "Prepare administrative boundaries",
-        "script": "step06_prepare_boundaries.py",
+        "script": "step02_prepare_boundaries.py",
         "requires": ["boundaries"],
         "optional": True,
     },
     {
-        "id": "07",
+        "id": "03",
         "name": "Build SQLite database",
-        "script": "step07_build_db.py",
+        "script": "step03_build_db.py",
         "requires": [],
         "optional": False,
     },
@@ -113,39 +85,17 @@ def _step_artifacts(step_id: str) -> dict:
     paths = get_paths()
     return {
         "01": {
-            "inputs": [_artifact("DOCX archives", paths.input_archives, ("*.docx", "*.DOCX"))],
-            "outputs": [_artifact("Markdown files", paths.output_markdown, ("*.md",))],
-        },
-        "02": {
-            "inputs": [_artifact("Markdown files", paths.output_markdown, ("*.md",))],
+            "inputs": [_artifact("Relics spreadsheet", paths.input_relics, ("*.xlsx", "*.xls", "*.csv"))],
             "outputs": [
                 _artifact("relics_full.json", paths.output_dataset / "relics_full.json", kind="file"),
-                _artifact("relics_master.csv", paths.output_dataset / "relics_master.csv", kind="file"),
-            ],
-        },
-        "03": {
-            "inputs": [_artifact("Markdown files", paths.output_markdown, ("*.md",))],
-            "outputs": [
-                _artifact("Photo files", paths.output_photos, ("*.jpg", "*.jpeg", "*.png", "*.webp")),
                 _artifact("photo_index.csv", paths.output_dataset / "photo_index.csv", kind="file"),
             ],
         },
-        "04": {
-            "inputs": [_artifact("Markdown files", paths.output_markdown, ("*.md",))],
-            "outputs": [
-                _artifact("Drawing files", paths.output_drawings, ("*.jpg", "*.jpeg", "*.png", "*.webp", "*.pdf")),
-                _artifact("drawing_index.csv", paths.output_dataset / "drawing_index.csv", kind="file"),
-            ],
-        },
-        "05": {
-            "inputs": [_artifact("Worklog spreadsheets", paths.input_worklogs, ("*.xlsx", "*.xls"))],
-            "outputs": [_artifact("Worklog PDFs", paths.output_worklogs, ("*.pdf",))],
-        },
-        "06": {
+        "02": {
             "inputs": [_artifact("Boundary sources", paths.input_boundaries, ("*.shp", "*.geojson", "*.json"))],
             "outputs": [_artifact("Boundary GeoJSON", paths.output_boundaries, ("*.geojson", "*.json"))],
         },
-        "07": {
+        "03": {
             "inputs": [_artifact("relics_full.json", paths.output_dataset / "relics_full.json", kind="file")],
             "outputs": [_artifact("relics.db", paths.output_dataset / "relics.db", kind="file")],
         },

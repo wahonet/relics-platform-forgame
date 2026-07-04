@@ -31,11 +31,13 @@ async def relics_by_bbox(
     max_lat: float = Query(..., description="视口北纬"),
     category: str | None = Query(None, description="国标大类 0100..0600，逗号分隔支持多选"),
     rank: str | None = Query(None, description="保护级别 1..5，逗号分隔支持多选"),
+    county: str | None = Query(None, description="县市区"),
     township: str | None = Query(None),
-    search_type: str | None = Query(None, description="普查来源 2/12/110301"),
+    tier: str | None = Query(None, description="数据层级 city/full"),
+    condition: str | None = Query(None, description="保存状况 好/较好/一般/较差/差"),
     limit: int = Query(2000, ge=1, le=5000),
 ):
-    """视口 + 筛选查询,每条 8 字段(目标 <250 B)。
+    """视口 + 筛选查询,每条极简字段。
     bbox 自动按 15% 缓冲扩展,便于快速拖动时命中缓存。"""
     if min_lng >= max_lng or min_lat >= max_lat:
         raise HTTPException(400, "bbox 参数无效：min 必须小于 max")
@@ -57,8 +59,10 @@ async def relics_by_bbox(
         qmin_lng, qmin_lat, qmax_lng, qmax_lat,
         categories=cats,
         ranks=ranks,
+        county=county or None,
         township=township or None,
-        search_type=search_type or None,
+        tier=tier or None,
+        condition=condition or None,
         limit=limit,
     )
     truncated = len(data) >= limit
@@ -115,11 +119,31 @@ async def get_relic_drawings(code: str):
 
 @router.get("/relics/{code}/polygon")
 async def get_relic_polygon(code: str):
-    """单条多边形几何(GeoJSON Geometry,不含 Feature 外壳)。"""
-    geom = store.polygon_of(code)
-    if not geom:
-        raise HTTPException(404, "此文物无多边形数据")
-    return geom
+    """两线范围面。返回 FeatureCollection,properties.kind = protection|control。
+    兼容旧前端:也可只取第一个 geometry。"""
+    polys = store.polygons_of(code)
+    if not polys:
+        raise HTTPException(404, "此文物无两线范围数据")
+    return {
+        "type": "FeatureCollection",
+        "features": [
+            {"type": "Feature", "properties": {"kind": p["kind"]}, "geometry": p["geometry"]}
+            for p in polys
+        ],
+    }
+
+
+@router.get("/relics/{code}/archives")
+async def get_relic_archives(code: str):
+    """普查档案 PDF 列表: {sanpu: [url...], sipu: [url...]}。
+    文件通过 /archive-docs/ 静态挂载提供。"""
+    if not store.get_relic(code):
+        raise HTTPException(status_code=404, detail=f"文物 {code} 不存在")
+    arch = store.archive_map.get(code) or {}
+    return {
+        "sanpu": [f"/archive-docs/{p}" for p in arch.get("sanpu", [])],
+        "sipu": [f"/archive-docs/{p}" for p in arch.get("sipu", [])],
+    }
 
 
 @router.get("/geojson/points")

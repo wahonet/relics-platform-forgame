@@ -4,23 +4,19 @@ uvicorn[standard]>=0.27
 pydantic>=2.5
 pyyaml>=6.0
 python-multipart>=0.0.9
-# AI 问答
+# AI 问答 / 巡查智能规划 / 照片评估
 openai>=1.12
 # DEM 地形服务
 numpy>=1.24
 tifffile>=2024.1.30
-# 村村达空间分析（data_loader 在加载村边界时使用）
+# 空间分析
 shapely>=2.0
+# 巡查:二维码生成 + 照片 EXIF 解析 + 占位图生成
+qrcode>=7.4
+Pillow>=10.0
 
 # ── 数据管线 ─────────────────────────────────────────────────
-# step01 调用 LLM 转档案：异步 HTTP
-aiohttp>=3.9
-# step01 / step03 / step04 读取 DOCX
-python-docx>=1.1.0
-# step05 读 Excel 工作日志
+# step01 读取台账 Excel
 openpyxl>=3.1.0
-# step05 生成 PDF
-reportlab>=4.0
-Pillow>=10.0
-# step06 读取 Shapefile
+# step02 读取行政边界 Shapefile
 pyshp>=2.3

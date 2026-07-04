@@ -13,17 +13,17 @@ interface ChatBubble {
   streaming?: boolean;
 }
 
-function buildGreeting(countyName: string, total: number): string {
+function buildGreeting(cityName: string, total: number): string {
   const totalStr = total > 0 ? `**${total}处**` : "";
   return (
-    `你好！我是${countyName || "本县"}文物档案 AI 助手，` +
-    `我掌握着全部 ${totalStr} 文物的完整数据，以及完整的 **外业普查工作日志**。\n\n` +
+    `你好！我是${cityName || "本市"}文物数据 AI 助手，` +
+    `我掌握着全市 ${totalStr} 不可移动文物的台账数据(含嘉祥县全量层档案与三维模型信息)。\n\n` +
     `试试问我：\n` +
-    `- ${countyName || "本县"}有哪些全国重点文物保护单位？\n` +
-    `- 有哪些文物保存状况较差需要修缮？\n` +
-    `- 各乡镇文物分布情况如何？\n` +
-    `- 近期外业工作去了哪些地方？\n\n` +
-    `回答中带 📍 的链接可直接在地图上查看，带 📋 的链接可打开工作日志！`
+    `- ${cityName || "本市"}有哪些全国重点文物保护单位？\n` +
+    `- 嘉祥县有哪些文物保存状况较差需要重点巡查？\n` +
+    `- 各县市区文物分布情况如何？\n` +
+    `- 哪些文物有三维模型可以在线查看？\n\n` +
+    `回答中带 📍 的链接可直接在地图上定位查看！`
   );
 }
 
@@ -54,7 +54,7 @@ export function ChatPanel() {
 
   useEffect(() => {
     if (open && !greeted.current) {
-      const county = config?.administrative?.county_name || "本县";
+      const county = config?.administrative?.county_name || "本市";
       const total = config?.stats?.relics_total ?? allRelics.length;
       setMessages([{ role: "assistant", content: buildGreeting(county, total) }]);
       greeted.current = true;
@@ -75,12 +75,6 @@ export function ChatPanel() {
         flyTo(r.center_lng, r.center_lat, 600);
         setUI({ selectedRelic: r });
       }
-      return;
-    }
-    if (actionStr.startsWith("log:")) {
-      const date = actionStr.slice(4);
-      setUI({ worklogDate: date, worklogOpen: true });
-      return;
     }
   };
 
@@ -141,7 +135,7 @@ export function ChatPanel() {
   };
 
   const clear = () => {
-    const county = config?.administrative?.county_name || "本县";
+    const county = config?.administrative?.county_name || "本市";
     const total = config?.stats?.relics_total ?? allRelics.length;
     setMessages([{ role: "assistant", content: buildGreeting(county, total) }]);
   };

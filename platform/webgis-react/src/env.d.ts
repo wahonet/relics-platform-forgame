@@ -13,13 +13,18 @@ interface PlatformConfig {
   };
   administrative: {
     county_name: string;
+    counties: string[];
     townships: string[];
+    /** 拥有档案/三维全量数据的县区(嘉祥县)。 */
+    full_tier_county?: string;
   };
   features: {
     ai_chat: boolean;
-    worklog: boolean;
     models_3d: boolean;
     dem: boolean;
+    patrol: boolean;
+    catalog: boolean;
+    amap_route?: boolean;
   };
   cesium_ion_token?: string;
   ai_chat?: {
@@ -29,11 +34,8 @@ interface PlatformConfig {
   };
   stats: {
     relics_total: number;
+    full_tier_total?: number;
     has_3d_count?: number;
-  };
-  admin_ui?: {
-    available: boolean;
-    url: string;
   };
   auth?: {
     enabled: boolean;

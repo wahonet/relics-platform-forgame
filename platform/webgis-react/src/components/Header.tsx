@@ -1,36 +1,41 @@
+import { Link } from "react-router-dom";
 import { usePlatformStore } from "../stores/platformStore";
 import { useUIStore } from "../stores/uiStore";
 
 export function Header() {
   const config = usePlatformStore((s) => s.config);
   const setUI = useUIStore((s) => s.set);
+  const patrolOpen = useUIStore((s) => s.patrolPanelOpen);
   const total = config?.stats?.relics_total ?? 0;
-  const has3d = config?.stats?.has_3d_count ?? 0;
-  const has3dEnabled = config?.features?.models_3d ?? false;
+  const fullTotal = config?.stats?.full_tier_total ?? 0;
   const aiEnabled = config?.features?.ai_chat ?? false;
-  const adminUrl = config?.admin_ui?.available ? config.admin_ui.url : "";
-
-  const goAdmin = () => {
-    if (!adminUrl) return;
-    // 后台是另一套独立的 Vue SPA,在新标签打开,保持当前主前端会话不动。
-    // 服务端的 AuthMiddleware 会自动处理鉴权:未登录 → /login?next=/admin-ui/ →
-    // /app/#/login?next=/admin-ui/ → 登录成功后 LoginPage 回跳到 /admin-ui/。
-    window.open(adminUrl, "_blank", "noopener,noreferrer");
-  };
 
   return (
     <div className="header">
-      <h1>{config?.project?.full_name || "不可移动文物数字档案平台"}</h1>
+      <h1>{config?.project?.full_name || "文物保护利用数据要素平台"}</h1>
+
+      <nav className="hdr-nav">
+        <span className="hdr-nav-item on">地图总览</span>
+        <Link className="hdr-nav-item" to="/dashboard">
+          数据要素门面
+        </Link>
+        <Link className="hdr-nav-item" to="/catalog">
+          数据资源目录
+        </Link>
+        <button
+          className={"hdr-nav-item as-btn" + (patrolOpen ? " on" : "")}
+          onClick={() => setUI({ patrolPanelOpen: !patrolOpen, filterPanelOpen: false })}
+        >
+          文物巡查
+        </button>
+      </nav>
+
       <div className="hdr-right">
         <span className="badge">
-          数据来源: <b>{config?.project?.data_source || "—"}</b>
-        </span>
-        <span className="badge">
-          文物总数: <b>{total}</b>
-          {has3dEnabled ? (
+          文物总量: <b>{total}</b>
+          {fullTotal ? (
             <>
-              {" "}
-              · 三维: <b style={{ color: "#ffd700" }}>{has3d}</b>
+              {" "}· 嘉祥全量层: <b style={{ color: "#ffd700" }}>{fullTotal}</b>
             </>
           ) : null}
         </span>
@@ -45,18 +50,6 @@ export function Header() {
               <path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-2 12H6v-2h12v2zm0-3H6V9h12v2zm0-3H6V6h12v2z" />
             </svg>
             AI 助手
-          </button>
-        ) : null}
-        {adminUrl ? (
-          <button
-            className="tb"
-            onClick={goAdmin}
-            title="打开数据管理后台 (新标签)"
-          >
-            <svg viewBox="0 0 24 24">
-              <path d="M3 5h8v6H3V5zm10 0h8v3h-8V5zm0 5h8v9h-8v-9zM3 13h8v6H3v-6z" />
-            </svg>
-            后台管理
           </button>
         ) : null}
         <button

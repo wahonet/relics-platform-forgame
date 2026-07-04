@@ -61,9 +61,8 @@ export function Toolbar() {
     useFilterStore.getState().reset(new Set(cats.filter(Boolean)));
     setUI({
       filterPanelOpen: false,
-      routePanelOpen: false,
       chatPanelOpen: false,
-      worklogOpen: false,
+      patrolPanelOpen: false,
       selectedRelic: null,
     });
     flyHomeFn(getViewer());

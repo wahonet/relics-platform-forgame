@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { Header } from "./components/Header";
 import { Toolbar } from "./components/Toolbar";
 import { FilterPanel } from "./components/FilterPanel";
 import { Dashboard } from "./components/Dashboard";
 import { InfoPanel } from "./components/InfoPanel";
 import { ChatPanel } from "./components/ChatPanel";
-import { WorklogPanel } from "./components/WorklogPanel";
+import { PatrolPanel } from "./components/PatrolPanel";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { TileDownloadPanel } from "./components/TileDownloadPanel";
 import { BoundaryDownloadPanel } from "./components/BoundaryDownloadPanel";
@@ -17,6 +18,7 @@ import { Compass } from "./components/Compass";
 import { MapView } from "./map/MapView";
 import { usePlatformStore } from "./stores/platformStore";
 import { useRelicsStore } from "./stores/relicsStore";
+import { useUIStore } from "./stores/uiStore";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 
 function App() {
@@ -26,6 +28,7 @@ function App() {
   const relicsLoading = useRelicsStore((s) => s.loading);
   const relicsLoad = useRelicsStore((s) => s.load);
   const loadError = useRelicsStore((s) => s.loadError);
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const [compassRot, setCompassRot] = useState(0);
   const [scale, setScale] = useState("");
@@ -37,6 +40,14 @@ function App() {
   useEffect(() => {
     if (!relicsLoaded && !relicsLoading) relicsLoad();
   }, [relicsLoaded, relicsLoading, relicsLoad]);
+
+  // 支持 /?patrol=1 直达巡查规划(门面大屏的入口链接)。
+  useEffect(() => {
+    if (searchParams.get("patrol") === "1") {
+      useUIStore.getState().set({ patrolPanelOpen: true });
+      setSearchParams({}, { replace: true });
+    }
+  }, [searchParams, setSearchParams]);
 
   const onCompassRotate = useCallback((deg: number) => setCompassRot(deg), []);
   const onScaleUpdate = useCallback((label: string) => setScale(label), []);
@@ -54,7 +65,7 @@ function App() {
       <ErrorBoundary label="Dashboard"><Dashboard /></ErrorBoundary>
       <ErrorBoundary label="InfoPanel"><InfoPanel /></ErrorBoundary>
       <ErrorBoundary label="ChatPanel"><ChatPanel /></ErrorBoundary>
-      <ErrorBoundary label="WorklogPanel"><WorklogPanel /></ErrorBoundary>
+      <ErrorBoundary label="PatrolPanel"><PatrolPanel /></ErrorBoundary>
       <ErrorBoundary label="SettingsPanel"><SettingsPanel /></ErrorBoundary>
       <ErrorBoundary label="TileDownloadPanel"><TileDownloadPanel /></ErrorBoundary>
       <ErrorBoundary label="BoundaryDownloadPanel"><BoundaryDownloadPanel /></ErrorBoundary>
