@@ -1,0 +1,42 @@
+# User data and local configuration
+data/input/
+config.yaml
+.env
+.env.*
+*.key
+
+# Large runtime artifacts under data/output
+data/output/tile_cache/
+data/output/worklog_pdf/
+data/output/worklog_pdfs/
+data/output/3dtiles/
+data/output/models_3d/
+data/output/dem/
+*.log
+
+# Python
+python/
+.venv/
+__pycache__/
+.pytest_cache/
+*.pyc
+*.pyo
+*.pyd
+
+# Node
+node_modules/
+.npm-cache/
+*.tsbuildinfo
+
+# Frontend build outputs
+platform/admin-vue/dist/
+platform/webgis-react/dist/
+.vite/
+.vite_cache/
+
+# Editors and OS
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store
+desktop.ini

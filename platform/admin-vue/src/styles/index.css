@@ -1,0 +1,92 @@
+/* 全局变量：对齐主地图的深色科技风。Element Plus 的 light/dark 主题在 main.ts 里切换。 */
+:root {
+  --bg:       #0d1117;
+  --bg2:      #161b22;
+  --bg3:      #21262d;
+  --bg4:      #30363d;
+  --bd:       rgba(88, 166, 255, 0.2);
+  --bd-a:     rgba(88, 166, 255, 0.5);
+  --t1:       #e6edf3;
+  --t2:       #8b949e;
+  --t3:       #c9d1d9;
+  --accent:   #58a6ff;
+  --accent2:  #79c0ff;
+  --green:    #3fb950;
+  --yellow:   #d29922;
+  --red:      #f85149;
+  --purple:   #bc8cff;
+  --gold:     #ffd700;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  font-family: "Microsoft YaHei", "PingFang SC", system-ui, sans-serif;
+  background: var(--bg);
+  color: var(--t1);
+  -webkit-font-smoothing: antialiased;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--bg4);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+a {
+  color: var(--accent);
+  text-decoration: none;
+}
+a:hover {
+  text-decoration: underline;
+}
+
+/* 让 Element Plus 深色主题和我们的背景融合 */
+html.dark {
+  --el-bg-color: var(--bg);
+  --el-bg-color-page: var(--bg);
+  --el-bg-color-overlay: var(--bg2);
+  --el-border-color: var(--bd);
+  --el-border-color-light: var(--bd);
+  --el-text-color-primary: var(--t1);
+  --el-text-color-regular: var(--t3);
+  --el-text-color-secondary: var(--t2);
+  --el-color-primary: var(--accent);
+}
+
+/* 通用容器 */
+.page-container {
+  padding: 20px 24px;
+  min-height: calc(100vh - 56px);
+}
+
+.page-title {
+  font-size: 18px;
+  font-weight: 600;
+  margin-bottom: 16px;
+  color: var(--t1);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.page-title .sub {
+  font-size: 12px;
+  color: var(--t2);
+  font-weight: 400;
+}

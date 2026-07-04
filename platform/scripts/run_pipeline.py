@@ -1,0 +1,350 @@
+"""Data pipeline orchestrator.
+
+Usage:
+    python run_pipeline.py
+    python run_pipeline.py --from 02
+    python run_pipeline.py --to 04
+    python run_pipeline.py --only 03
+    python run_pipeline.py --skip 01 --skip 05
+    python run_pipeline.py --list
+    python run_pipeline.py --dry-run
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import subprocess
+import sys
+import time
+from datetime import datetime
+from pathlib import Path
+
+from _common import PROJECT_ROOT, detect_features, get_logger, get_paths, load_config
+
+SCRIPTS_DIR = Path(__file__).resolve().parent
+
+
+STEPS = [
+    {
+        "id": "01",
+        "name": "Convert DOCX archives to Markdown",
+        "script": "step01_convert_docs.py",
+        "requires": ["archives"],
+        "optional": False,
+    },
+    {
+        "id": "02",
+        "name": "Build structured dataset",
+        "script": "step02_build_dataset.py",
+        "requires": [],
+        "optional": False,
+    },
+    {
+        "id": "03",
+        "name": "Extract photos",
+        "script": "step03_extract_photos.py",
+        "requires": ["archives"],
+        "optional": False,
+    },
+    {
+        "id": "04",
+        "name": "Extract drawings",
+        "script": "step04_extract_drawings.py",
+        "requires": ["archives"],
+        "optional": False,
+    },
+    {
+        "id": "05",
+        "name": "Convert worklogs to PDF",
+        "script": "step05_convert_worklogs.py",
+        "requires": ["worklogs"],
+        "optional": True,
+    },
+    {
+        "id": "06",
+        "name": "Prepare administrative boundaries",
+        "script": "step06_prepare_boundaries.py",
+        "requires": ["boundaries"],
+        "optional": True,
+    },
+    {
+        "id": "07",
+        "name": "Build SQLite database",
+        "script": "step07_build_db.py",
+        "requires": [],
+        "optional": False,
+    },
+]
+
+
+def _rel(path: Path) -> str:
+    try:
+        return str(path.relative_to(PROJECT_ROOT))
+    except ValueError:
+        return str(path)
+
+
+def _artifact(label: str, path: Path, patterns: tuple[str, ...] = (), kind: str = "dir") -> dict:
+    if kind == "file":
+        exists = path.exists() and path.is_file() and path.stat().st_size > 0
+        count = 1 if exists else 0
+    else:
+        if not path.exists():
+            count = 0
+        else:
+            count = sum(
+                1
+                for pattern in patterns
+                for item in path.rglob(pattern)
+                if item.is_file()
+            )
+        exists = count > 0
+    return {
+        "label": label,
+        "path": _rel(path),
+        "kind": kind,
+        "patterns": list(patterns),
+        "exists": exists,
+        "count": count,
+    }
+
+
+def _step_artifacts(step_id: str) -> dict:
+    paths = get_paths()
+    return {
+        "01": {
+            "inputs": [_artifact("DOCX archives", paths.input_archives, ("*.docx", "*.DOCX"))],
+            "outputs": [_artifact("Markdown files", paths.output_markdown, ("*.md",))],
+        },
+        "02": {
+            "inputs": [_artifact("Markdown files", paths.output_markdown, ("*.md",))],
+            "outputs": [
+                _artifact("relics_full.json", paths.output_dataset / "relics_full.json", kind="file"),
+                _artifact("relics_master.csv", paths.output_dataset / "relics_master.csv", kind="file"),
+            ],
+        },
+        "03": {
+            "inputs": [_artifact("Markdown files", paths.output_markdown, ("*.md",))],
+            "outputs": [
+                _artifact("Photo files", paths.output_photos, ("*.jpg", "*.jpeg", "*.png", "*.webp")),
+                _artifact("photo_index.csv", paths.output_dataset / "photo_index.csv", kind="file"),
+            ],
+        },
+        "04": {
+            "inputs": [_artifact("Markdown files", paths.output_markdown, ("*.md",))],
+            "outputs": [
+                _artifact("Drawing files", paths.output_drawings, ("*.jpg", "*.jpeg", "*.png", "*.webp", "*.pdf")),
+                _artifact("drawing_index.csv", paths.output_dataset / "drawing_index.csv", kind="file"),
+            ],
+        },
+        "05": {
+            "inputs": [_artifact("Worklog spreadsheets", paths.input_worklogs, ("*.xlsx", "*.xls"))],
+            "outputs": [_artifact("Worklog PDFs", paths.output_worklogs, ("*.pdf",))],
+        },
+        "06": {
+            "inputs": [_artifact("Boundary sources", paths.input_boundaries, ("*.shp", "*.geojson", "*.json"))],
+            "outputs": [_artifact("Boundary GeoJSON", paths.output_boundaries, ("*.geojson", "*.json"))],
+        },
+        "07": {
+            "inputs": [_artifact("relics_full.json", paths.output_dataset / "relics_full.json", kind="file")],
+            "outputs": [_artifact("relics.db", paths.output_dataset / "relics.db", kind="file")],
+        },
+    }.get(step_id, {"inputs": [], "outputs": []})
+
+
+def _evaluate_step(step: dict, features: dict) -> dict:
+    artifacts = _step_artifacts(step["id"])
+    missing_features = [r for r in step["requires"] if not features.get(r, False)]
+    missing_inputs = [item for item in artifacts["inputs"] if not item["exists"]]
+    missing_outputs = [item for item in artifacts["outputs"] if not item["exists"]]
+    return {
+        "id": step["id"],
+        "name": step["name"],
+        "script": step["script"],
+        "optional": step["optional"],
+        "missing_features": missing_features,
+        "inputs": artifacts["inputs"],
+        "outputs": artifacts["outputs"],
+        "missing_inputs": missing_inputs,
+        "missing_outputs": missing_outputs,
+    }
+
+
+def _format_artifact(items: list[dict]) -> str:
+    if not items:
+        return "none"
+    return "; ".join(
+        f"{item['label']}={'ok' if item['exists'] else 'missing'}"
+        f"({item['count']} @ {item['path']})"
+        for item in items
+    )
+
+
+def _manifest_record(step: dict, status: str, started: float, finished: float,
+                     features: dict, error: str | None = None) -> dict:
+    evaluation = _evaluate_step(step, features)
+    return {
+        **evaluation,
+        "status": status,
+        "started": datetime.fromtimestamp(started).isoformat(timespec="seconds"),
+        "finished": datetime.fromtimestamp(finished).isoformat(timespec="seconds"),
+        "duration_sec": round(finished - started, 3),
+        "error": error,
+    }
+
+
+def _write_manifest(records: list[dict], status: str, selected: list[dict]) -> Path:
+    paths = get_paths()
+    paths.output_logs.mkdir(parents=True, exist_ok=True)
+    manifest_path = paths.output_logs / "pipeline_manifest.json"
+    payload = {
+        "schema_version": 1,
+        "status": status,
+        "project_root": str(PROJECT_ROOT),
+        "generated_at": datetime.now().isoformat(timespec="seconds"),
+        "selected_steps": [s["id"] for s in selected],
+        "steps": records,
+    }
+    manifest_path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    return manifest_path
+
+
+def _parse_args() -> argparse.Namespace:
+    p = argparse.ArgumentParser(description="Relics Platform data pipeline")
+    p.add_argument("--from", dest="from_id", default=None, help="Start step id, for example 02")
+    p.add_argument("--to", dest="to_id", default=None, help="End step id, inclusive, for example 04")
+    p.add_argument("--only", dest="only_id", default=None, help="Run only one step id, for example 03")
+    p.add_argument("--skip", dest="skip_ids", action="append", default=[],
+                   help="Skip a step id. Can be repeated, for example --skip 01 --skip 05")
+    p.add_argument("--list", action="store_true", help="List all steps and exit")
+    p.add_argument("--dry-run", action="store_true", help="Print planned steps without running them")
+    return p.parse_args()
+
+
+def _list_steps() -> None:
+    print("Pipeline steps:")
+    for s in STEPS:
+        tag = "[optional]" if s["optional"] else "[required]"
+        print(f"  {s['id']}  {tag}  {s['name']}  ({s['script']})")
+
+
+def _select_steps(args: argparse.Namespace) -> list[dict]:
+    skip = set(args.skip_ids or [])
+    if args.only_id:
+        return [s for s in STEPS if s["id"] == args.only_id and s["id"] not in skip]
+    selected = STEPS[:]
+    if args.from_id:
+        selected = [s for s in selected if s["id"] >= args.from_id]
+    if args.to_id:
+        selected = [s for s in selected if s["id"] <= args.to_id]
+    if skip:
+        selected = [s for s in selected if s["id"] not in skip]
+    return selected
+
+
+def _run_step(step: dict, log) -> int:
+    script_path = SCRIPTS_DIR / step["script"]
+    if not script_path.exists():
+        log.error("Script not found: %s", script_path)
+        return 1
+    log.info("-> start step%s: %s", step["id"], step["name"])
+    t0 = time.time()
+    proc = subprocess.run(
+        [sys.executable, str(script_path)],
+        cwd=str(SCRIPTS_DIR),
+    )
+    dt = time.time() - t0
+    if proc.returncode == 0:
+        log.info("OK step%s completed in %.1fs", step["id"], dt)
+    else:
+        log.error("FAIL step%s exited with %s in %.1fs", step["id"], proc.returncode, dt)
+    return proc.returncode
+
+
+def main() -> int:
+    args = _parse_args()
+    if args.list:
+        _list_steps()
+        return 0
+
+    log = get_logger("pipeline")
+    selected = _select_steps(args)
+
+    if not selected:
+        log.error("No matching steps")
+        return 2
+
+    if not args.dry_run:
+        try:
+            load_config()
+        except FileNotFoundError as e:
+            log.error(str(e))
+            return 2
+
+    features = detect_features().as_dict
+
+    log.info("Project root: %s", PROJECT_ROOT)
+    log.info("Input feature status: %s", features)
+    log.info("Planned steps: %d", len(selected))
+
+    manifest_records: list[dict] = []
+    for step in selected:
+        needs = step["requires"]
+        missing = [r for r in needs if not features.get(r, False)]
+        evaluation = _evaluate_step(step, features)
+
+        if args.dry_run:
+            io_status = (
+                f"inputs: {_format_artifact(evaluation['inputs'])}; "
+                f"outputs: {_format_artifact(evaluation['outputs'])}"
+            )
+            if missing and not step["optional"]:
+                log.info("[dry-run] step%s: %s (would fail, missing %s; %s)",
+                         step["id"], step["name"], missing, io_status)
+            elif missing and step["optional"]:
+                log.info("[dry-run] step%s: %s (would skip optional, missing %s; %s)",
+                         step["id"], step["name"], missing, io_status)
+            else:
+                log.info("[dry-run] step%s: %s (%s)", step["id"], step["name"], io_status)
+            continue
+
+        if missing:
+            started = finished = time.time()
+            if step["optional"]:
+                log.warning("Skip optional step%s, missing input: %s", step["id"], missing)
+                manifest_records.append(_manifest_record(step, "skipped", started, finished, features,
+                                                         error=f"missing input: {missing}"))
+                continue
+            log.error("step%s requires missing input: %s", step["id"], missing)
+            manifest_records.append(_manifest_record(step, "error", started, finished, features,
+                                                     error=f"missing input: {missing}"))
+            manifest = _write_manifest(manifest_records, "error", selected)
+            log.info("Pipeline manifest written: %s", manifest)
+            return 3
+
+        started = time.time()
+        rc = _run_step(step, log)
+        finished = time.time()
+        if rc != 0:
+            log.error("Pipeline stopped at step%s", step["id"])
+            manifest_records.append(_manifest_record(step, "error", started, finished, features,
+                                                     error=f"returncode {rc}"))
+            manifest = _write_manifest(manifest_records, "error", selected)
+            log.info("Pipeline manifest written: %s", manifest)
+            return rc
+        manifest_records.append(_manifest_record(step, "done", started, finished, features))
+
+    if args.dry_run:
+        log.info("[dry-run] plan printed; no step was executed")
+    else:
+        manifest = _write_manifest(manifest_records, "done", selected)
+        log.info("Pipeline manifest written: %s", manifest)
+        log.info("All selected steps completed")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

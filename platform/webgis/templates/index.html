@@ -1,0 +1,1435 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ full_name }}</title>
+    <script src="https://cesium.com/downloads/cesiumjs/releases/1.125/Build/Cesium/Cesium.js"></script>
+    <link href="https://cesium.com/downloads/cesiumjs/releases/1.125/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <script>if(typeof pdfjsLib!=='undefined')pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';</script>
+    <style>
+        :root {
+            --bg: #0d1117; --bg2: #161b22; --bg3: #21262d; --bg4: #30363d;
+            --bd: rgba(88,166,255,0.2); --bd-active: rgba(88,166,255,0.5);
+            --t1: #e6edf3; --t2: #8b949e; --t3: #c9d1d9;
+            --accent: #58a6ff; --accent2: #79c0ff;
+            --green: #3fb950; --yellow: #d29922; --red: #f85149; --purple: #bc8cff; --gold: #ffd700;
+            --hdr: 50px; --side-w: 360px; --dash-w: 320px; --info-w: 420px;
+        }
+        *{margin:0;padding:0;box-sizing:border-box}
+        html,body{width:100%;height:100%;overflow:hidden;font-family:"Microsoft YaHei","PingFang SC",sans-serif;background:var(--bg);color:var(--t1)}
+        ::-webkit-scrollbar{width:4px}::-webkit-scrollbar-thumb{background:var(--bg4);border-radius:2px}
+
+        /* ── 顶部栏 ── */
+        #header{position:absolute;top:0;left:0;right:0;height:var(--hdr);z-index:200;background:linear-gradient(135deg,rgba(13,17,23,.97),rgba(22,40,65,.97));border-bottom:1px solid var(--bd);display:flex;align-items:center;padding:0 16px;backdrop-filter:blur(12px)}
+        #header h1{font-size:17px;font-weight:600;letter-spacing:3px;white-space:nowrap;background:linear-gradient(90deg,var(--accent),var(--accent2),var(--accent));-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+        .hdr-right{margin-left:auto;display:flex;align-items:center;gap:8px}
+        .badge{font-size:11px;color:var(--t2);padding:4px 10px;background:var(--bg3);border-radius:4px;white-space:nowrap}
+        .badge b{color:var(--accent)}
+
+        /* ── 工具栏 ── */
+        #toolbar{position:absolute;top:var(--hdr);left:0;right:0;height:40px;z-index:190;background:rgba(22,27,34,.95);border-bottom:1px solid var(--bd);display:flex;align-items:center;padding:0 12px;gap:6px;backdrop-filter:blur(8px)}
+        .tb{height:30px;padding:0 12px;background:var(--bg3);border:1px solid var(--bd);border-radius:5px;color:var(--t2);font-size:12px;cursor:pointer;display:flex;align-items:center;gap:5px;transition:all .2s;font-family:inherit;white-space:nowrap}
+        .tb:hover{border-color:var(--bd-active);color:var(--t1)}
+        .tb.on{background:rgba(88,166,255,.15);border-color:var(--accent);color:var(--accent)}
+        .tb svg{width:14px;height:14px;fill:currentColor}
+        .tb-sep{width:1px;height:20px;background:var(--bd);flex-shrink:0}
+        .tb-group{display:flex;align-items:center;gap:6px}
+        /* 工具分组外框,把同类按钮视觉上捆绑 */
+        .tb-group.boxed{padding:3px 6px;border:1px solid var(--bd);border-radius:7px;background:rgba(88,166,255,.04)}
+        .tb-group.boxed:hover{border-color:var(--bd-active)}
+        .tb-select{height:30px;padding:0 8px;background:var(--bg3);border:1px solid var(--bd);border-radius:5px;color:var(--t2);font-size:12px;font-family:inherit;outline:none;cursor:pointer}
+        .tb-select:focus{border-color:var(--accent);color:var(--t1)}
+        .tb-info{font-size:12px;color:var(--t2);white-space:nowrap}.tb-info b{color:var(--accent)}
+        /* 当前位置指示器:绝对居中,不随两侧按钮数量变化偏移 */
+        #statusSummary{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);font-size:15px;color:var(--accent);font-weight:700;letter-spacing:.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:46vw;text-align:center;pointer-events:none}
+
+        /* ── 地图 ── */
+        #cesiumContainer{position:absolute;top:calc(var(--hdr) + 40px);left:0;right:0;bottom:0}
+
+        /* ── 左侧筛选面板 ── */
+        #filterPanel{position:absolute;top:calc(var(--hdr) + 40px);left:0;bottom:0;width:var(--side-w);z-index:150;background:rgba(13,17,23,.96);border-right:1px solid var(--bd);transform:translateX(-100%);transition:transform .3s ease;overflow-y:auto;backdrop-filter:blur(12px)}
+        #filterPanel.open{transform:translateX(0)}
+        .fp-title{padding:14px 16px;border-bottom:1px solid var(--bd);font-size:14px;color:var(--accent2);font-weight:500;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;background:rgba(13,17,23,.98);z-index:1}
+        .fp-title button{background:none;border:none;color:var(--t2);font-size:18px;cursor:pointer;padding:2px 6px}
+        .fp-section{padding:14px 16px;border-bottom:1px solid rgba(255,255,255,.04)}
+        .fp-label{font-size:13px;color:var(--t2);margin-bottom:8px;font-weight:500}
+        .fp-search{width:100%;height:34px;background:var(--bg3);border:1px solid var(--bd);border-radius:5px;padding:0 12px;color:var(--t1);font-size:13px;outline:none;font-family:inherit}
+        .fp-search:focus{border-color:var(--accent)}
+        .fp-search::placeholder{color:var(--t2)}
+        .fp-select{width:100%;height:34px;background:var(--bg3);border:1px solid var(--bd);border-radius:5px;padding:0 10px;color:var(--t2);font-size:13px;font-family:inherit;outline:none;cursor:pointer}
+        .fp-select:focus{border-color:var(--accent);color:var(--t1)}
+        .fp-checks{display:flex;flex-wrap:wrap;gap:5px}
+        .fp-chk{display:flex;align-items:center;gap:6px;padding:5px 10px;background:var(--bg3);border:1px solid var(--bd);border-radius:4px;font-size:12px;color:var(--t3);cursor:pointer;transition:all .15s;user-select:none}
+        .fp-chk:hover{border-color:var(--bd-active)}
+        .fp-chk.active{background:rgba(88,166,255,.12);border-color:var(--accent);color:var(--accent)}
+        .fp-chk .dot{width:9px;height:9px;border-radius:50%;flex-shrink:0}
+        .fp-actions{padding:14px 16px;display:flex;gap:8px}
+        .fp-btn{flex:1;height:36px;border:none;border-radius:5px;font-size:13px;font-family:inherit;cursor:pointer;font-weight:500}
+        .fp-btn.primary{background:var(--accent);color:#fff}
+        .fp-btn.primary:hover{background:var(--accent2)}
+        .fp-btn.secondary{background:var(--bg3);color:var(--t2);border:1px solid var(--bd)}
+        .fp-btn.secondary:hover{color:var(--t1);border-color:var(--bd-active)}
+        .fp-stat{padding:12px 16px;font-size:13px;color:var(--t2);text-align:center;border-bottom:1px solid rgba(255,255,255,.04)}
+        .fp-stat b{color:var(--accent);font-size:18px}
+        .fp-stat small{color:var(--green)}
+
+        /* 搜索结果列表 */
+        .list-item{padding:12px 16px;border-bottom:1px solid rgba(255,255,255,.03);cursor:pointer;transition:background .15s}
+        .list-item:hover{background:rgba(88,166,255,.06)}
+        .li-name{font-size:13px;color:var(--t1);margin-bottom:3px}
+        .li-meta{font-size:11px;color:var(--t2);display:flex;gap:6px}
+        .li-cat{color:var(--green)}.li-era{color:var(--accent2)}
+
+        /* ── (旧统计面板保留兼容) ── */
+        #statsPanel{display:none}
+        .dash{position:absolute;top:calc(var(--hdr) + 40px);bottom:0;width:var(--dash-w);z-index:100;background:rgba(13,17,23,.92);border:1px solid var(--bd);overflow-y:auto;backdrop-filter:blur(10px);padding:0;transition:left .3s ease,right .3s ease,opacity .2s}
+        .dash.dock-l{left:0;right:auto;border-left:none;border-radius:0 8px 8px 0}
+        .dash.dock-r{right:0;left:auto;border-right:none;border-radius:8px 0 0 8px}
+        .dash.is-dragging{position:fixed!important;z-index:400;opacity:.85;transition:none!important;box-shadow:0 12px 40px rgba(0,0,0,.6)}
+        .dash.collapsed .dash-cards,.dash.collapsed .dash-sec{display:none}
+        .dash.collapsed{bottom:auto;overflow:hidden}
+        #dockHint{display:none;position:fixed;top:calc(var(--hdr) + 40px);bottom:0;width:var(--dash-w);z-index:350;pointer-events:none;border:2px dashed var(--accent);background:rgba(88,166,255,.08);border-radius:8px}
+        #dockHint.show{display:block}
+        #dockHint.hint-l{left:0}
+        #dockHint.hint-r{right:0}
+        .dash-hdr{padding:12px 16px;font-size:14px;color:var(--accent2);font-weight:600;border-bottom:1px solid var(--bd);position:sticky;top:0;background:rgba(13,17,23,.98);z-index:1;display:flex;justify-content:space-between;align-items:center;cursor:grab;user-select:none}
+        .dash-hdr:active{cursor:grabbing}
+        .dash-hdr button{background:none;border:none;color:var(--t2);font-size:14px;cursor:pointer;padding:3px 6px;border-radius:3px;transition:background .15s}
+        .dash-hdr button:hover{background:rgba(255,255,255,.08);color:var(--t1)}
+        .dash-hdr .dh-acts{display:flex;gap:2px;align-items:center}
+        .dash-cards{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;padding:12px 14px}
+        .dc{background:var(--bg3);border-radius:6px;padding:10px;text-align:center;border:1px solid rgba(255,255,255,.03)}
+        .dc .n{font-size:22px;font-weight:700;color:var(--accent);line-height:1.2}
+        .dc .l{font-size:11px;color:var(--t2);margin-top:3px}
+        .dc.y .n{color:var(--gold)}
+        .dash-sec{padding:10px 14px;border-top:1px solid var(--bd)}
+        .dash-sec h4{font-size:12px;color:var(--accent2);font-weight:500;margin:0 0 6px;display:flex;align-items:center;gap:5px;cursor:pointer;padding:4px 5px;border-radius:3px;transition:background .15s}
+        .dash-sec h4:hover{background:rgba(88,166,255,.08)}
+        .dash-sec h4.active{background:rgba(88,166,255,.15);color:var(--accent)}
+        .dash-sec h4::before{content:'';width:3px;height:12px;background:var(--accent);border-radius:2px;flex-shrink:0}
+        .dash-chart{width:100%;height:190px}
+        .dash-chart.tall{height:250px}
+
+        /* ── 图例 ── */
+        #legend{position:absolute;bottom:16px;left:336px;z-index:100;background:rgba(13,17,23,.92);border:1px solid var(--bd);border-radius:8px;padding:12px 16px;backdrop-filter:blur(8px);transition:left .3s}
+        #legend.shifted{left:calc(var(--side-w) + 16px)}
+        #legend h3{font-size:12px;color:var(--accent2);margin-bottom:6px;font-weight:500}
+        .lg-item{display:flex;align-items:center;gap:6px;padding:2px 0;font-size:11px;color:var(--t3)}
+        .lg-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0}
+        .lg-item.g .lg-dot{border-radius:2px;box-shadow:0 0 5px rgba(255,215,0,.6)}
+
+        /* ── 右侧信息面板 ── */
+        #infoPanel{display:none;position:absolute;top:calc(var(--hdr) + 40px + 10px);right:14px;z-index:160;width:var(--info-w);max-height:calc(100vh - var(--hdr) - 60px);overflow-y:auto;background:rgba(13,17,23,.97);border:1px solid var(--bd);border-radius:10px;backdrop-filter:blur(12px);box-shadow:0 8px 32px rgba(0,0,0,.5);animation:slideIn .25s ease-out;transition:right .3s ease}
+        #infoPanel.shifted{right:calc(var(--side-w) + 14px)}
+        @keyframes slideIn{from{opacity:0;transform:translateX(16px)}to{opacity:1;transform:translateX(0)}}
+        .pi-hdr{position:sticky;top:0;z-index:1;padding:14px 16px;background:rgba(13,17,23,.98);border-bottom:1px solid rgba(88,166,255,.15);display:flex;justify-content:space-between;align-items:flex-start}
+        .pi-hdr h2{font-size:17px;color:var(--accent);font-weight:600;flex:1;line-height:1.4}
+        .pi-close{width:30px;height:30px;background:rgba(255,255,255,.08);border:none;border-radius:5px;color:var(--t2);font-size:18px;cursor:pointer;display:flex;align-items:center;justify-content:center;margin-left:6px;flex-shrink:0}
+        .pi-close:hover{background:rgba(255,255,255,.15);color:#fff}
+        .pi-tabs{display:flex;border-bottom:1px solid var(--bd);padding:0 16px;background:rgba(13,17,23,.98);position:sticky;top:52px;z-index:1}
+        .pi-tab{padding:9px 14px;font-size:13px;color:var(--t2);cursor:pointer;border-bottom:2px solid transparent;transition:all .2s;background:none;border-top:none;border-left:none;border-right:none;font-family:inherit}
+        .pi-tab:hover{color:var(--t1)}.pi-tab.on{color:var(--accent);border-bottom-color:var(--accent)}
+        .tc{display:none;padding:14px 16px}.tc.on{display:block}
+
+        .info-tags{margin-bottom:12px;display:flex;flex-wrap:wrap;gap:6px}
+        .tag{display:inline-block;padding:3px 10px;border-radius:4px;font-size:11px;font-weight:500}
+        .tag-3d{background:rgba(255,215,0,.15);color:var(--gold);border:1px solid rgba(255,215,0,.3)}
+        .tag-era{background:rgba(88,166,255,.1);color:var(--accent2)}
+        .tag-cat{background:rgba(63,185,80,.1);color:var(--green)}
+        .tag-lv{background:rgba(188,140,255,.1);color:var(--purple)}
+        .ir{display:flex;padding:7px 0;border-bottom:1px solid rgba(255,255,255,.04);font-size:13px}
+        .ir-l{width:72px;color:var(--t2);flex-shrink:0}.ir-v{color:var(--t1);flex:1;word-break:break-all}
+        .lv-g{color:var(--green)}.lv-f{color:var(--accent)}.lv-a{color:var(--yellow)}.lv-p{color:var(--red)}
+
+        /* 照片 */
+        .pg{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+        .pt{position:relative;aspect-ratio:1;border-radius:5px;overflow:hidden;cursor:pointer;border:1px solid var(--bd);transition:border-color .2s}
+        .pt:hover{border-color:var(--accent)}
+        .pt img{width:100%;height:100%;object-fit:cover;display:block}
+        .pt .pl{position:absolute;bottom:0;left:0;right:0;padding:3px 5px;background:linear-gradient(transparent,rgba(0,0,0,.8));font-size:10px;color:#fff;text-align:center}
+        /* 图纸 */
+        .di{display:flex;align-items:center;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.04);gap:10px;cursor:pointer;border-radius:4px;transition:background .15s}
+        .di:hover{background:rgba(255,255,255,.03)}
+        .di-icon{width:36px;height:36px;background:var(--bg3);border-radius:5px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+        .di-icon svg{width:18px;height:18px;fill:var(--accent)}
+        .di-name{font-size:12px;color:var(--t1)}.di-meta{font-size:11px;color:var(--t2);margin-top:1px}
+
+        /* 功能按钮组 */
+        .pi-action-bar{display:flex;gap:8px;margin-top:14px}
+        .pi-act-btn{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;
+            padding:10px 6px;border-radius:10px;cursor:pointer;font-family:inherit;font-size:11px;font-weight:600;
+            border:1px solid;transition:all .2s}
+        .pi-act-btn svg{width:20px;height:20px}
+        .pi-act-btn:hover{transform:translateY(-1px);box-shadow:0 4px 12px rgba(0,0,0,.3)}
+        .pi-btn-3d{background:rgba(255,215,0,.08);border-color:rgba(255,215,0,.3);color:var(--gold)}
+        .pi-btn-3d:hover{background:rgba(255,215,0,.18);border-color:var(--gold)}
+        .pi-btn-3d svg{fill:var(--gold)}
+        .pi-btn-3d.loading{opacity:.5;pointer-events:none}
+        .pi-btn-pdf{background:rgba(88,166,255,.08);border-color:rgba(88,166,255,.3);color:var(--accent2)}
+        .pi-btn-pdf:hover{background:rgba(88,166,255,.18);border-color:var(--accent2)}
+        .pi-btn-pdf svg{fill:var(--accent2)}
+        .pi-btn-log{background:rgba(63,185,80,.08);border-color:rgba(63,185,80,.3);color:var(--green)}
+        .pi-btn-log:hover{background:rgba(63,185,80,.18);border-color:var(--green)}
+        .pi-btn-log svg{fill:var(--green)}
+        .pi-btn-log.disabled{opacity:.3;pointer-events:none;cursor:default}
+        .tag-pdf{background:rgba(88,166,255,.1);color:var(--accent2);border:1px solid rgba(88,166,255,.3)}
+        .pi-back-btn{width:28px;height:28px;background:rgba(88,166,255,.1);border:1px solid rgba(88,166,255,.3);
+            border-radius:6px;color:var(--accent);font-size:14px;cursor:pointer;display:flex;align-items:center;
+            justify-content:center;flex-shrink:0;margin-right:8px;transition:all .2s}
+        .pi-back-btn:hover{background:rgba(88,166,255,.25);border-color:var(--accent)}
+        .pi-back-btn.disabled{opacity:.25;pointer-events:none;cursor:default}
+        .intro-text{font-size:13px;line-height:1.8;color:var(--t2);text-align:justify}
+        .empty-tip{text-align:center;color:var(--t2);font-size:12px;padding:24px 0}
+
+        /* ── 照片灯箱 ── */
+        #lightbox{display:none;position:fixed;inset:0;z-index:500;background:rgba(0,0,0,.92);backdrop-filter:blur(8px);justify-content:center;align-items:center;flex-direction:column}
+        #lightbox.open{display:flex}
+        #lightbox img{max-width:90vw;max-height:80vh;object-fit:contain;border-radius:6px;box-shadow:0 4px 40px rgba(0,0,0,.5)}
+        .lb-cap{margin-top:10px;color:#ccc;font-size:12px;text-align:center;max-width:600px}
+        .lb-x{position:absolute;top:16px;right:20px;width:36px;height:36px;background:rgba(255,255,255,.1);border:none;border-radius:50%;color:#fff;font-size:22px;cursor:pointer;display:flex;align-items:center;justify-content:center}
+        .lb-x:hover{background:rgba(255,255,255,.2)}
+        .lb-nav{position:absolute;top:50%;transform:translateY(-50%);width:44px;height:44px;background:rgba(255,255,255,.1);border:none;border-radius:50%;color:#fff;font-size:20px;cursor:pointer;display:flex;align-items:center;justify-content:center}
+        .lb-nav:hover{background:rgba(255,255,255,.2)}
+        .lb-prev{left:16px}.lb-next{right:16px}
+
+        /* ── 三维模型弹窗 ── */
+        #model3dBox{display:none;position:fixed;inset:0;z-index:500;background:#000;flex-direction:column}
+        #model3dBox.open{display:flex}
+        .m3d-bar{height:48px;background:rgba(13,17,23,.98);border-bottom:1px solid var(--bd);display:flex;align-items:center;padding:0 16px;gap:12px;flex-shrink:0;z-index:510}
+        .m3d-bar h3{color:var(--accent);font-size:14px;font-weight:500;flex:1}
+        .m3d-bar .m3d-hint{font-size:11px;color:var(--t2)}
+        .m3d-close{width:32px;height:32px;background:rgba(255,255,255,.08);border:none;border-radius:6px;color:var(--t2);font-size:18px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+        .m3d-close:hover{background:rgba(255,255,255,.15);color:#fff}
+        #model3dFrame{flex:1;border:none;width:100%;height:100%}
+
+        /* ── 提示条 ── */
+        #toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:rgba(22,27,34,.95);color:var(--t1);padding:10px 24px;border-radius:8px;font-size:12px;z-index:600;border:1px solid var(--bd);opacity:0;transition:opacity .3s;pointer-events:none}
+        #toast.show{opacity:1}
+        #toast.err{border-color:rgba(248,81,73,.4);background:rgba(248,81,73,.12)}
+
+        /* ── 边界 & 标注设置面板 ── */
+        #boundaryMenu,#labelMenu,#baseLayerMenu{display:none;position:absolute;z-index:210;background:rgba(13,17,23,.97);border:1px solid var(--bd);border-radius:8px;padding:10px 0;min-width:200px;backdrop-filter:blur(12px);box-shadow:0 8px 24px rgba(0,0,0,.4)}
+        #boundaryMenu.open,#labelMenu.open,#baseLayerMenu.open{display:block}
+        #baseLayerMenu .bm-subtitle{padding:6px 14px 2px;font-size:10px;color:var(--t3);letter-spacing:1px}
+        .bm-title{padding:2px 14px 8px;font-size:12px;color:var(--accent2);font-weight:600;border-bottom:1px solid var(--bd);margin-bottom:4px}
+        .bm-opt{display:flex;align-items:center;gap:6px;padding:5px 14px;font-size:11px;color:var(--t3);cursor:pointer;transition:background .15s;user-select:none}
+        .bm-opt:hover{background:rgba(88,166,255,.06)}
+        .bm-opt input{accent-color:var(--accent);cursor:pointer}
+        .bm-opt.bm-sub{padding-left:28px;color:var(--t2);font-size:10px}
+        .bm-sep{height:1px;background:var(--bd);margin:4px 0}
+        .bm-sel-row{padding:2px 14px 2px 28px}
+        .bm-sel{width:100%;height:24px;background:var(--bg3);border:1px solid var(--bd);border-radius:4px;color:var(--t2);font-size:10px;font-family:inherit;outline:none;padding:0 4px}
+        .bm-sel:focus{border-color:var(--accent);color:var(--t1)}
+        .bm-range-row{padding:4px 14px;display:flex;align-items:center;gap:6px}
+        .bm-range-label{font-size:10px;color:var(--t2);white-space:nowrap;min-width:52px}
+        .bm-range{-webkit-appearance:none;flex:1;height:3px;background:var(--bg4);border-radius:2px;outline:none;cursor:pointer}
+        .bm-range::-webkit-slider-thumb{-webkit-appearance:none;width:10px;height:10px;background:var(--accent);border-radius:50%;cursor:pointer}
+        .bm-range-val{font-size:10px;color:var(--accent);min-width:24px;text-align:right}
+        .tb-range{-webkit-appearance:none;width:64px;height:4px;background:var(--bg4);border-radius:2px;outline:none;cursor:pointer;vertical-align:middle;margin:0}
+        .tb-range::-webkit-slider-thumb{-webkit-appearance:none;width:12px;height:12px;background:var(--accent);border-radius:50%;cursor:pointer}
+        .tb-range-wrap{display:flex;align-items:center;gap:4px;font-size:10px;color:var(--t2);white-space:nowrap}
+        #compass{position:fixed;top:calc(var(--hdr) + 54px);right:calc(var(--dash-w) + 10px);width:48px;height:48px;z-index:140;cursor:pointer;user-select:none}
+        #compassRing{width:100%;height:100%;border-radius:50%;border:2px solid rgba(255,255,255,.2);background:rgba(13,17,23,.75);backdrop-filter:blur(6px);position:relative;transition:transform .08s linear}
+        .compass-n{position:absolute;top:3px;left:50%;transform:translateX(-50%);color:#f85149;font-weight:700;font-size:13px;line-height:1;text-shadow:0 1px 3px rgba(0,0,0,.6)}
+        .compass-s{position:absolute;bottom:3px;left:50%;transform:translateX(-50%);color:rgba(255,255,255,.35);font-size:10px;line-height:1}
+        .compass-tick{position:absolute;top:50%;left:50%;width:1px;height:8px;background:rgba(255,255,255,.25);transform-origin:center -16px}
+        #compass:hover #compassRing{border-color:rgba(88,166,255,.5)}
+        .sp-tab{display:none}
+
+        /* (三维弹窗样式已合并到上方) */
+
+        /* ── AI 筛选结果浮动面板 ── */
+        #chatResults{display:none;position:absolute;top:calc(var(--hdr) + 50px);left:calc(var(--dash-w) + 6px);z-index:160;
+            width:280px;max-height:calc(100vh - var(--hdr) - 80px);
+            background:rgba(13,17,23,.96);border:1px solid var(--bd);border-radius:8px;
+            backdrop-filter:blur(12px);box-shadow:0 8px 32px rgba(0,0,0,.4);overflow:hidden;
+            animation:slideIn .2s ease-out}
+        #chatResults.open{display:flex;flex-direction:column}
+        .cr-hdr{padding:10px 14px;border-bottom:1px solid var(--bd);display:flex;align-items:center;justify-content:space-between;flex-shrink:0;background:rgba(13,17,23,.98)}
+        .cr-hdr span{font-size:13px;color:var(--accent);font-weight:600}
+        .cr-close{width:24px;height:24px;background:rgba(255,255,255,.08);border:none;border-radius:4px;color:var(--t2);font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center}
+        .cr-close:hover{background:rgba(255,255,255,.15);color:#fff}
+        #crList{overflow-y:auto;flex:1}
+        .cr-item{padding:8px 14px;border-bottom:1px solid rgba(255,255,255,.03);cursor:pointer;transition:background .15s}
+        .cr-item:hover{background:rgba(88,166,255,.08)}
+        .cr-item .cr-name{font-size:12px;color:var(--t1);margin-bottom:2px;display:flex;align-items:center;gap:5px}
+        .cr-item .cr-name .cr-3d{color:var(--gold);font-size:10px}
+        .cr-item .cr-meta{font-size:10px;color:var(--t2);display:flex;gap:6px}
+        .cr-item .cr-meta .cr-cat{color:var(--green)}.cr-item .cr-meta .cr-era{color:var(--accent2)}
+
+        /* ── 加载 ── */
+        #loading{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);z-index:300;text-align:center;color:var(--accent)}
+        .spinner{width:40px;height:40px;border:3px solid rgba(88,166,255,.2);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite;margin:0 auto 12px}
+        @keyframes spin{to{transform:rotate(360deg)}}
+        .cesium-viewer-bottom{display:none!important}
+
+        /* ── AI 对话 ── */
+        #chatBtn{position:fixed;bottom:24px;right:calc(var(--dash-w) + 16px);z-index:180;width:52px;height:52px;border-radius:50%;
+            background:linear-gradient(135deg,#58a6ff,#bc8cff);border:none;cursor:pointer;
+            box-shadow:0 4px 20px rgba(88,166,255,.4);display:flex;align-items:center;justify-content:center;
+            transition:all .2s;color:#fff}
+        #chatBtn:hover{transform:scale(1.08);box-shadow:0 6px 28px rgba(88,166,255,.5)}
+        #chatBtn.on{background:linear-gradient(135deg,#bc8cff,#58a6ff)}
+        #chatBtn svg{width:26px;height:26px;fill:#fff}
+        #chatPanel{position:fixed;bottom:86px;right:calc(var(--dash-w) + 16px);z-index:180;width:420px;height:540px;
+            background:rgba(13,17,23,.97);border:1px solid var(--bd);border-radius:12px;
+            backdrop-filter:blur(12px);box-shadow:0 12px 48px rgba(0,0,0,.5);
+            display:none;flex-direction:column;overflow:hidden}
+        #chatPanel.open{display:flex;animation:slideIn .2s ease-out}
+        .cp-hdr{padding:12px 16px;border-bottom:1px solid var(--bd);display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
+        .cp-hdr h3{font-size:14px;color:var(--accent);font-weight:600;display:flex;align-items:center;gap:6px}
+        .cp-model{height:26px;padding:0 6px;background:var(--bg3);border:1px solid var(--bd);border-radius:4px;color:var(--purple);font-size:11px;font-family:inherit;outline:none;cursor:pointer;max-width:150px}
+        .cp-model:focus{border-color:var(--accent);color:var(--t1)}
+        .cp-hdr button{background:none;border:none;color:var(--t2);font-size:12px;cursor:pointer;padding:4px 8px;border-radius:4px}
+        .cp-hdr button:hover{background:rgba(255,255,255,.08);color:var(--t1)}
+        #chatMessages{flex:1;overflow-y:auto;padding:12px 16px;display:flex;flex-direction:column;gap:10px}
+        .cm{display:flex}
+        .cm-user{justify-content:flex-end}
+        .cm-user .cm-bubble{background:rgba(88,166,255,.15);border:1px solid rgba(88,166,255,.25);color:var(--t1)}
+        .cm-ai{justify-content:flex-start}
+        .cm-ai .cm-bubble{background:var(--bg3);border:1px solid rgba(255,255,255,.06);color:var(--t3)}
+        .cm-bubble{max-width:85%;padding:8px 12px;border-radius:10px;font-size:13px;line-height:1.7;word-break:break-word}
+        .cm-bubble .cf{color:#58a6ff;cursor:pointer;text-decoration:underline;text-decoration-style:dashed;
+            text-underline-offset:3px;transition:all .15s;font-weight:600;white-space:nowrap}
+        .cm-bubble .cf:hover{color:#79c0ff;text-decoration-style:solid;background:rgba(88,166,255,.1);border-radius:3px;padding:0 2px;margin:0 -2px}
+        .cm-bubble .cf-log{color:var(--green)}
+        .cm-bubble .cf-log:hover{color:#56d364;background:rgba(63,185,80,.1)}
+        .cm-typing{color:var(--t2);font-style:italic}
+        .cm-cursor{display:inline-block;width:2px;height:14px;background:var(--accent);margin-left:2px;vertical-align:text-bottom;animation:blink 1s step-end infinite}
+        @keyframes blink{50%{opacity:0}}
+        .cp-input{padding:10px 14px;border-top:1px solid var(--bd);display:flex;gap:8px;flex-shrink:0;background:rgba(13,17,23,.98)}
+        #chatInput{flex:1;height:36px;background:var(--bg3);border:1px solid var(--bd);border-radius:6px;
+            padding:0 12px;color:var(--t1);font-size:13px;font-family:inherit;outline:none}
+        #chatInput:focus{border-color:var(--accent)}
+        #chatInput::placeholder{color:var(--t2)}
+        #chatSend{height:36px;padding:0 16px;background:var(--accent);border:none;border-radius:6px;
+            color:#fff;font-size:13px;font-family:inherit;cursor:pointer;font-weight:500;white-space:nowrap}
+        #chatSend:hover{background:var(--accent2)}
+        #chatSend:disabled{opacity:.5;cursor:not-allowed}
+
+        /* ── 设置面板（屏幕居中模态） ── */
+        #adminBtn{width:34px;height:34px;background:var(--bg3);border:1px solid var(--bd);border-radius:6px;color:var(--t2);cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .2s}
+        #adminBtn:hover{border-color:var(--bd-active);color:var(--t1)}
+        #adminBtn svg{width:18px;height:18px;fill:currentColor}
+        #settingsBtn{width:34px;height:34px;background:var(--bg3);border:1px solid var(--bd);border-radius:6px;color:var(--t2);cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .2s}
+        #settingsBtn:hover{border-color:var(--bd-active);color:var(--t1)}
+        #settingsBtn.on{background:rgba(88,166,255,.15);border-color:var(--accent);color:var(--accent)}
+        #settingsBtn svg{width:18px;height:18px;fill:currentColor}
+        #settingsMask{display:none;position:fixed;inset:0;z-index:249;background:rgba(0,0,0,.45);backdrop-filter:blur(3px)}
+        #settingsMask.open{display:block}
+
+        /* ── 地图下载面板（模态） ── */
+        #downloadMask{display:none;position:fixed;inset:0;z-index:249;background:rgba(0,0,0,.45);backdrop-filter:blur(3px)}
+        #downloadMask.open{display:block}
+        #downloadPanel{display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:250;
+            width:500px;max-height:88vh;overflow-y:auto;
+            background:rgba(13,17,23,.98);border:1px solid var(--bd);border-radius:12px;
+            backdrop-filter:blur(14px);box-shadow:0 20px 60px rgba(0,0,0,.6)}
+        #downloadPanel.open{display:block;animation:fadeScale .2s ease-out}
+        /* ── 下载面板专属样式：结构化小节 + 步骤徽标 ── */
+        .dl-step{padding:14px 18px;border-bottom:1px solid rgba(255,255,255,.04)}
+        .dl-step:last-child{border-bottom:none}
+        .dl-step-hdr{display:flex;align-items:center;gap:8px;margin-bottom:10px}
+        .dl-step-num{display:inline-flex;align-items:center;justify-content:center;
+            width:20px;height:20px;border-radius:50%;font-size:11px;font-weight:700;
+            background:rgba(88,166,255,.15);color:var(--accent);border:1px solid rgba(88,166,255,.4)}
+        .dl-step-title{font-size:12px;color:var(--t1);font-weight:600;letter-spacing:.5px}
+        .dl-step-hint{font-size:11px;color:var(--t3);margin-left:auto}
+        /* 范围选择：两个切换 tab */
+        .dl-mode-tabs{display:flex;gap:0;background:var(--bg3);border:1px solid var(--bd);border-radius:6px;padding:3px}
+        .dl-mode-tab{flex:1;height:28px;background:transparent;border:none;border-radius:4px;
+            color:var(--t3);font-size:12px;font-family:inherit;cursor:pointer;transition:all .15s}
+        .dl-mode-tab:hover{color:var(--t1)}
+        .dl-mode-tab.on{background:rgba(88,166,255,.18);color:var(--accent);font-weight:600;box-shadow:0 0 0 1px rgba(88,166,255,.35)}
+        .dl-mode-body{margin-top:10px}
+        /* 县域级联下拉 */
+        .dl-cascade{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+        .dl-cascade select{width:100%;height:32px;padding:0 8px;background:var(--bg3);
+            border:1px solid var(--bd);border-radius:5px;color:var(--t1);font-size:12px;font-family:inherit;cursor:pointer}
+        .dl-cascade select:focus{outline:none;border-color:var(--accent)}
+        .dl-cascade select:disabled{opacity:.4;cursor:not-allowed}
+        /* bbox 预览条 */
+        .dl-bbox-preview{font-size:11px;color:var(--t2);padding:8px 10px;margin-top:10px;
+            background:var(--bg3);border:1px dashed var(--bd);border-radius:5px;line-height:1.6;font-family:var(--mono,monospace)}
+        .dl-bbox-preview.empty{color:var(--t3);font-family:inherit;text-align:center;padding:12px}
+        .dl-bbox-preview b{color:var(--accent2);font-weight:600}
+        /* 缩放 / 类型 chips 再微调一下 */
+        #dlZoomChecks,#dlProviderChecks{display:flex;flex-wrap:wrap;gap:6px}
+        /* 估算 / 进度 数据卡 */
+        .dl-stat-card{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:4px}
+        .dl-stat-cell{padding:8px 10px;background:var(--bg3);border:1px solid var(--bd);border-radius:5px;text-align:center}
+        .dl-stat-cell .lbl{font-size:10px;color:var(--t3);margin-bottom:4px}
+        .dl-stat-cell .val{font-size:15px;font-weight:700;color:var(--t1)}
+        .dl-stat-cell.accent .val{color:var(--accent)}
+        .dl-stat-cell.green  .val{color:var(--green)}
+        .dl-stat-cell.yellow .val{color:var(--yellow)}
+        .dl-stat-cell.red    .val{color:var(--red)}
+        /* 主操作按钮区 */
+        .dl-actions{display:flex;gap:8px}
+        .dl-actions .fp-btn{flex:1;height:38px;font-size:13px;font-weight:600}
+        .dl-actions .fp-btn.primary{flex:2}
+        /* 缓存状态小节：折叠外观 */
+        .dl-cache-summary{display:grid;grid-template-columns:repeat(2,1fr);gap:6px;margin-bottom:8px}
+        .dl-cache-cell{padding:6px 8px;background:var(--bg3);border:1px solid var(--bd);border-radius:4px;
+            font-size:11px;display:flex;justify-content:space-between;align-items:center}
+        .dl-cache-cell .k{color:var(--t3)}
+        .dl-cache-cell .v{color:var(--accent);font-weight:600}
+        .dl-cache-actions{display:flex;gap:6px;flex-wrap:wrap}
+        .dl-cache-actions .fp-btn{flex:1;min-width:72px;height:28px;font-size:11px}
+        /* 画框时地图角标 */
+        #bboxDrawHint{display:none;position:fixed;top:calc(var(--hdr) + 48px);left:50%;transform:translateX(-50%);z-index:205;
+            background:rgba(88,166,255,.92);color:#fff;padding:6px 14px;border-radius:6px;font-size:12px;pointer-events:none;
+            box-shadow:0 4px 16px rgba(0,0,0,.4)}
+        #bboxDrawHint.show{display:block}
+        
+        #settingsPanel{display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:250;
+            width:420px;max-height:80vh;overflow-y:auto;
+            background:rgba(13,17,23,.98);border:1px solid var(--bd);border-radius:12px;
+            backdrop-filter:blur(14px);box-shadow:0 20px 60px rgba(0,0,0,.6)}
+        #settingsPanel.open{display:block;animation:fadeScale .2s ease-out}
+        @keyframes fadeScale{from{opacity:0;transform:translate(-50%,-50%) scale(.95)}to{opacity:1;transform:translate(-50%,-50%) scale(1)}}
+        .sp-hdr{padding:14px 20px;border-bottom:1px solid var(--bd);display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;background:rgba(13,17,23,.99);z-index:1;border-radius:12px 12px 0 0}
+        .sp-hdr h3{font-size:15px;color:var(--accent);font-weight:600}
+        .sp-hdr button{background:none;border:none;color:var(--t2);font-size:18px;cursor:pointer;padding:2px 6px;border-radius:4px}
+        .sp-hdr button:hover{color:var(--t1);background:rgba(255,255,255,.08)}
+        .sp-group{padding:14px 20px;border-bottom:1px solid rgba(255,255,255,.04)}
+        .sp-group-title{font-size:11px;color:var(--accent2);font-weight:600;text-transform:uppercase;letter-spacing:1px;margin-bottom:10px}
+        .sp-row{display:flex;align-items:center;justify-content:space-between;padding:5px 0;gap:8px}
+        .sp-row-label{font-size:12px;color:var(--t3);flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+        .sp-toggle{position:relative;width:36px;height:20px;flex-shrink:0}
+        .sp-toggle input{opacity:0;width:0;height:0;position:absolute}
+        .sp-toggle .slider{position:absolute;inset:0;background:var(--bg4);border-radius:10px;cursor:pointer;transition:background .2s}
+        .sp-toggle .slider::after{content:'';position:absolute;left:2px;top:2px;width:16px;height:16px;background:var(--t2);border-radius:50%;transition:all .2s}
+        .sp-toggle input:checked+.slider{background:var(--accent)}
+        .sp-toggle input:checked+.slider::after{left:18px;background:#fff}
+        .sp-chart-type{display:flex;gap:2px;flex-shrink:0}
+        .sp-ct{width:28px;height:22px;background:var(--bg4);border:1px solid transparent;border-radius:4px;color:var(--t2);font-size:10px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .15s;padding:0}
+        .sp-ct:hover{border-color:var(--bd-active);color:var(--t1)}
+        .sp-ct.on{background:rgba(88,166,255,.2);border-color:var(--accent);color:var(--accent)}
+        .sp-ct svg{width:14px;height:14px;fill:currentColor}
+        .sp-size-group{display:flex;gap:6px}
+        .sp-size{flex:1;height:32px;background:var(--bg3);border:1px solid var(--bd);border-radius:6px;color:var(--t2);font-size:12px;font-family:inherit;cursor:pointer;transition:all .15s}
+        .sp-size:hover{border-color:var(--bd-active);color:var(--t1)}
+        .sp-size.on{background:rgba(88,166,255,.15);border-color:var(--accent);color:var(--accent);font-weight:600}
+        .sp-theme-group{display:flex;gap:8px;flex-wrap:wrap}
+        .sp-theme{width:36px;height:36px;border-radius:50%;border:2px solid var(--bg4);cursor:pointer;transition:all .2s;position:relative}
+        .sp-theme:hover{border-color:rgba(255,255,255,.3);transform:scale(1.1)}
+        .sp-theme.on{border-color:#fff;box-shadow:0 0 12px rgba(255,255,255,.3)}
+        .sp-theme.on::after{content:'✓';position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#fff;font-size:14px;font-weight:700;text-shadow:0 1px 3px rgba(0,0,0,.8)}
+        .sp-footer{padding:12px 20px;text-align:center;border-top:1px solid var(--bd)}
+        .sp-footer p{font-size:10px;color:var(--t2);line-height:1.8;margin:0}
+
+        /* ── 缩放滑条 ── */
+        #mapZoomPanel{position:fixed;top:calc(var(--hdr) + 110px);right:calc(var(--dash-w) + 10px);z-index:140;display:flex;flex-direction:column;align-items:center;gap:4px;background:rgba(13,17,23,.85);border:1px solid var(--bd);border-radius:8px;padding:6px 4px;backdrop-filter:blur(8px)}
+        .mz-btn{width:28px;height:28px;background:var(--bg3);border:1px solid var(--bd);border-radius:5px;color:var(--t1);font-size:16px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .15s;font-family:inherit;line-height:1;padding:0}
+        .mz-btn:hover{border-color:var(--accent);color:var(--accent)}
+        .mz-track{width:6px;height:140px;background:var(--bg4);border-radius:3px;position:relative;cursor:pointer;touch-action:none}
+        .mz-fill{position:absolute;bottom:0;left:0;right:0;background:var(--accent);border-radius:3px;pointer-events:none}
+        .mz-thumb{position:absolute;left:50%;transform:translate(-50%,50%);width:14px;height:14px;background:var(--accent);border:2px solid #fff;border-radius:50%;cursor:grab;box-shadow:0 2px 6px rgba(0,0,0,.4);pointer-events:none}
+        .mz-label{font-size:9px;color:var(--t2);white-space:nowrap}
+
+        /* ── 使用说明按钮 ── */
+        #helpBtn{width:34px;height:34px;background:var(--bg3);border:1px solid var(--bd);border-radius:6px;color:var(--t2);cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .2s;font-size:16px;font-weight:700;font-family:inherit}
+        #helpBtn:hover{border-color:var(--bd-active);color:var(--t1)}
+        #logoutBtn{width:34px;height:34px;background:var(--bg3);border:1px solid var(--bd);border-radius:6px;color:var(--t2);cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .2s}
+        #logoutBtn:hover{border-color:rgba(248,81,73,.5);color:var(--red)}
+        #logoutBtn svg{width:18px;height:18px;fill:currentColor}
+
+        /* ── 使用说明弹窗 ── */
+        #helpMask{display:none;position:fixed;inset:0;z-index:249;background:rgba(0,0,0,.45);backdrop-filter:blur(3px)}
+        #helpMask.open{display:block}
+        #helpPanel{display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:250;width:440px;max-height:80vh;overflow-y:auto;background:rgba(13,17,23,.98);border:1px solid var(--bd);border-radius:12px;backdrop-filter:blur(14px);box-shadow:0 20px 60px rgba(0,0,0,.6)}
+        #helpPanel.open{display:block;animation:fadeScale .2s ease-out}
+        .hp-hdr{padding:14px 20px;border-bottom:1px solid var(--bd);display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;background:rgba(13,17,23,.99);z-index:1;border-radius:12px 12px 0 0}
+        .hp-hdr h3{font-size:15px;color:var(--accent);font-weight:600}
+        .hp-hdr button{background:none;border:none;color:var(--t2);font-size:18px;cursor:pointer;padding:2px 6px;border-radius:4px}
+        .hp-hdr button:hover{color:var(--t1);background:rgba(255,255,255,.08)}
+        .hp-body{padding:16px 20px}
+        .hp-sec{margin-bottom:16px}
+        .hp-sec h4{font-size:13px;color:var(--accent2);font-weight:600;margin-bottom:8px;padding-left:8px;border-left:3px solid var(--accent)}
+        .hp-sec ul{list-style:none;padding:0;margin:0}
+        .hp-sec li{font-size:12px;color:var(--t3);padding:4px 0 4px 12px;line-height:1.6}
+        .hp-sec li b{color:var(--t1);font-weight:500}
+
+        /* ── 比例尺 ── */
+        #scaleBar{position:absolute;bottom:10px;left:50%;transform:translateX(-50%);z-index:140;pointer-events:none;display:flex;align-items:center;gap:0}
+        #scaleBarLabel{font-size:11px;color:rgba(255,255,255,.9);text-shadow:0 1px 4px rgba(0,0,0,.9);white-space:nowrap;background:rgba(13,17,23,.6);padding:2px 10px;border-radius:4px;backdrop-filter:blur(4px);letter-spacing:.5px}
+
+        /* ═══════════════════════════════════════════════════════════
+           Mobile-only elements (hidden on desktop)
+           ═══════════════════════════════════════════════════════════ */
+        #mobileNav,#mobileStatsBar{display:none}
+
+        /* ── 普查路线面板 ── */
+        #routePanel{
+            position:fixed;right:-380px;top:var(--hdr);width:360px;bottom:0;z-index:150;
+            background:linear-gradient(180deg,rgba(13,17,23,.97),rgba(18,22,28,.97));
+            border-left:1px solid var(--bd);backdrop-filter:blur(16px);
+            transition:right .35s cubic-bezier(.4,0,.2,1);
+            display:flex;flex-direction:column;overflow:hidden;
+        }
+        #routePanel.open{right:0}
+        .rp-title{
+            display:flex;align-items:center;justify-content:space-between;
+            padding:14px 16px;font-size:15px;font-weight:600;color:var(--t1);
+            border-bottom:1px solid var(--bd);flex-shrink:0;
+        }
+        .rp-title button{
+            background:none;border:none;color:var(--t2);font-size:20px;cursor:pointer;
+            width:28px;height:28px;display:flex;align-items:center;justify-content:center;
+            border-radius:6px;transition:background .2s;
+        }
+        .rp-title button:hover{background:var(--bd)}
+        .rp-summary{
+            padding:8px 16px;font-size:12px;color:var(--accent);flex-shrink:0;
+        }
+        .rp-actions{
+            display:flex;gap:8px;padding:4px 16px 10px;flex-shrink:0;
+        }
+        .rp-btn{
+            padding:4px 12px;border-radius:6px;font-size:12px;cursor:pointer;
+            background:var(--bd);color:var(--t1);border:1px solid var(--bd);
+            transition:background .2s;
+        }
+        .rp-btn:hover{background:var(--bd-active)}
+        .rp-list{
+            flex:1;overflow-y:auto;padding:0 8px 12px;
+        }
+        .rp-list::-webkit-scrollbar{width:5px}
+        .rp-list::-webkit-scrollbar-thumb{background:var(--bd);border-radius:3px}
+        .route-date-row{
+            display:flex;align-items:center;gap:8px;padding:7px 10px;
+            border-radius:6px;cursor:pointer;transition:background .15s;font-size:13px;
+        }
+        .route-date-row:hover{background:var(--bd)}
+        .route-date-row input[type="checkbox"]{
+            accent-color:var(--accent);cursor:pointer;margin:0;flex-shrink:0;
+        }
+        .route-color-dot{
+            width:10px;height:10px;border-radius:50%;flex-shrink:0;
+        }
+        .route-date-text{color:var(--t1);flex:1;white-space:nowrap}
+        .route-date-count{color:var(--t2);font-size:11px;flex-shrink:0}
+        .route-fly-btn{
+            background:none;border:none;color:var(--t2);cursor:pointer;
+            font-size:14px;padding:2px 4px;border-radius:4px;transition:color .2s;flex-shrink:0;
+        }
+        .route-fly-btn:hover{color:var(--accent)}
+
+        /* ── 村村达 ── */
+        #btnVillageCoverage{transition:background .2s,color .2s}
+        #btnVillageCoverage.active{background:var(--accent);color:#000;border-color:var(--accent);font-weight:600}
+        .cv-stats{padding:8px 16px;border-bottom:1px solid var(--bd);flex-shrink:0}
+        .cv-stat-row{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--t1)}
+        .cv-reached{font-weight:700;color:#3fb950;font-size:16px}
+        .cv-pct{margin-left:auto;font-weight:700;color:var(--accent);font-size:14px}
+        .cv-bar{height:6px;background:rgba(248,81,73,0.3);border-radius:3px;margin-top:6px;overflow:hidden}
+        .cv-bar-fill{height:100%;background:linear-gradient(90deg,#3fb950,#58a6ff);border-radius:3px;transition:width .6s}
+        .cv-unreached{max-height:200px;overflow-y:auto;border-bottom:1px solid var(--bd);flex-shrink:0}
+        .cv-unreached::-webkit-scrollbar{width:4px}
+        .cv-unreached::-webkit-scrollbar-thumb{background:var(--bd);border-radius:2px}
+        .cv-list-title{padding:6px 16px;font-size:11px;color:var(--t2);font-weight:600;position:sticky;top:0;background:rgba(13,17,23,.97)}
+        .cv-village-row{
+            display:flex;align-items:center;gap:8px;padding:5px 16px;cursor:pointer;
+            transition:background .15s;font-size:12px;
+        }
+        .cv-village-row:hover{background:var(--bd)}
+        .cv-village-name{color:var(--t1);flex:1}
+        .cv-village-town{color:var(--t2);font-size:11px;flex-shrink:0}
+
+        /* ── 日志按钮 & 村庄提示 ── */
+        .route-log-btn{
+            background:none;border:none;cursor:pointer;font-size:14px;
+            padding:2px 4px;border-radius:4px;transition:all .2s;flex-shrink:0;
+            opacity:.7;
+        }
+        .route-log-btn:hover{opacity:1;transform:scale(1.15)}
+        .route-village-tip{
+            padding:2px 10px 4px 36px;font-size:10px;color:var(--t2);
+            white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+            opacity:.8;
+        }
+
+        /* ── 工作日志查看面板 ── */
+        .worklog-panel{
+            position:fixed;top:0;right:-52vw;width:50vw;height:100vh;z-index:300;
+            background:linear-gradient(180deg,rgba(13,17,23,.99),rgba(18,22,28,.99));
+            border-left:1px solid var(--bd);backdrop-filter:blur(16px);
+            transition:right .35s cubic-bezier(.4,0,.2,1);
+            display:flex;flex-direction:column;overflow:hidden;
+            box-shadow:-8px 0 40px rgba(0,0,0,.5);
+        }
+        .worklog-panel.open{right:0}
+        .wl-header{
+            display:flex;align-items:center;justify-content:space-between;
+            padding:12px 18px;border-bottom:1px solid var(--bd);flex-shrink:0;
+            background:linear-gradient(135deg,rgba(88,166,255,.08),transparent);
+        }
+        .wl-title-group{display:flex;align-items:center;gap:12px}
+        .wl-title{font-size:15px;color:var(--accent);font-weight:600;margin:0}
+        .wl-date{font-size:13px;color:var(--t2);background:var(--bg3);padding:3px 10px;border-radius:4px}
+        .wl-nav{display:flex;align-items:center;gap:4px}
+        .wl-nav-btn{
+            width:28px;height:28px;background:var(--bg3);border:1px solid var(--bd);
+            border-radius:5px;color:var(--t2);cursor:pointer;font-size:12px;
+            display:flex;align-items:center;justify-content:center;transition:all .2s;
+        }
+        .wl-nav-btn:hover{border-color:var(--accent);color:var(--accent)}
+        .wl-close-btn{
+            width:28px;height:28px;background:rgba(248,81,73,.1);border:1px solid rgba(248,81,73,.3);
+            border-radius:5px;color:var(--red);cursor:pointer;font-size:14px;
+            display:flex;align-items:center;justify-content:center;transition:all .2s;
+            margin-left:4px;
+        }
+        .wl-close-btn:hover{background:rgba(248,81,73,.2);border-color:var(--red)}
+        .wl-ledger{
+            padding:8px 18px;border-bottom:1px solid var(--bd);flex-shrink:0;
+        }
+        .wl-row{
+            display:flex;padding:2px 0;font-size:12px;
+        }
+        .wl-label{width:60px;color:var(--t2);flex-shrink:0}
+        .wl-val{color:var(--t1);flex:1;word-break:break-all}
+        .wl-villages{color:var(--green);font-weight:500}
+        .wl-stat-review{color:var(--accent)}
+        .wl-stat-new{color:var(--green)}
+        .wl-relic-inline{display:flex;flex-wrap:wrap;align-items:center;gap:5px;padding:3px 0}
+        .wl-relic-tag{font-size:11px;font-weight:600;flex-shrink:0}
+        .wl-relic-tag b{font-size:13px;margin-left:2px}
+        .wl-relic-link{padding:1px 7px;border-radius:3px;font-size:11px;cursor:pointer;
+            background:rgba(255,255,255,.06);color:var(--t3);border:1px solid var(--bg4);transition:all .15s}
+        .wl-relic-link:hover{background:var(--accent);color:#fff;border-color:var(--accent)}
+        .wl-relic-nolink{padding:1px 7px;border-radius:3px;font-size:11px;color:var(--t2);opacity:.5}
+        .wl-no-ledger,.wl-no-pdf{padding:20px;text-align:center;font-size:12px;color:var(--t2)}
+
+        /* PDF 自定义查看器 */
+        .wl-pdf-toolbar{
+            display:flex;align-items:center;justify-content:center;gap:16px;
+            padding:8px 18px;border-bottom:1px solid var(--bd);flex-shrink:0;
+            background:rgba(22,27,34,.95);
+        }
+        .wl-page-btn{
+            padding:5px 14px;background:var(--bg3);border:1px solid var(--bd);
+            border-radius:5px;color:var(--t2);font-size:12px;cursor:pointer;
+            font-family:inherit;transition:all .2s;
+        }
+        .wl-page-btn:hover:not(:disabled){border-color:var(--accent);color:var(--accent)}
+        .wl-page-btn:disabled{opacity:.35;cursor:not-allowed}
+        .wl-page-info{
+            font-size:13px;color:var(--t1);font-weight:600;min-width:50px;text-align:center;
+        }
+        .wl-pdf-viewport{
+            flex:1;overflow-y:auto;display:flex;justify-content:center;
+            padding:8px;background:rgba(30,30,30,.6);
+        }
+        .wl-pdf-viewport canvas{
+            display:block;max-width:100%;
+            box-shadow:0 2px 16px rgba(0,0,0,.4);border-radius:4px;
+        }
+
+        @media(max-width:768px){
+            .worklog-panel{width:100vw;right:-100vw}
+            .worklog-panel.open{right:0}
+        }
+
+        /* ── 路线点位弹窗 ── */
+        .route-popup{
+            position:fixed;right:20px;bottom:20px;width:320px;z-index:200;
+            background:linear-gradient(135deg,rgba(13,17,23,.97),rgba(22,27,34,.97));
+            border:1px solid var(--bd);border-radius:12px;
+            box-shadow:0 8px 32px rgba(0,0,0,.5);backdrop-filter:blur(12px);
+            opacity:0;transform:translateY(20px);pointer-events:none;
+            transition:opacity .25s,transform .25s;overflow:hidden;
+        }
+        .route-popup.show{opacity:1;transform:translateY(0);pointer-events:auto}
+        .rp-close{
+            position:absolute;top:8px;right:8px;width:24px;height:24px;
+            display:flex;align-items:center;justify-content:center;
+            background:rgba(0,0,0,.4);border-radius:50%;color:#fff;cursor:pointer;
+            font-size:14px;z-index:1;
+        }
+        .rp-img-wrap{max-height:200px;overflow:hidden;background:#000}
+        .rp-img-wrap img{width:100%;display:block;object-fit:cover}
+        .rp-info{padding:12px 14px}
+        .rp-row{display:flex;align-items:center;gap:8px;padding:3px 0;font-size:12.5px;color:var(--t1)}
+        .rp-label{color:var(--t2);min-width:36px;flex-shrink:0}
+        .rp-filename{color:var(--t2);font-size:11px;margin-top:4px;word-break:break-all}
+
+        /* ═══════════════════════════════════════════════════════════
+           Mobile Responsive (@media max-width: 768px)
+           ═══════════════════════════════════════════════════════════ */
+        @media(max-width:768px){
+            :root{--hdr:44px;--side-w:100vw;--info-w:100vw}
+
+            /* ── Header ── */
+            #header{padding:0 10px}
+            #header h1{font-size:13px;letter-spacing:1px}
+            #header img{height:24px!important;margin-right:6px!important}
+            .hdr-right{gap:4px}
+            #adminBtn,#helpBtn,#logoutBtn,#settingsBtn{width:30px;height:30px}
+
+            /* ── Toolbar: compact scrollable ── */
+            #toolbar{height:36px;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none;gap:4px;padding:0 8px}
+            #toolbar::-webkit-scrollbar{display:none}
+            .tb-sep{display:none}
+            .tb{padding:0 8px;font-size:11px;height:28px}
+            .tb-select{height:28px;font-size:11px}
+            .tb-range-wrap{display:none}
+            #statusSummary{display:none}
+            .tb-info{display:none}
+
+            /* ── Map ── */
+            #cesiumContainer{top:calc(var(--hdr) + 36px);bottom:56px}
+
+            /* ── Filter panel: full overlay ── */
+            #filterPanel{width:100%;z-index:220;top:calc(var(--hdr) + 36px);bottom:56px}
+
+            /* ── Dashboards: hidden on mobile ── */
+            .dash{display:none!important}
+            body.m-stats-l #dashL,body.m-stats-r #dashR{
+                display:block!important;position:fixed!important;
+                top:calc(var(--hdr) + 36px + 40px)!important;left:0!important;right:0!important;bottom:56px!important;
+                width:100%!important;z-index:220!important;
+                border:none!important;border-radius:0!important;
+                background:rgba(13,17,23,.98)!important
+            }
+            body.m-stats-l #dashL .dash-hdr,body.m-stats-r #dashR .dash-hdr{display:none!important}
+            .dash-chart{height:220px!important}
+            .dash-chart.tall{height:280px!important}
+
+            /* ── Mobile Stats Tab Bar ── */
+            #mobileStatsBar{
+                position:fixed;top:calc(var(--hdr) + 36px);left:0;right:0;height:40px;z-index:221;
+                background:rgba(22,27,34,.98);border-bottom:1px solid var(--bd);
+                align-items:center;justify-content:center;backdrop-filter:blur(8px)
+            }
+            body.m-stats-l #mobileStatsBar,body.m-stats-r #mobileStatsBar{display:flex}
+            .mst-tab{
+                flex:1;height:100%;background:none;border:none;border-bottom:2px solid transparent;
+                color:var(--t2);font-size:13px;font-family:inherit;cursor:pointer;transition:all .2s
+            }
+            .mst-tab.active{color:var(--accent);border-bottom-color:var(--accent)}
+
+            /* ── Info panel: full overlay ── */
+            #infoPanel{
+                position:fixed!important;top:var(--hdr)!important;left:0!important;right:0!important;
+                bottom:56px!important;width:100%!important;max-height:none!important;
+                border-radius:0!important;z-index:230!important;animation:none!important
+            }
+            #infoPanel.shifted{right:0!important}
+
+            /* ── Chat: full overlay ── */
+            #chatBtn{display:none!important}
+            #chatPanel{
+                position:fixed!important;top:var(--hdr)!important;left:0!important;right:0!important;
+                bottom:56px!important;width:100%!important;height:auto!important;
+                border-radius:0!important;z-index:220!important
+            }
+
+            /* ── Legend ── */
+            #legend{left:10px!important;bottom:66px;max-width:calc(100vw - 20px);font-size:10px}
+
+            /* ── Map controls ── */
+            #compass{right:10px!important;top:calc(var(--hdr) + 44px)!important;width:40px;height:40px}
+            .compass-n{font-size:11px}
+            #mapZoomPanel{right:10px!important;top:calc(var(--hdr) + 92px)!important}
+            .mz-track{height:100px}
+
+            /* ── Settings / Help ── */
+            #settingsPanel{width:calc(100vw - 24px)!important;max-height:70vh}
+            #helpPanel{width:calc(100vw - 24px)!important}
+            .sp-chart-type{flex-wrap:wrap}
+            .sp-row{flex-wrap:wrap}
+
+            /* ── Misc repositioning ── */
+            #scaleBar{bottom:64px}
+            #toast{bottom:70px}
+            #chatResults{left:10px!important;top:calc(var(--hdr) + 46px)!important;width:calc(100vw - 20px)!important}
+            .lb-nav{width:36px;height:36px;font-size:18px}
+            .lb-prev{left:8px}.lb-next{right:8px}
+            .pg{grid-template-columns:repeat(2,1fr)}
+
+            /* ── Loading ── */
+            #loading{top:45%;font-size:13px}
+
+            /* ── Mobile Bottom Nav ── */
+            #mobileNav{
+                display:flex!important;position:fixed;bottom:0;left:0;right:0;height:56px;z-index:300;
+                background:rgba(13,17,23,.98);border-top:1px solid var(--bd);
+                backdrop-filter:blur(12px);padding:0;
+                -webkit-user-select:none;user-select:none
+            }
+            .mn-btn{
+                flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;
+                background:none;border:none;color:var(--t2);font-size:10px;font-family:inherit;
+                cursor:pointer;transition:color .2s;padding:4px 0;position:relative;
+                -webkit-tap-highlight-color:transparent
+            }
+            .mn-btn svg{width:22px;height:22px;fill:currentColor;flex-shrink:0}
+            .mn-btn.active{color:var(--accent)}
+            .mn-btn .mn-badge{
+                position:absolute;top:4px;right:calc(50% - 18px);min-width:16px;height:16px;
+                background:var(--accent);color:#fff;font-size:9px;font-weight:700;
+                border-radius:8px;display:flex;align-items:center;justify-content:center;padding:0 4px
+            }
+        }
+    </style>
+</head>
+<body>
+
+<!-- 顶部 -->
+<div id="header">
+    <img src="/static/中国遗产保护logo.png" alt="logo" style="height:32px;margin-right:10px;vertical-align:middle;object-fit:contain" onerror="this.style.display='none'">
+    <h1>{{ full_name }}</h1>
+    <div class="hdr-right">
+        <button id="helpBtn" onclick="toggleHelp()" title="使用说明">?</button>
+        <button id="adminBtn" onclick="window.open('/admin-ui/','_blank')" title="打开管理后台">
+            <svg viewBox="0 0 24 24"><path d="M3 13h2v-2H3v2zm0 4h2v-2H3v2zm0-8h2V7H3v2zm4 4h14v-2H7v2zm0 4h14v-2H7v2zM7 7v2h14V7H7z"/></svg>
+        </button>
+        <button id="settingsBtn" onclick="toggleSettings()" title="设置">
+            <svg viewBox="0 0 24 24"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 00.12-.61l-1.92-3.32a.488.488 0 00-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.484.484 0 00-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.07.62-.07.94s.02.64.07.94l-2.03 1.58a.49.49 0 00-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6A3.6 3.6 0 1115.6 12 3.611 3.611 0 0112 15.6z"/></svg>
+        </button>
+        <button id="logoutBtn" onclick="doLogout()" title="退出登录">
+            <svg viewBox="0 0 24 24"><path d="M17 7l-1.41 1.41L18.17 11H8v2h10.17l-2.58 2.58L17 17l5-5zM4 5h8V3H4c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h8v-2H4V5z"/></svg>
+        </button>
+    </div>
+</div>
+
+<!-- 工具栏:四组按钮(数据查询 / 影像类 / 图层叠加 / 窗口级操作),同类用外框捆绑 -->
+<div id="toolbar">
+    <!-- 组 1: 数据查询 -->
+    <div class="tb-group boxed" title="数据查询">
+        <button class="tb" id="btnFilter" onclick="togglePanel('filter')">
+            <svg viewBox="0 0 24 24"><path d="M10 18h4v-2h-4v2zM3 6v2h18V6H3zm3 7h12v-2H6v2z"/></svg>筛选
+        </button>
+        <button class="tb" id="btnRoute" onclick="toggleRoutePanel()">
+            <svg viewBox="0 0 24 24"><path d="M21 3L3 10.53v.98l6.84 2.65L12.48 21h.98L21 3z"/></svg>路线
+        </button>
+    </div>
+
+    <!-- 组 2: 影像类(底图 + 下载瓦片,透明度收入底图菜单) -->
+    <div class="tb-group boxed" title="影像 / 瓦片">
+        <button class="tb" id="btnBaseLayer" onclick="toggleBaseLayerMenu()" title="底图类型 / 透明度">
+            <svg viewBox="0 0 24 24"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg><span id="btnBaseLayerText">离线影像</span> ▾
+        </button>
+        <button class="tb" id="btnDownload" onclick="toggleDownloadPanel()" title="框选区域下载离线瓦片">
+            <svg viewBox="0 0 24 24"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>下载地图
+        </button>
+    </div>
+
+    <!-- 组 3: 图层叠加(边界 + 标注 + 地形) -->
+    <div class="tb-group boxed" title="图层叠加">
+        <button class="tb" id="btnBoundary" onclick="toggleBoundaryMenu()">
+            <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/></svg>边界 ▾
+        </button>
+        <button class="tb" id="btnLabel" onclick="toggleLabelMenu()">
+            <svg viewBox="0 0 24 24"><path d="M5 4v3h5.5v12h3V7H19V4H5z"/></svg>标注 ▾
+        </button>
+        <label class="tb" style="cursor:pointer;gap:4px;user-select:none" title="勾选进入 3D 斜视并显示地形"><input type="checkbox" id="terrainToggle" onchange="toggleTerrain()" style="accent-color:var(--accent);cursor:pointer;margin:0">
+            <svg viewBox="0 0 24 24" style="width:14px;height:14px;fill:currentColor;flex-shrink:0"><path d="M14 6l-3.75 5 2.85 3.8-1.6 1.2C9.81 13.75 7 10 7 10l-6 8h22L14 6z"/></svg>地形</label>
+    </div>
+
+    <div class="tb-info">显示 <b id="tbCount">-</b> 处</div>
+
+    <!-- 用绝对定位把"当前位置"真正钉在工具栏正中心,
+         两侧 flex 怎么增减都不会让它左右漂移 -->
+    <div id="statusSummary">当前位置：全部文物</div>
+
+    <div style="flex:1"></div>
+
+    <!-- 组 4: 窗口级操作(全屏 / 重置) -->
+    <div class="tb-group boxed" title="窗口与重置">
+        <button class="tb" onclick="toggleFullscreen()">
+            <svg viewBox="0 0 24 24"><path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"/></svg>全屏
+        </button>
+        <button class="tb" id="btnReset" onclick="resetAll()" title="重置所有筛选和视图">
+            <svg viewBox="0 0 24 24"><path d="M17.65 6.35A7.958 7.958 0 0012 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0112 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>重置
+        </button>
+    </div>
+</div>
+
+<!-- 底图菜单:离线 / 在线 / 透明度三合一 -->
+<div id="baseLayerMenu">
+    <div class="bm-title">底图影像</div>
+    <div class="bm-subtitle">离线（走本地瓦片缓存）</div>
+    <label class="bm-opt"><input type="radio" name="baseLayerRadio" value="arcgis_sat" checked onchange="pickBaseLayer(this.value,'离线影像')"> 离线影像</label>
+    <label class="bm-opt"><input type="radio" name="baseLayerRadio" value="osm" onchange="pickBaseLayer(this.value,'离线矢量')"> 离线矢量</label>
+    <div class="bm-subtitle">在线（需网络）</div>
+    <label class="bm-opt"><input type="radio" name="baseLayerRadio" value="gaode_sat" onchange="pickBaseLayer(this.value,'在线影像（高德）')"> 在线影像（高德）</label>
+    <label class="bm-opt"><input type="radio" name="baseLayerRadio" value="gaode_vec" onchange="pickBaseLayer(this.value,'在线矢量（高德）')"> 在线矢量（高德）</label>
+    <div class="bm-sep"></div>
+    <label class="bm-opt"><input type="radio" name="baseLayerRadio" value="none" onchange="pickBaseLayer(this.value,'无底图')"> 无底图</label>
+    <div class="bm-sep"></div>
+    <div class="bm-range-row"><span class="bm-range-label">透明度</span><input type="range" class="bm-range" id="baseAlpha" min="0" max="100" value="90" oninput="setBaseMapAlpha(this.value)"><span class="bm-range-val" id="baseAlphaVal">90%</span></div>
+</div>
+
+<!-- 边界图层下拉菜单 -->
+<div id="boundaryMenu">
+    <div class="bm-title">边界图层</div>
+    <label class="bm-opt"><input type="checkbox" id="bndCounty" checked onchange="updateBoundaryLayers()"> 县界</label>
+    <label class="bm-opt"><input type="checkbox" id="bndTownship" checked onchange="updateBoundaryLayers()"> 镇街界</label>
+    <label class="bm-opt"><input type="checkbox" id="bndVillage" onchange="updateBoundaryLayers()"> 村界</label>
+    <label class="bm-opt"><input type="checkbox" id="bndVillageName" onchange="updateBoundaryLayers()"> 村名</label>
+</div>
+
+<!-- 标注设置下拉菜单 -->
+<div id="labelMenu">
+    <div class="bm-title">标注设置</div>
+    <label class="bm-opt"><input type="checkbox" id="hideRelicToggle" onchange="toggleHideRelicPoints()"> 隐藏文物点</label>
+    <div class="bm-sep"></div>
+    <label class="bm-opt"><input type="checkbox" id="nonSymbolToggle" onchange="toggleNonSymbolize()"> 非符号化标注</label>
+    <div class="bm-sep"></div>
+    <label class="bm-opt"><input type="checkbox" id="textLabelToggle" checked onchange="toggleTextLabels()"> 显示文字标注</label>
+    <div class="bm-sep"></div>
+    <div class="bm-range-row"><span class="bm-range-label">标注尺寸</span><input type="range" class="bm-range" id="labelSize" min="8" max="28" step="1" value="14" oninput="setLabelSize(this.value)"><span class="bm-range-val" id="labelSizeVal">14px</span></div>
+    <div class="bm-sep"></div>
+    <div style="padding:5px 14px">
+        <div style="font-size:10px;color:var(--t2);margin-bottom:4px">标注字体</div>
+        <select class="bm-sel" id="labelFontSel" onchange="setLabelFont(this.value)" style="width:100%;height:28px">
+            <option value='"Microsoft YaHei", sans-serif'>微软雅黑</option>
+            <option value='"SimSun", serif'>宋体</option>
+            <option value='"SimHei", sans-serif'>黑体</option>
+            <option value='"KaiTi", serif'>楷体</option>
+            <option value='"FangSong", serif'>仿宋</option>
+        </select>
+    </div>
+</div>
+
+<!-- 地图下载面板 -->
+<div id="downloadMask" onclick="toggleDownloadPanel()"></div>
+<div id="downloadPanel">
+    <div class="sp-hdr">
+        <h3>离线瓦片下载</h3>
+        <button onclick="toggleDownloadPanel()" title="关闭">&times;</button>
+    </div>
+
+    <!-- 步骤 1: 下载范围 -->
+    <div class="dl-step">
+        <div class="dl-step-hdr">
+            <span class="dl-step-num">1</span>
+            <span class="dl-step-title">选择下载范围</span>
+        </div>
+        <div class="dl-mode-tabs" id="dlModeTabs">
+            <button class="dl-mode-tab on"  data-mode="bbox"   onclick="dlSetMode('bbox')">在地图框选</button>
+            <button class="dl-mode-tab"     data-mode="county" onclick="dlSetMode('county')">按县域选择</button>
+        </div>
+
+        <!-- 模式 1: 框选 -->
+        <div class="dl-mode-body" id="dlModeBbox">
+            <button class="fp-btn primary" style="width:100%;height:32px" onclick="dlStartPickBbox()">
+                在地图上框选（按住左键拖拽）
+            </button>
+        </div>
+
+        <!-- 模式 2: 山东省市/县级联 -->
+        <div class="dl-mode-body" id="dlModeCounty" style="display:none">
+            <div class="dl-cascade">
+                <select id="dlCityPick" onchange="dlOnCityChange()"><option value="">选择地级市…</option></select>
+                <select id="dlCountyPick" onchange="dlOnCountyChange()" disabled><option value="">请先选市…</option></select>
+            </div>
+            <div style="font-size:11px;color:var(--t3);margin-top:6px">
+                当前仅支持山东省；也可以只选市一级。
+            </div>
+        </div>
+
+        <!-- 已选范围预览 -->
+        <div id="dlBboxLine" class="dl-bbox-preview empty">尚未选择范围</div>
+    </div>
+
+    <!-- 步骤 2: 瓦片类型 -->
+    <div class="dl-step">
+        <div class="dl-step-hdr">
+            <span class="dl-step-num">2</span>
+            <span class="dl-step-title">瓦片类型</span>
+            <span class="dl-step-hint">离线优先选 ArcGIS + OSM</span>
+        </div>
+        <div id="dlProviderChecks">
+            <label class="fp-chk active" data-p="arcgis_sat"><input type="checkbox" checked value="arcgis_sat">卫星影像 · ArcGIS</label>
+            <label class="fp-chk active" data-p="osm"><input type="checkbox" checked value="osm">矢量路网 · OSM</label>
+            <label class="fp-chk" data-p="gaode_sat"><input type="checkbox" value="gaode_sat">卫星影像 · 高德</label>
+            <label class="fp-chk" data-p="gaode_vec"><input type="checkbox" value="gaode_vec">矢量路网 · 高德</label>
+        </div>
+    </div>
+
+    <div class="dl-step">
+        <div class="dl-step-hdr">
+            <span class="dl-step-num">3</span>
+            <span class="dl-step-title">缩放层级</span>
+            <span class="dl-step-hint">每提升 1 级 ≈ ×4 瓦片</span>
+        </div>
+        <div id="dlZoomChecks">
+            <label class="fp-chk active" data-z="12"><input type="checkbox" checked value="12">Z12</label>
+            <label class="fp-chk active" data-z="13"><input type="checkbox" checked value="13">Z13</label>
+            <label class="fp-chk active" data-z="14"><input type="checkbox" checked value="14">Z14</label>
+            <label class="fp-chk active" data-z="15"><input type="checkbox" checked value="15">Z15</label>
+            <label class="fp-chk" data-z="16"><input type="checkbox" value="16">Z16</label>
+            <label class="fp-chk" data-z="17"><input type="checkbox" value="17">Z17</label>
+        </div>
+    </div>
+
+    <!-- 步骤 4: 预估 + 下载 -->
+    <div class="dl-step">
+        <div class="dl-step-hdr">
+            <span class="dl-step-num">4</span>
+            <span class="dl-step-title">预估与下载</span>
+        </div>
+        <div id="dlEstimate" style="display:none;margin-bottom:10px">
+            <div class="dl-stat-card" id="dlEstimateBody"></div>
+        </div>
+        <div id="dlProgress" style="margin-bottom:10px;display:none"></div>
+        <div class="dl-actions">
+            <button class="fp-btn secondary" onclick="dlEstimate()">预估</button>
+            <button class="fp-btn primary" id="dlStartBtn" onclick="dlStartDownload()">开始下载</button>
+        </div>
+    </div>
+
+    <!-- 本地缓存状态 -->
+    <div class="dl-step">
+        <div class="dl-step-hdr">
+            <span class="dl-step-num" style="background:rgba(63,185,80,.15);color:var(--green);border-color:rgba(63,185,80,.35)">✓</span>
+            <span class="dl-step-title">本地缓存</span>
+            <span class="dl-step-hint" id="dlCacheInfoHint">—</span>
+        </div>
+        <div id="dlCacheInfo" class="dl-cache-summary">
+            <div style="grid-column:1/-1;color:var(--t3);font-size:11px;text-align:center;padding:6px">
+                点击"刷新"查看离线瓦片体量
+            </div>
+        </div>
+        <div id="dlCachePathLine" style="font-size:10px;color:var(--t2);margin:6px 0 8px;word-break:break-all;font-family:var(--mono,monospace)"></div>
+        <div class="dl-cache-actions">
+            <button class="fp-btn secondary" onclick="dlRefreshCacheInfo()">刷新</button>
+            <button class="fp-btn secondary" onclick="dlOpenCacheFolder()" title="在系统文件管理器里打开瓦片缓存目录">打开文件夹</button>
+            <button class="fp-btn secondary" style="color:var(--red);border-color:rgba(248,81,73,.4)" onclick="dlClearCache()" title="删除所有已缓存的离线瓦片">清空缓存</button>
+        </div>
+    </div>
+</div>
+    <div class="rp-title">普查路线查看<button onclick="toggleRoutePanel()">&times;</button></div>
+    <div class="rp-summary" id="routeSummary">加载中...</div>
+    <div class="rp-actions">
+        <button class="rp-btn" onclick="routeSelectAll()">全选</button>
+        <button class="rp-btn" onclick="routeDeselectAll()">取消全选</button>
+        <button class="rp-btn" id="btnVillageCoverage" onclick="toggleVillageCoverage()">村村达</button>
+    </div>
+    <div id="coverageStats" class="cv-stats" style="display:none"></div>
+    <div id="unreachedList" class="cv-unreached" style="display:none"></div>
+    <div class="rp-list" id="routeDateList"></div>
+</div>
+
+<!-- Cesium -->
+<div id="cesiumContainer"></div>
+
+<!-- 加载 -->
+<div id="loading"><div class="spinner"></div><div>正在加载文物数据...</div></div>
+
+<!-- 左侧筛选面板 -->
+<div id="filterPanel">
+    <div class="fp-title">筛选条件<button onclick="togglePanel('filter')">&times;</button></div>
+    <div class="fp-section">
+        <div class="fp-label">关键词搜索</div>
+        <input class="fp-search" type="text" id="searchInput" placeholder="文物名称 / 编号 / 地址..." oninput="onFilterChange()">
+    </div>
+    <div class="fp-section">
+        <div class="fp-label">文物类别</div>
+        <div class="fp-checks" id="catChecks"></div>
+    </div>
+    <div class="fp-section">
+        <div class="fp-label">乡镇</div>
+        <select class="fp-select" id="filterTown" onchange="onFilterChange()"><option value="">全部乡镇</option></select>
+    </div>
+    <div class="fp-section">
+        <div class="fp-label">保护级别</div>
+        <select class="fp-select" id="filterLevel" onchange="onFilterChange()"><option value="">全部级别</option></select>
+    </div>
+    <div class="fp-section">
+        <div class="fp-label">保存现状</div>
+        <select class="fp-select" id="filterCond" onchange="onFilterChange()"><option value="">全部现状</option></select>
+    </div>
+    <div class="fp-section">
+        <div class="fp-label">三维模型</div>
+        <select class="fp-select" id="filter3D" onchange="onFilterChange()">
+            <option value="">不限</option><option value="1">有三维模型</option><option value="0">无三维模型</option>
+        </select>
+    </div>
+    <div class="fp-actions">
+        <button class="fp-btn primary" onclick="onFilterChange()">应用筛选</button>
+        <button class="fp-btn secondary" onclick="resetFilters()">重置</button>
+    </div>
+    <div class="fp-stat" id="filterStat"></div>
+    <div id="resultList"></div>
+</div>
+
+<!-- 左侧仪表盘 -->
+<div class="dash dock-l" id="dashL">
+    <div class="dash-hdr"><span>数据统计</span><div class="dh-acts"><button onclick="toggleDashSide('dashL')" title="切换停靠侧">⇄</button><button onclick="toggleDashVis('dashL')" title="收起">−</button></div></div>
+    <div class="dash-cards">
+        <div class="dc"><div class="n" id="stTotal">-</div><div class="l">文物总量</div></div>
+        <div class="dc y"><div class="n" id="st3d">-</div><div class="l">三维模型</div></div>
+    </div>
+    <div class="dash-sec"><h4 onclick="setColorBy('category_main')">文物类别</h4><div id="chCat" class="dash-chart"></div></div>
+    <div class="dash-sec"><h4 onclick="setColorBy('heritage_level')">文物级别</h4><div id="chLevel" class="dash-chart"></div></div>
+    <div class="dash-sec"><h4 onclick="setColorBy('survey_type')">普查类型</h4><div id="chSurvey" class="dash-chart"></div></div>
+</div>
+
+<!-- 右侧仪表盘 -->
+<div class="dash dock-r" id="dashR">
+    <div class="dash-hdr"><span>分布分析</span><div class="dh-acts"><button onclick="toggleDashSide('dashR')" title="切换停靠侧">⇄</button><button onclick="toggleDashVis('dashR')" title="收起">−</button></div></div>
+    <div class="dash-sec"><h4 onclick="setColorBy('township')">乡镇分布</h4><div id="chTown" class="dash-chart tall"></div></div>
+    <div class="dash-sec"><h4 onclick="setColorBy('era')">年代分布</h4><div id="chEra" class="dash-chart"></div></div>
+    <div class="dash-sec"><h4 onclick="setColorBy('ownership_type')">所有权</h4><div id="chOwner" class="dash-chart"></div></div>
+    <div class="dash-sec"><h4 onclick="setColorBy('industry')">所属行业</h4><div id="chIndustry" class="dash-chart"></div></div>
+    <div class="dash-sec"><h4 onclick="setColorBy('risk_factors')">影响因素</h4><div id="chRisk" class="dash-chart"></div></div>
+    <div class="dash-sec"><h4 onclick="setColorBy('condition_level')">评估状态</h4><div id="chCondition" class="dash-chart"></div></div>
+</div>
+
+<!-- 指北针 -->
+<div id="compass" onclick="resetNorthView()" title="点击复位到正北俯视">
+    <div id="compassRing">
+        <div class="compass-n">N</div>
+        <div class="compass-s">S</div>
+    </div>
+</div>
+
+<!-- 缩放滑条 -->
+<div id="mapZoomPanel">
+    <button class="mz-btn" onclick="mapZoomStep(-1)" title="放大">+</button>
+    <div class="mz-track" id="mapZoomTrack">
+        <div class="mz-fill" id="mapZoomFill"></div>
+        <div class="mz-thumb" id="mapZoomThumb"></div>
+    </div>
+    <button class="mz-btn" onclick="mapZoomStep(1)" title="缩小">−</button>
+    <div class="mz-label" id="mapZoomLabel"></div>
+</div>
+
+
+<!-- 比例尺 -->
+<div id="scaleBar">
+    <div id="scaleBarLabel">1:-</div>
+</div>
+
+<!-- 使用说明弹窗 -->
+<div id="helpMask" onclick="toggleHelp()"></div>
+<div id="helpPanel">
+    <div class="hp-hdr"><h3>使用说明</h3><button onclick="toggleHelp()">&times;</button></div>
+    <div class="hp-body">
+        <div class="hp-sec">
+            <h4>地图操作</h4>
+            <ul>
+                <li><b>鼠标滚轮</b> — 缩放地图</li>
+                <li><b>左上角滑块</b> — 拖动可自由缩放</li>
+                <li><b>鼠标左键拖拽</b> — 平移地图</li>
+                <li><b>鼠标右键拖拽</b> — 旋转/倾斜视角</li>
+                <li><b>点击指南针 N</b> — 重置视角到正北</li>
+            </ul>
+        </div>
+        <div class="hp-sec">
+            <h4>筛选与查询</h4>
+            <ul>
+                <li><b>左侧筛选面板</b> — 点击"筛选"按钮展开，可按关键词、乡镇、级别等条件筛选</li>
+                <li><b>点击图表条目</b> — 直接筛选对应类别（支持多维交叉筛选）</li>
+                <li><b>双击乡镇区域</b> — 筛选该乡镇所有文物</li>
+                <li><b>再次点击已选条目</b> — 取消该维度筛选</li>
+            </ul>
+        </div>
+        <div class="hp-sec">
+            <h4>快捷键</h4>
+            <ul>
+                <li><b>ESC</b> — 重置所有筛选和视图 / 关闭弹窗</li>
+            </ul>
+        </div>
+        <div class="hp-sec">
+            <h4>文物详情</h4>
+            <ul>
+                <li><b>点击文物点</b> — 查看基本信息、照片、图纸、简介</li>
+                <li><b>查看三维模型</b> — 打开三维模型查看器</li>
+                <li><b>四普档案</b> — 翻书式阅读 PDF 档案</li>
+            </ul>
+        </div>
+    </div>
+</div>
+
+<!-- 图例（动态） -->
+<div id="legend"><h3 id="legendTitle">分类图例</h3><div id="legendBody"></div></div>
+
+<!-- 信息面板 -->
+<div id="infoPanel">
+    <div class="pi-hdr"><button id="piBackBtn" class="pi-back-btn disabled" onclick="piGoBackToLog()" title="返回日志">◀</button><h2 id="piTitle">-</h2><button class="pi-close" onclick="closeInfo()">&times;</button></div>
+    <div class="pi-tabs">
+        <button class="pi-tab on" data-t="tcInfo" onclick="switchTab(this)">基本信息</button>
+        <button class="pi-tab" data-t="tcIntro" onclick="switchTab(this)">简介</button>
+        <button class="pi-tab" data-t="tcPhoto" onclick="switchTab(this)">照片</button>
+        <button class="pi-tab" data-t="tcDraw" onclick="switchTab(this)">图纸</button>
+    </div>
+    <div class="tc on" id="tcInfo"></div>
+    <div class="tc" id="tcIntro"></div>
+    <div class="tc" id="tcPhoto"></div>
+    <div class="tc" id="tcDraw"></div>
+</div>
+
+<!-- 灯箱 -->
+<div id="lightbox">
+    <button class="lb-x" onclick="closeLB()">&times;</button>
+    <button class="lb-nav lb-prev" onclick="navLB(-1)">&#8249;</button>
+    <button class="lb-nav lb-next" onclick="navLB(1)">&#8250;</button>
+    <img id="lbImg" src="" alt=""><div class="lb-cap" id="lbCap"></div>
+</div>
+
+<!-- 三维模型弹窗（iframe 隔离方案） -->
+<div id="model3dBox">
+    <div class="m3d-bar">
+        <h3 id="m3dTitle">三维模型</h3>
+        <button class="m3d-close" onclick="close3DBox()">&times;</button>
+    </div>
+</div>
+
+<!-- PDF 档案弹窗 -->
+<div id="pdfBox" style="display:none;position:fixed;inset:0;z-index:500;background:#000;flex-direction:column">
+    <div class="m3d-bar">
+        <h3 id="pdfBoxTitle">四普档案</h3>
+        <button class="m3d-close" onclick="closePdfBox()">&times;</button>
+    </div>
+    <iframe id="pdfFrame" style="flex:1;border:none;width:100%;height:100%" src="about:blank"></iframe>
+</div>
+
+<!-- AI 对话 -->
+<button id="chatBtn" onclick="toggleChat()" title="AI 文物助手">
+    <svg viewBox="0 0 24 24"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H5.17L4 17.17V4h16v12z"/><path d="M7 9h2v2H7zm4 0h2v2h-2zm4 0h2v2h-2z"/></svg>
+</button>
+<div id="chatPanel">
+    <div class="cp-hdr">
+        <h3>文物 AI 助手</h3>
+        <div style="display:flex;align-items:center;gap:4px">
+            <select id="chatModel" class="cp-model" title="切换 AI 模型"></select>
+            <button onclick="clearChat()">清空</button><button onclick="toggleChat()">收起</button>
+        </div>
+    </div>
+    <div id="chatMessages"></div>
+    <div class="cp-input">
+        <input id="chatInput" type="text" placeholder="问我关于{{ county_name }}文物的任何问题...">
+        <button id="chatSend" onclick="sendChat()">发送</button>
+    </div>
+</div>
+
+<!-- 设置面板遮罩 -->
+<div id="settingsMask" onclick="toggleSettings()"></div>
+<!-- 设置面板 -->
+<div id="settingsPanel">
+    <div class="sp-hdr"><h3>平台设置</h3><button onclick="toggleSettings()">&times;</button></div>
+    <div class="sp-group">
+        <div class="sp-group-title">显示质量</div>
+        <div class="sp-row">
+            <span class="sp-row-label" title="开启后以更高像素密度渲染字体和图例，默认关闭以保持最佳性能">高清模式 <span style="color:var(--t2);font-size:10px">（性能降低）</span></span>
+            <label class="sp-toggle"><input type="checkbox" id="hdModeToggle" onchange="setHDMode(this.checked)"><span class="slider"></span></label>
+        </div>
+    </div>
+    <div class="sp-group">
+        <div class="sp-group-title">UI 尺寸</div>
+        <div class="sp-size-group">
+            <button class="sp-size" data-size="sm" onclick="setUISize('sm')">小</button>
+            <button class="sp-size on" data-size="md" onclick="setUISize('md')">中</button>
+            <button class="sp-size" data-size="lg" onclick="setUISize('lg')">大</button>
+        </div>
+    </div>
+    <div class="sp-group">
+        <div class="sp-group-title">主题颜色</div>
+        <div class="sp-theme-group">
+            <div class="sp-theme on" data-theme="blue" onclick="setTheme('blue')" title="科技蓝" style="background:linear-gradient(135deg,#58a6ff,#1f6feb)"></div>
+            <div class="sp-theme" data-theme="purple" onclick="setTheme('purple')" title="典雅紫" style="background:linear-gradient(135deg,#bc8cff,#8b5cf6)"></div>
+            <div class="sp-theme" data-theme="gold" onclick="setTheme('gold')" title="华贵金" style="background:linear-gradient(135deg,#ffd700,#d4a017)"></div>
+            <div class="sp-theme" data-theme="pink" onclick="setTheme('pink')" title="浪漫粉" style="background:linear-gradient(135deg,#f778ba,#e84393)"></div>
+        </div>
+    </div>
+
+    <!-- 主视角:山东省市/县两级级联,重置时飞回此处 -->
+    <div class="sp-group">
+        <div class="sp-group-title">主视角（重置后回到这里）</div>
+        <div style="font-size:11px;color:var(--t3);line-height:1.6;margin-bottom:8px">
+            按 <b>地级市 → 区县</b> 两级选择，仅限山东省。<b style="color:var(--accent)">选好就自动生效</b>，"应用并飞过去"只是顺便飞一下；之后顶部"重置"按钮都会回到这里。
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
+            <select id="hvCityPick" onchange="onHvCityChange()"
+                style="height:32px;padding:0 8px;background:var(--bg3);border:1px solid var(--bd);border-radius:5px;color:var(--t1);font-size:12px;font-family:inherit;cursor:pointer">
+                <option value="">选择地级市…</option>
+            </select>
+            <select id="hvCountyPick" disabled onchange="onHvCountyChange()"
+                style="height:32px;padding:0 8px;background:var(--bg3);border:1px solid var(--bd);border-radius:5px;color:var(--t1);font-size:12px;font-family:inherit;cursor:pointer">
+                <option value="">请先选市…</option>
+            </select>
+        </div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px">
+            <button class="fp-btn primary" style="flex:2;height:30px;font-size:12px" onclick="applyHomeViewFromPick()">应用并飞过去</button>
+            <button class="fp-btn secondary" style="flex:1;height:30px;font-size:11px" onclick="applyHomeViewFromCurrent()" title="把当前地图视角固化为主视角">用当前视角</button>
+            <button class="fp-btn secondary" style="flex:1;height:30px;font-size:11px;color:var(--red);border-color:rgba(248,81,73,.4)" onclick="resetHomeView()" title="清除自定义,回到后端配置的默认位置">恢复默认</button>
+        </div>
+        <div id="hvCurrent" style="font-size:11px;color:var(--t2);padding:6px 10px;background:var(--bg3);border:1px dashed var(--bd);border-radius:5px;line-height:1.5">—</div>
+    </div>
+    <div class="sp-group">
+        <div class="sp-group-title">数据统计 (左)</div>
+        <div class="sp-row"><span class="sp-row-label">文物类别</span>
+            <div class="sp-chart-type" data-chart="chCat" data-dim="category_main">
+                <button class="sp-ct on" onclick="setChartType('chCat','category_main','pie',this)" title="饼图"><svg viewBox="0 0 24 24"><path d="M11 2v20C5.48 21.5 1 16.82 1 11S5.48.5 11 2zm2 0v9h9c-.47-4.82-4.18-8.53-9-9zm0 11v9c4.82-.47 8.53-4.18 9-9h-9z"/></svg></button>
+                <button class="sp-ct" onclick="setChartType('chCat','category_main','bar',this)" title="横向柱图"><svg viewBox="0 0 24 24"><path d="M2 17h6v-2H2v2zm0-5h10v-2H2v2zm0-7v2h14V5H2zm18.5 4.5L22 8l-4-4-4 4 1.5 1.5L18 7v12h2V7l2.5 2.5z"/></svg></button>
+                <button class="sp-ct" onclick="setChartType('chCat','category_main','vbar',this)" title="纵向柱图"><svg viewBox="0 0 24 24"><path d="M5 9.2h3V19H5V9.2zM10.6 5h2.8v14h-2.8V5zm5.6 8H19v6h-2.8v-6z"/></svg></button>
+                <button class="sp-ct" onclick="setChartType('chCat','category_main','rose',this)" title="玫瑰图"><svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-1-14v7l5 3-.8 1.3-5.7-3.3V6h1.5z"/></svg></button>
+                <button class="sp-ct" onclick="setChartType('chCat','category_main','radar',this)" title="雷达图"><svg viewBox="0 0 24 24"><path d="M12 2L2 12l10 10 10-10L12 2zm0 2.83L19.17 12 12 19.17 4.83 12 12 4.83z"/></svg></button>
+                <button class="sp-ct" onclick="setChartType('chCat','category_main','treemap',this)" title="矩阵树图"><svg viewBox="0 0 24 24"><path d="M3 3h8v8H3V3zm0 10h8v8H3v-8zm10-10h8v4h-8V3zm0 6h8v12h-8V9z"/></svg></button>
+            </div>
+            <label class="sp-toggle"><input type="checkbox" checked onchange="toggleChartVis('chCat',this.checked)"><span class="slider"></span></label></div>
+        <div class="sp-row"><span class="sp-row-label">文物级别</span>
+            <div class="sp-chart-type" data-chart="chLevel" data-dim="heritage_level">
+                <button class="sp-ct" onclick="setChartType('chLevel','heritage_level','pie',this)" title="饼图"><svg viewBox="0 0 24 24"><path d="M11 2v20C5.48 21.5 1 16.82 1 11S5.48.5 11 2zm2 0v9h9c-.47-4.82-4.18-8.53-9-9zm0 11v9c4.82-.47 8.53-4.18 9-9h-9z"/></svg></button>
+                <button class="sp-ct on" onclick="setChartType('chLevel','heritage_level','bar',this)" title="横向柱图"><svg viewBox="0 0 24 24"><path d="M2 17h6v-2H2v2zm0-5h10v-2H2v2zm0-7v2h14V5H2zm18.5 4.5L22 8l-4-4-4 4 1.5 1.5L18 7v12h2V7l2.5 2.5z"/></svg></button>
+                <button class="sp-ct" onclick="setChartType('chLevel','heritage_level','vbar',this)" title="纵向柱图"><svg viewBox="0 0 24 24"><path d="M5 9.2h3V19H5V9.2zM10.6 5h2.8v14h-2.8V5zm5.6 8H19v6h-2.8v-6z"/></svg></button>
+                <button class="sp-ct" onclick="setChartType('chLevel','heritage_level','rose',this)" title="玫瑰图"><svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-1-14v7l5 3-.8 1.3-5.7-3.3V6h1.5z"/></svg></button>
+                <button class="sp-ct" onclick="setChartType('chLevel','heritage_level','radar',this)" title="雷达图"><svg viewBox="0 0 24 24"><path d="M12 2L2 12l10 10 10-10L12 2zm0 2.83L19.17 12 12 19.17 4.83 12 12 4.83z"/></svg></button>
+                <button class="sp-ct" onclick="setChartType('chLevel','heritage_level','treemap',this)" title="矩阵树图"><svg viewBox="0 0 24 24"><path d="M3 3h8v8H3V3zm0 10h8v8H3v-8zm10-10h8v4h-8V3zm0 6h8v12h-8V9z"/></svg></button>
+            </div>
+            <label class="sp-toggle"><input type="checkbox" checked onchange="toggleChartVis('chLevel',this.checked)"><span class="slider"></span></label></div>
+        <div class="sp-row"><span class="sp-row-label">普查类型</span>
+            <div class="sp-chart-type" data-chart="chSurvey" data-dim="survey_type">
+                <button class="sp-ct on" onclick="setChartType('chSurvey','survey_type','pie',this)" title="饼图"><svg viewBox="0 0 24 24"><path d="M11 2v20C5.48 21.5 1 16.82 1 11S5.48.5 11 2zm2 0v9h9c-.47-4.82-4.18-8.53-9-9zm0 11v9c4.82-.47 8.53-4.18 9-9h-9z"/></svg></button>
+                <button class="sp-ct" onclick="setChartType('chSurvey','survey_type','bar',this)" title="横向柱图"><svg viewBox="0 0 24 24"><path d="M2 17h6v-2H2v2zm0-5h10v-2H2v2zm0-7v2h14V5H2zm18.5 4.5L22 8l-4-4-4 4 1.5 1.5L18 7v12h2V7l2.5 2.5z"/></svg></button>
+                <button class="sp-ct" onclick="setChartType('chSurvey','survey_type','vbar',this)" title="纵向柱图"><svg viewBox="0 0 24 24"><path d="M5 9.2h3V19H5V9.2zM10.6 5h2.8v14h-2.8V5zm5.6 8H19v6h-2.8v-6z"/></svg></button>
+                <button class="sp-ct" onclick="setChartType('chSurvey','survey_type','rose',this)" title="玫瑰图"><svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-1-14v7l5 3-.8 1.3-5.7-3.3V6h1.5z"/></svg></button>
+                <button class="sp-ct" onclick="setChartType('chSurvey','survey_type','radar',this)" title="雷达图"><svg viewBox="0 0 24 24"><path d="M12 2L2 12l10 10 10-10L12 2zm0 2.83L19.17 12 12 19.17 4.83 12 12 4.83z"/></svg></button>
+                <button class="sp-ct" onclick="setChartType('chSurvey','survey_type','treemap',this)" title="矩阵树图"><svg viewBox="0 0 24 24"><path d="M3 3h8v8H3V3zm0 10h8v8H3v-8zm10-10h8v4h-8V3zm0 6h8v12h-8V9z"/></svg></button>
+            </div>
+            <label class="sp-toggle"><input type="checkbox" checked onchange="toggleChartVis('chSurvey',this.checked)"><span class="slider"></span></label></div>
+    </div>
+    <div class="sp-group">
+        <div class="sp-group-title">分布分析 (右)</div>
+        <div class="sp-row"><span class="sp-row-label">乡镇分布</span>
+            <div class="sp-chart-type" data-chart="chTown" data-dim="township">
+                <button class="sp-ct" onclick="setChartType('chTown','township','pie',this)" title="饼图"><svg viewBox="0 0 24 24"><path d="M11 2v20C5.48 21.5 1 16.82 1 11S5.48.5 11 2zm2 0v9h9c-.47-4.82-4.18-8.53-9-9zm0 11v9c4.82-.47 8.53-4.18 9-9h-9z"/></svg></button>
+                <button class="sp-ct on" onclick="setChartType('chTown','township','bar',this)" title="横向柱图"><svg viewBox="0 0 24 24"><path d="M2 17h6v-2H2v2zm0-5h10v-2H2v2zm0-7v2h14V5H2zm18.5 4.5L22 8l-4-4-4 4 1.5 1.5L18 7v12h2V7l2.5 2.5z"/></svg></button>
+                <button class="sp-ct" onclick="setChartType('chTown','township','vbar',this)" title="纵向柱图"><svg viewBox="0 0 24 24"><path d="M5 9.2h3V19H5V9.2zM10.6 5h2.8v14h-2.8V5zm5.6 8H19v6h-2.8v-6z"/></svg></button>
+                <button class="sp-ct" onclick="setChartType('chTown','township','rose',this)" title="玫瑰图"><svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-1-14v7l5 3-.8 1.3-5.7-3.3V6h1.5z"/></svg></button>
+                <button class="sp-ct" onclick="setChartType('chTown','township','radar',this)" title="雷达图"><svg viewBox="0 0 24 24"><path d="M12 2L2 12l10 10 10-10L12 2zm0 2.83L19.17 12 12 19.17 4.83 12 12 4.83z"/></svg></button>
+                <button class="sp-ct" onclick="setChartType('chTown','township','treemap',this)" title="矩阵树图"><svg viewBox="0 0 24 24"><path d="M3 3h8v8H3V3zm0 10h8v8H3v-8zm10-10h8v4h-8V3zm0 6h8v12h-8V9z"/></svg></button>
+            </div>
+            <label class="sp-toggle"><input type="checkbox" checked onchange="toggleChartVis('chTown',this.checked)"><span class="slider"></span></label></div>
+        <div class="sp-row"><span class="sp-row-label">年代分布</span>
+            <div class="sp-chart-type" data-chart="chEra" data-dim="era">
+                <button class="sp-ct" onclick="setChartType('chEra','era','pie',this)" title="饼图"><svg viewBox="0 0 24 24"><path d="M11 2v20C5.48 21.5 1 16.82 1 11S5.48.5 11 2zm2 0v9h9c-.47-4.82-4.18-8.53-9-9zm0 11v9c4.82-.47 8.53-4.18 9-9h-9z"/></svg></button>
+                <button class="sp-ct" onclick="setChartType('chEra','era','bar',this)" title="横向柱图"><svg viewBox="0 0 24 24"><path d="M2 17h6v-2H2v2zm0-5h10v-2H2v2zm0-7v2h14V5H2zm18.5 4.5L22 8l-4-4-4 4 1.5 1.5L18 7v12h2V7l2.5 2.5z"/></svg></button>
+                <button class="sp-ct on" onclick="setChartType('chEra','era','vbar',this)" title="纵向柱图"><svg viewBox="0 0 24 24"><path d="M5 9.2h3V19H5V9.2zM10.6 5h2.8v14h-2.8V5zm5.6 8H19v6h-2.8v-6z"/></svg></button>
+                <button class="sp-ct" onclick="setChartType('chEra','era','rose',this)" title="玫瑰图"><svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-1-14v7l5 3-.8 1.3-5.7-3.3V6h1.5z"/></svg></button>
+                <button class="sp-ct" onclick="setChartType('chEra','era','radar',this)" title="雷达图"><svg viewBox="0 0 24 24"><path d="M12 2L2 12l10 10 10-10L12 2zm0 2.83L19.17 12 12 19.17 4.83 12 12 4.83z"/></svg></button>
+                <button class="sp-ct" onclick="setChartType('chEra','era','treemap',this)" title="矩阵树图"><svg viewBox="0 0 24 24"><path d="M3 3h8v8H3V3zm0 10h8v8H3v-8zm10-10h8v4h-8V3zm0 6h8v12h-8V9z"/></svg></button>
+            </div>
+            <label class="sp-toggle"><input type="checkbox" checked onchange="toggleChartVis('chEra',this.checked)"><span class="slider"></span></label></div>
+        <div class="sp-row"><span class="sp-row-label">所有权</span>
+            <div class="sp-chart-type" data-chart="chOwner" data-dim="ownership_type">
+                <button class="sp-ct on" onclick="setChartType('chOwner','ownership_type','pie',this)" title="饼图"><svg viewBox="0 0 24 24"><path d="M11 2v20C5.48 21.5 1 16.82 1 11S5.48.5 11 2zm2 0v9h9c-.47-4.82-4.18-8.53-9-9zm0 11v9c4.82-.47 8.53-4.18 9-9h-9z"/></svg></button>
+                <button class="sp-ct" onclick="setChartType('chOwner','ownership_type','bar',this)" title="横向柱图"><svg viewBox="0 0 24 24"><path d="M2 17h6v-2H2v2zm0-5h10v-2H2v2zm0-7v2h14V5H2zm18.5 4.5L22 8l-4-4-4 4 1.5 1.5L18 7v12h2V7l2.5 2.5z"/></svg></button>
+                <button class="sp-ct" onclick="setChartType('chOwner','ownership_type','vbar',this)" title="纵向柱图"><svg viewBox="0 0 24 24"><path d="M5 9.2h3V19H5V9.2zM10.6 5h2.8v14h-2.8V5zm5.6 8H19v6h-2.8v-6z"/></svg></button>
+                <button class="sp-ct" onclick="setChartType('chOwner','ownership_type','rose',this)" title="玫瑰图"><svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-1-14v7l5 3-.8 1.3-5.7-3.3V6h1.5z"/></svg></button>
+                <button class="sp-ct" onclick="setChartType('chOwner','ownership_type','radar',this)" title="雷达图"><svg viewBox="0 0 24 24"><path d="M12 2L2 12l10 10 10-10L12 2zm0 2.83L19.17 12 12 19.17 4.83 12 12 4.83z"/></svg></button>
+                <button class="sp-ct" onclick="setChartType('chOwner','ownership_type','treemap',this)" title="矩阵树图"><svg viewBox="0 0 24 24"><path d="M3 3h8v8H3V3zm0 10h8v8H3v-8zm10-10h8v4h-8V3zm0 6h8v12h-8V9z"/></svg></button>
+            </div>
+            <label class="sp-toggle"><input type="checkbox" checked onchange="toggleChartVis('chOwner',this.checked)"><span class="slider"></span></label></div>
+        <div class="sp-row"><span class="sp-row-label">所属行业</span>
+            <div class="sp-chart-type" data-chart="chIndustry" data-dim="industry">
+                <button class="sp-ct" onclick="setChartType('chIndustry','industry','pie',this)" title="饼图"><svg viewBox="0 0 24 24"><path d="M11 2v20C5.48 21.5 1 16.82 1 11S5.48.5 11 2zm2 0v9h9c-.47-4.82-4.18-8.53-9-9zm0 11v9c4.82-.47 8.53-4.18 9-9h-9z"/></svg></button>
+                <button class="sp-ct on" onclick="setChartType('chIndustry','industry','bar',this)" title="横向柱图"><svg viewBox="0 0 24 24"><path d="M2 17h6v-2H2v2zm0-5h10v-2H2v2zm0-7v2h14V5H2zm18.5 4.5L22 8l-4-4-4 4 1.5 1.5L18 7v12h2V7l2.5 2.5z"/></svg></button>
+                <button class="sp-ct" onclick="setChartType('chIndustry','industry','vbar',this)" title="纵向柱图"><svg viewBox="0 0 24 24"><path d="M5 9.2h3V19H5V9.2zM10.6 5h2.8v14h-2.8V5zm5.6 8H19v6h-2.8v-6z"/></svg></button>
+                <button class="sp-ct" onclick="setChartType('chIndustry','industry','rose',this)" title="玫瑰图"><svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-1-14v7l5 3-.8 1.3-5.7-3.3V6h1.5z"/></svg></button>
+                <button class="sp-ct" onclick="setChartType('chIndustry','industry','radar',this)" title="雷达图"><svg viewBox="0 0 24 24"><path d="M12 2L2 12l10 10 10-10L12 2zm0 2.83L19.17 12 12 19.17 4.83 12 12 4.83z"/></svg></button>
+                <button class="sp-ct" onclick="setChartType('chIndustry','industry','treemap',this)" title="矩阵树图"><svg viewBox="0 0 24 24"><path d="M3 3h8v8H3V3zm0 10h8v8H3v-8zm10-10h8v4h-8V3zm0 6h8v12h-8V9z"/></svg></button>
+            </div>
+            <label class="sp-toggle"><input type="checkbox" checked onchange="toggleChartVis('chIndustry',this.checked)"><span class="slider"></span></label></div>
+        <div class="sp-row"><span class="sp-row-label">影响因素</span>
+            <div class="sp-chart-type" data-chart="chRisk" data-dim="risk_factors">
+                <button class="sp-ct" onclick="setChartType('chRisk','risk_factors','pie',this)" title="饼图"><svg viewBox="0 0 24 24"><path d="M11 2v20C5.48 21.5 1 16.82 1 11S5.48.5 11 2zm2 0v9h9c-.47-4.82-4.18-8.53-9-9zm0 11v9c4.82-.47 8.53-4.18 9-9h-9z"/></svg></button>
+                <button class="sp-ct on" onclick="setChartType('chRisk','risk_factors','bar',this)" title="横向柱图"><svg viewBox="0 0 24 24"><path d="M2 17h6v-2H2v2zm0-5h10v-2H2v2zm0-7v2h14V5H2zm18.5 4.5L22 8l-4-4-4 4 1.5 1.5L18 7v12h2V7l2.5 2.5z"/></svg></button>
+                <button class="sp-ct" onclick="setChartType('chRisk','risk_factors','vbar',this)" title="纵向柱图"><svg viewBox="0 0 24 24"><path d="M5 9.2h3V19H5V9.2zM10.6 5h2.8v14h-2.8V5zm5.6 8H19v6h-2.8v-6z"/></svg></button>
+                <button class="sp-ct" onclick="setChartType('chRisk','risk_factors','rose',this)" title="玫瑰图"><svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-1-14v7l5 3-.8 1.3-5.7-3.3V6h1.5z"/></svg></button>
+                <button class="sp-ct" onclick="setChartType('chRisk','risk_factors','radar',this)" title="雷达图"><svg viewBox="0 0 24 24"><path d="M12 2L2 12l10 10 10-10L12 2zm0 2.83L19.17 12 12 19.17 4.83 12 12 4.83z"/></svg></button>
+                <button class="sp-ct" onclick="setChartType('chRisk','risk_factors','treemap',this)" title="矩阵树图"><svg viewBox="0 0 24 24"><path d="M3 3h8v8H3V3zm0 10h8v8H3v-8zm10-10h8v4h-8V3zm0 6h8v12h-8V9z"/></svg></button>
+            </div>
+            <label class="sp-toggle"><input type="checkbox" checked onchange="toggleChartVis('chRisk',this.checked)"><span class="slider"></span></label></div>
+        <div class="sp-row"><span class="sp-row-label">评估状态</span>
+            <div class="sp-chart-type" data-chart="chCondition" data-dim="condition_level">
+                <button class="sp-ct on" onclick="setChartType('chCondition','condition_level','pie',this)" title="饼图"><svg viewBox="0 0 24 24"><path d="M11 2v20C5.48 21.5 1 16.82 1 11S5.48.5 11 2zm2 0v9h9c-.47-4.82-4.18-8.53-9-9zm0 11v9c4.82-.47 8.53-4.18 9-9h-9z"/></svg></button>
+                <button class="sp-ct" onclick="setChartType('chCondition','condition_level','bar',this)" title="横向柱图"><svg viewBox="0 0 24 24"><path d="M2 17h6v-2H2v2zm0-5h10v-2H2v2zm0-7v2h14V5H2zm18.5 4.5L22 8l-4-4-4 4 1.5 1.5L18 7v12h2V7l2.5 2.5z"/></svg></button>
+                <button class="sp-ct" onclick="setChartType('chCondition','condition_level','vbar',this)" title="纵向柱图"><svg viewBox="0 0 24 24"><path d="M5 9.2h3V19H5V9.2zM10.6 5h2.8v14h-2.8V5zm5.6 8H19v6h-2.8v-6z"/></svg></button>
+                <button class="sp-ct" onclick="setChartType('chCondition','condition_level','rose',this)" title="玫瑰图"><svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-1-14v7l5 3-.8 1.3-5.7-3.3V6h1.5z"/></svg></button>
+                <button class="sp-ct" onclick="setChartType('chCondition','condition_level','radar',this)" title="雷达图"><svg viewBox="0 0 24 24"><path d="M12 2L2 12l10 10 10-10L12 2zm0 2.83L19.17 12 12 19.17 4.83 12 12 4.83z"/></svg></button>
+                <button class="sp-ct" onclick="setChartType('chCondition','condition_level','treemap',this)" title="矩阵树图"><svg viewBox="0 0 24 24"><path d="M3 3h8v8H3V3zm0 10h8v8H3v-8zm10-10h8v4h-8V3zm0 6h8v12h-8V9z"/></svg></button>
+            </div>
+            <label class="sp-toggle"><input type="checkbox" checked onchange="toggleChartVis('chCondition',this.checked)"><span class="slider"></span></label></div>
+    </div>
+    <div class="sp-footer">
+        <p>数据来源：{{ data_source }}</p>
+        <p>数据截止时间：2026年3月1日</p>
+    </div>
+</div>
+
+<!-- AI 筛选结果浮动面板 -->
+<div id="chatResults">
+    <div class="cr-hdr"><span id="crTitle">筛选结果</span><button class="cr-close" onclick="closeChatResults()">&times;</button></div>
+    <div id="crList"></div>
+</div>
+
+<!-- Mobile: Stats Tab Bar -->
+<div id="mobileStatsBar">
+    <button class="mst-tab active" onclick="mobileStatTab('dashL',this)">数据统计</button>
+    <button class="mst-tab" onclick="mobileStatTab('dashR',this)">分布分析</button>
+</div>
+
+<!-- Mobile: Bottom Nav -->
+<div id="mobileNav">
+    <button class="mn-btn active" data-tab="map" onclick="mobileSetTab('map')">
+        <svg viewBox="0 0 24 24"><path d="M20.5 3l-.16.03L15 5.1 9 3 3.36 4.9c-.21.07-.36.25-.36.48V20.5c0 .28.22.5.5.5l.16-.03L9 18.9l6 2.1 5.64-1.9c.21-.07.36-.25.36-.48V3.5c0-.28-.22-.5-.5-.5zM15 19l-6-2.11V5l6 2.11V19z"/></svg>
+        <span>地图</span>
+    </button>
+    <button class="mn-btn" data-tab="filter" onclick="mobileSetTab('filter')">
+        <svg viewBox="0 0 24 24"><path d="M10 18h4v-2h-4v2zM3 6v2h18V6H3zm3 7h12v-2H6v2z"/></svg>
+        <span>筛选</span>
+    </button>
+    <button class="mn-btn" data-tab="stats" onclick="mobileSetTab('stats')">
+        <svg viewBox="0 0 24 24"><path d="M11 2v20C5.48 21.5 1 16.82 1 11S5.48.5 11 2zm2 0v9h9c-.47-4.82-4.18-8.53-9-9zm0 11v9c4.82-.47 8.53-4.18 9-9h-9z"/></svg>
+        <span>统计</span>
+    </button>
+    <button class="mn-btn" data-tab="chat" onclick="mobileSetTab('chat')">
+        <svg viewBox="0 0 24 24"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H5.17L4 17.17V4h16v12z"/><path d="M7 9h2v2H7zm4 0h2v2h-2zm4 0h2v2h-2z"/></svg>
+        <span>AI</span>
+    </button>
+</div>
+
+<!-- 框选提示条 -->
+<div id="bboxDrawHint">按住鼠标左键在地图上拖拽画出矩形 · 松开完成 · ESC 取消</div>
+
+<!-- Toast -->
+<div id="toast"></div>
+<!-- Dock indicator -->
+<div id="dockHint"></div>
+
+<script src="/static/js/config.js"></script>
+<script src="/static/js/state.js"></script>
+<script src="/static/js/utils.js"></script>
+<script src="/static/js/bus.js"></script>
+<script src="/static/js/dict.js"></script>
+<script src="/static/js/map.js"></script>
+<script src="/static/js/boundary.js"></script>
+<script src="/static/js/point_renderer.js"></script>
+<script src="/static/js/polygon_renderer.js"></script>
+<script src="/static/js/viewport.js"></script>
+<script src="/static/js/render.js"></script>
+<script src="/static/js/filter.js"></script>
+<script src="/static/js/charts.js"></script>
+<script src="/static/js/info.js"></script>
+<script src="/static/js/lightbox.js"></script>
+<script src="/static/js/model3d.js"></script>
+<script src="/static/js/home_view.js"></script>
+<script src="/static/js/layout.js"></script>
+<script src="/static/js/worklog.js"></script>
+<script src="/static/js/route.js"></script>
+<script src="/static/js/chat.js"></script>
+<script src="/static/js/pick_mode.js"></script>
+<script src="/static/js/tile_download.js"></script>
+<script src="/static/js/app.js"></script>
+</body>
+</html>

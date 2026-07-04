@@ -1,0 +1,266 @@
+import { useEffect, useRef, useState } from "react";
+import { useUIStore } from "../stores/uiStore";
+import { useFilterStore } from "../stores/filterStore";
+import { useRelicsStore } from "../stores/relicsStore";
+import { flyHomeFn } from "../map/MapView";
+import { getViewer } from "../map/viewerRegistry";
+import type { BaseLayerType } from "../types";
+
+const BASE_OPTIONS: { value: BaseLayerType; label: string }[] = [
+  { value: "arcgis_sat", label: "离线影像" },
+  { value: "osm", label: "离线矢量" },
+  { value: "gaode_sat", label: "在线影像 (高德)" },
+  { value: "gaode_vec", label: "在线矢量 (高德)" },
+  { value: "none", label: "无底图" },
+];
+
+export function Toolbar() {
+  // 单独订阅以避免对整个 ui store 的全量订阅触发不必要的重渲染。
+  const filterPanelOpen = useUIStore((s) => s.filterPanelOpen);
+  const tileDownloadOpen = useUIStore((s) => s.tileDownloadOpen);
+  const baseLayer = useUIStore((s) => s.baseLayer);
+  const baseLayerAlpha = useUIStore((s) => s.baseLayerAlpha);
+  const terrainEnabled = useUIStore((s) => s.terrainEnabled);
+  const bndCounty = useUIStore((s) => s.bndCounty);
+  const bndCountyName = useUIStore((s) => s.bndCountyName);
+  const bndTownship = useUIStore((s) => s.bndTownship);
+  const bndTownshipName = useUIStore((s) => s.bndTownshipName);
+  const bndVillage = useUIStore((s) => s.bndVillage);
+  const bndVillageName = useUIStore((s) => s.bndVillageName);
+  const toastObj = useUIStore((s) => s.toast);
+  const setUI = useUIStore((s) => s.set);
+  const showToast = useUIStore((s) => s.showToast);
+
+  const filteredCount = useFilterStore((s) => s.activeCats.size);
+  const allCount = useRelicsStore((s) => s.all.length);
+
+  const [baseMenuOpen, setBaseMenuOpen] = useState(false);
+  const [boundaryMenuOpen, setBoundaryMenuOpen] = useState(false);
+  const baseMenuRef = useRef<HTMLDivElement>(null);
+  const boundaryMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (baseMenuRef.current && !baseMenuRef.current.contains(t)) {
+        setBaseMenuOpen(false);
+      }
+      if (boundaryMenuRef.current && !boundaryMenuRef.current.contains(t)) {
+        setBoundaryMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  const baseLabel =
+    BASE_OPTIONS.find((o) => o.value === baseLayer)?.label || "底图影像";
+
+  const onReset = () => {
+    const cats = useRelicsStore.getState().all.map((r) => r.category_main || "");
+    useFilterStore.getState().reset(new Set(cats.filter(Boolean)));
+    setUI({
+      filterPanelOpen: false,
+      routePanelOpen: false,
+      chatPanelOpen: false,
+      worklogOpen: false,
+      selectedRelic: null,
+    });
+    flyHomeFn(getViewer());
+    setTimeout(() => flyHomeFn(getViewer()), 50);
+    showToast("已重置筛选并飞回主视角");
+  };
+
+  const onFullscreen = () => {
+    if (!document.fullscreenElement) document.documentElement.requestFullscreen();
+    else document.exitFullscreen();
+  };
+
+  return (
+    <div className="toolbar">
+      <div className="tb-group boxed">
+        <button
+          className={"tb" + (filterPanelOpen ? " on" : "")}
+          onClick={() => setUI({ filterPanelOpen: !filterPanelOpen })}
+          title="筛选面板"
+        >
+          <svg viewBox="0 0 24 24">
+            <path d="M3 4h18v2L13 16v6h-2v-6L3 6V4z" />
+          </svg>
+          筛选
+          {filteredCount > 0 && filteredCount < allCount ? <b>·{filteredCount}</b> : null}
+        </button>
+      </div>
+
+      <div className="tb-group boxed">
+        <div ref={baseMenuRef} style={{ position: "relative" }}>
+          <button
+            className={"tb" + (baseMenuOpen ? " on" : "")}
+            onClick={() => setBaseMenuOpen((v) => !v)}
+          >
+            <svg viewBox="0 0 24 24">
+              <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" />
+            </svg>
+            {baseLabel} ▾
+          </button>
+          {baseMenuOpen && (
+            <div
+              className="dropdown-menu open"
+              style={{ left: 0, top: "calc(100% + 4px)" }}
+            >
+              {BASE_OPTIONS.map((opt) => (
+                <div
+                  key={opt.value}
+                  className={
+                    "dropdown-item" + (baseLayer === opt.value ? " on" : "")
+                  }
+                  onClick={() => {
+                    setUI({ baseLayer: opt.value });
+                    setBaseMenuOpen(false);
+                  }}
+                >
+                  {opt.label}
+                </div>
+              ))}
+              <div className="dropdown-divider" />
+              <div className="dropdown-group">底图透明度: {baseLayerAlpha}%</div>
+              <input
+                type="range"
+                min={20}
+                max={100}
+                value={baseLayerAlpha}
+                onChange={(e) => setUI({ baseLayerAlpha: Number(e.target.value) })}
+                style={{ width: "calc(100% - 16px)", margin: "4px 8px" }}
+              />
+            </div>
+          )}
+        </div>
+        <button
+          className={"tb" + (tileDownloadOpen ? " on" : "")}
+          onClick={() => setUI({ tileDownloadOpen: !tileDownloadOpen })}
+        >
+          <svg viewBox="0 0 24 24">
+            <path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z" />
+          </svg>
+          下载地图
+        </button>
+      </div>
+
+      <div className="tb-group boxed">
+        <div ref={boundaryMenuRef} style={{ position: "relative" }}>
+          <button
+            className={"tb" + (boundaryMenuOpen ? " on" : "")}
+            onClick={() => setBoundaryMenuOpen((v) => !v)}
+          >
+            <svg viewBox="0 0 24 24">
+              <path d="M21 4H3v2h18V4zM3 20h18v-2H3v2zM4 12l4-4 4 4 4-4 4 4v6H4z" />
+            </svg>
+            边界 ▾
+          </button>
+          {boundaryMenuOpen && (
+            <div
+              className="dropdown-menu open"
+              style={{ left: 0, top: "calc(100% + 4px)" }}
+            >
+              <label className="dropdown-item">
+                <input
+                  type="checkbox"
+                  checked={bndCounty}
+                  onChange={(e) => setUI({ bndCounty: e.target.checked })}
+                />{" "}
+                县界
+              </label>
+              <label className="dropdown-item">
+                <input
+                  type="checkbox"
+                  checked={bndCountyName}
+                  onChange={(e) => setUI({ bndCountyName: e.target.checked })}
+                />{" "}
+                县名
+              </label>
+              <label className="dropdown-item">
+                <input
+                  type="checkbox"
+                  checked={bndTownship}
+                  onChange={(e) => setUI({ bndTownship: e.target.checked })}
+                />{" "}
+                镇界
+              </label>
+              <label className="dropdown-item">
+                <input
+                  type="checkbox"
+                  checked={bndTownshipName}
+                  onChange={(e) => setUI({ bndTownshipName: e.target.checked })}
+                />{" "}
+                镇名
+              </label>
+              <label className="dropdown-item">
+                <input
+                  type="checkbox"
+                  checked={bndVillage}
+                  onChange={(e) => setUI({ bndVillage: e.target.checked })}
+                />{" "}
+                村界
+              </label>
+              <label className="dropdown-item">
+                <input
+                  type="checkbox"
+                  checked={bndVillageName}
+                  onChange={(e) => setUI({ bndVillageName: e.target.checked })}
+                />{" "}
+                村名
+              </label>
+              <div className="dropdown-divider" />
+              <div
+                className="dropdown-item"
+                onClick={() => {
+                  setUI({ boundaryDownloadOpen: true });
+                  setBoundaryMenuOpen(false);
+                }}
+                style={{ color: "var(--accent)", fontWeight: 500 }}
+              >
+                <svg
+                  viewBox="0 0 24 24"
+                  width="14"
+                  height="14"
+                  style={{ verticalAlign: "middle", marginRight: 6, fill: "currentColor" }}
+                >
+                  <path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z" />
+                </svg>
+                下载边界…
+              </div>
+            </div>
+          )}
+        </div>
+
+        <button
+          className={"tb" + (terrainEnabled ? " on" : "")}
+          onClick={() => setUI({ terrainEnabled: !terrainEnabled })}
+        >
+          <svg viewBox="0 0 24 24">
+            <path d="M14 6l-3.75 5L8 8.5 3 15h18z" />
+          </svg>
+          {terrainEnabled ? "地形 ✓" : "地形"}
+        </button>
+      </div>
+
+      <div className="status-summary">
+        当前位置: {toastObj?.text || `全部文物 ${allCount} 处`}
+      </div>
+
+      <div className="tb-group" style={{ marginLeft: "auto" }}>
+        <button className="tb" onClick={onFullscreen} title="全屏">
+          <svg viewBox="0 0 24 24">
+            <path d="M5 5h6v2H7v4H5V5zm14 0v6h-2V7h-4V5h6zM5 19v-6h2v4h4v2H5zm14-6v6h-6v-2h4v-4h2z" />
+          </svg>
+        </button>
+        <button className="tb" onClick={onReset} title="重置主视角">
+          <svg viewBox="0 0 24 24">
+            <path d="M12 2L4 7v6c0 5.55 3.84 10.74 8 12 4.16-1.26 8-6.45 8-12V7l-8-5z" />
+          </svg>
+          重置
+        </button>
+      </div>
+    </div>
+  );
+}

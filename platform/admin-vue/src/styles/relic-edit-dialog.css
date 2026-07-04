@@ -1,0 +1,214 @@
+.loading-block {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 40px 0;
+  color: var(--el-text-color-secondary);
+}
+.relic-tabs :deep(.el-tabs__nav-wrap::after) {
+  background-color: var(--el-border-color-lighter);
+}
+.hint {
+  margin-left: 12px;
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+}
+.mini-audit {
+  margin-bottom: 12px;
+  border: 1px solid var(--el-border-color-light);
+  border-radius: 4px;
+}
+
+/* 相邻文物面板 */
+.nb-badge {
+  margin-left: 2px;
+}
+.nb-badge :deep(.el-badge__content) {
+  transform: translateY(-8px) translateX(-4px) scale(0.85);
+}
+.nb-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 4px 12px;
+  border-bottom: 1px solid var(--el-border-color-lighter);
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+.nb-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--el-text-color-regular);
+  font-size: 13px;
+}
+.nb-list {
+  max-height: 46vh;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+.nb-item {
+  padding: 10px 12px;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 6px;
+  margin-bottom: 8px;
+  transition: all 0.15s;
+}
+.nb-item:hover {
+  border-color: var(--el-color-primary);
+  background: var(--el-fill-color-lighter);
+}
+.nb-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.nb-rank { flex-shrink: 0; }
+.nb-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--el-text-color-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.nb-distance {
+  color: var(--el-color-primary);
+  font-weight: 600;
+  font-size: 13px;
+  flex-shrink: 0;
+}
+.nb-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+  margin-bottom: 4px;
+}
+.nb-code {
+  font-family: var(--el-font-family-mono, ui-monospace, Menlo, Consolas, monospace);
+}
+.nb-sep {
+  color: var(--el-text-color-placeholder);
+}
+.nb-actions {
+  display: flex;
+  gap: 8px;
+}
+.mono {
+  font-family: var(--el-font-family-mono, ui-monospace, Menlo, Consolas, monospace);
+}
+.mini-audit :deep(.el-collapse-item__header) {
+  padding: 0 12px;
+  background: var(--el-fill-color-lighter);
+  font-size: 13px;
+}
+.mini-audit :deep(.el-collapse-item__content) {
+  padding: 8px 16px 0;
+}
+.mini-audit-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  color: var(--el-text-color-primary);
+}
+.mini-audit-more {
+  margin-left: auto;
+  margin-right: 8px;
+  font-size: 12px;
+  font-weight: normal;
+}
+.mini-audit-timeline {
+  padding: 4px 0;
+}
+.mini-audit-timeline :deep(.el-timeline-item__timestamp) {
+  font-size: 11px;
+  margin-bottom: 2px;
+}
+.mini-audit-timeline :deep(.el-timeline-item) {
+  padding-bottom: 10px;
+}
+.audit-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  flex-wrap: wrap;
+}
+.audit-actor {
+  color: var(--el-text-color-regular);
+  font-family: var(--el-font-family-mono, ui-monospace, monospace);
+}
+.audit-fields {
+  color: var(--el-text-color-secondary);
+}
+.version-line {
+  margin-top: 4px;
+  text-align: right;
+}
+.dialog-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+/* ── mini-map ───────────────────────────────────── */
+.mini-map-wrapper {
+  position: relative;
+  margin-bottom: 14px;
+  border-radius: 6px;
+  overflow: hidden;
+  border: 1px solid var(--el-border-color);
+  background: #0b1220;
+}
+.mini-map {
+  width: 100%;
+  height: 300px;
+  cursor: crosshair;
+}
+.mini-map-layer-switch {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 500;
+  background: rgba(0, 0, 0, 0.35);
+  padding: 3px;
+  border-radius: 4px;
+  backdrop-filter: blur(4px);
+}
+.mini-map-coord {
+  position: absolute;
+  left: 8px;
+  bottom: 8px;
+  z-index: 500;
+  font-family: var(--el-font-family-mono, ui-monospace, monospace);
+  font-size: 12px;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.55);
+  padding: 3px 8px;
+  border-radius: 4px;
+  letter-spacing: 0.3px;
+}
+.mini-map-coord .alt {
+  color: var(--el-text-color-secondary);
+  margin-left: 4px;
+}
+.mini-map-hint {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  z-index: 500;
+  font-size: 11px;
+  color: #dcdfe6;
+  background: rgba(0, 0, 0, 0.4);
+  padding: 2px 6px;
+  border-radius: 4px;
+}

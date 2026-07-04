@@ -1,0 +1,484 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>三维模型查看器</title>
+<script src="https://cesium.com/downloads/cesiumjs/releases/1.125/Build/Cesium/Cesium.js"></script>
+<link href="https://cesium.com/downloads/cesiumjs/releases/1.125/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
+<style>
+    *{margin:0;padding:0;box-sizing:border-box}
+    html,body{width:100%;height:100%;overflow:hidden;background:#111318;font-family:"Microsoft YaHei","PingFang SC",sans-serif}
+    #viewer{width:100%;height:100%}
+    .cesium-viewer-bottom,.cesium-viewer-toolbar{display:none!important}
+
+    #overlay{position:fixed;inset:0;z-index:100;display:flex;justify-content:center;align-items:center;background:#111318;transition:opacity .4s}
+    #overlay.done{opacity:0;pointer-events:none}
+    .ld-wrap{text-align:center;color:#79c0ff}
+    .ld-spinner{width:44px;height:44px;border:3px solid rgba(88,166,255,.2);border-top-color:#58a6ff;border-radius:50%;animation:spin .8s linear infinite;margin:0 auto 14px}
+    @keyframes spin{to{transform:rotate(360deg)}}
+    .ld-text{font-size:14px}.ld-sub{font-size:11px;color:#8b949e;margin-top:6px}.ld-err{color:#f85149}
+
+    #hint{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);z-index:50;
+        background:rgba(13,17,23,.85);color:#8b949e;padding:8px 18px;border-radius:6px;
+        font-size:12px;border:1px solid rgba(88,166,255,.2);opacity:1;transition:opacity 1s;pointer-events:none}
+    #hint.hide{opacity:0}
+
+    #measureBar{position:fixed;top:10px;left:50%;transform:translateX(-50%);z-index:90;
+        display:none;background:rgba(13,17,23,.92);border:1px solid rgba(88,166,255,.25);
+        border-radius:8px;padding:4px 6px;backdrop-filter:blur(10px);gap:4px;align-items:center}
+    #measureBar.show{display:flex}
+    .mb{height:30px;padding:0 12px;background:transparent;border:1px solid transparent;border-radius:5px;
+        color:#8b949e;font-size:12px;cursor:pointer;display:flex;align-items:center;gap:5px;
+        transition:all .15s;font-family:inherit;white-space:nowrap}
+    .mb:hover{background:rgba(255,255,255,.06);color:#e6edf3}
+    .mb.on{background:rgba(88,166,255,.15);border-color:rgba(88,166,255,.4);color:#58a6ff}
+    .mb svg{width:14px;height:14px;fill:currentColor}
+    .mb-sep{width:1px;height:18px;background:rgba(255,255,255,.1);flex-shrink:0}
+
+    #infoBox{position:fixed;bottom:50px;left:50%;transform:translateX(-50%);z-index:90;
+        display:none;background:rgba(13,17,23,.94);border:1px solid rgba(88,166,255,.25);
+        border-radius:8px;padding:10px 16px;backdrop-filter:blur(10px);color:#e6edf3;
+        font-size:12px;min-width:240px;text-align:center}
+    #infoBox.show{display:block}
+    .ib-label{color:#8b949e;font-size:11px;margin-bottom:4px}
+    .ib-val{font-size:14px;font-weight:600;color:#58a6ff;font-variant-numeric:tabular-nums}
+    .ib-row{display:flex;justify-content:center;gap:16px;margin-top:4px}
+    .ib-item{text-align:center}
+    .ib-item .k{color:#8b949e;font-size:10px}.ib-item .v{color:#e6edf3;font-size:12px;margin-top:1px}
+
+    #measureHint{position:fixed;top:50px;left:50%;transform:translateX(-50%);z-index:80;
+        display:none;background:rgba(255,215,0,.12);border:1px solid rgba(255,215,0,.3);
+        border-radius:6px;padding:6px 14px;color:#ffd700;font-size:11px;pointer-events:none}
+    #measureHint.show{display:block}
+
+    #zoomPanel{position:fixed;right:16px;top:50%;transform:translateY(-50%);z-index:90;
+        display:none;flex-direction:column;align-items:center;gap:6px;
+        background:rgba(13,17,23,.92);border:1px solid rgba(88,166,255,.25);
+        border-radius:8px;padding:10px 8px;backdrop-filter:blur(10px)}
+    #zoomPanel.show{display:flex}
+    .zoom-btn{width:30px;height:30px;border-radius:5px;border:1px solid rgba(88,166,255,.2);
+        background:rgba(255,255,255,.06);color:#c9d1d9;cursor:pointer;display:flex;
+        align-items:center;justify-content:center;font-size:16px;font-weight:700;
+        transition:all .15s;font-family:inherit;line-height:1}
+    .zoom-btn:hover{background:rgba(88,166,255,.15);border-color:rgba(88,166,255,.4);color:#58a6ff}
+    .zoom-btn svg{width:16px;height:16px;fill:currentColor}
+    .zoom-slider-track{width:4px;height:160px;background:rgba(255,255,255,.1);border-radius:2px;
+        position:relative;cursor:pointer}
+    .zoom-slider-fill{position:absolute;bottom:0;left:0;width:100%;background:rgba(88,166,255,.4);
+        border-radius:2px;pointer-events:none}
+    .zoom-slider-thumb{position:absolute;left:50%;transform:translate(-50%,-50%);width:14px;height:14px;
+        border-radius:50%;background:#58a6ff;border:2px solid #0d1117;cursor:grab;
+        box-shadow:0 0 6px rgba(88,166,255,.4);transition:box-shadow .15s}
+    .zoom-slider-thumb:hover,.zoom-slider-thumb:active{box-shadow:0 0 12px rgba(88,166,255,.6)}
+    .zoom-label{color:#8b949e;font-size:10px;margin-top:2px;white-space:nowrap}
+</style>
+</head>
+<body>
+
+<div id="viewer"></div>
+
+<div id="overlay">
+    <div class="ld-wrap">
+        <div class="ld-spinner"></div>
+        <div class="ld-text" id="ldText">正在加载三维模型...</div>
+        <div class="ld-sub" id="ldSub"></div>
+    </div>
+</div>
+
+<div id="hint">鼠标左键旋转 · 滚轮缩放 · 右键平移</div>
+
+<div id="measureBar">
+    <button class="mb" id="btnDist" onclick="toggleTool('dist')" title="点击两点测量距离">
+        <svg viewBox="0 0 24 24"><path d="M21 6H3c-1.1 0-2 .9-2 2v8c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2zm0 10H3V8h2v4h2V8h2v4h2V8h2v4h2V8h2v4h2V8h1v8z"/></svg>测距
+    </button>
+    <div class="mb-sep"></div>
+    <button class="mb" onclick="clearMeasure()" title="清除所有测量">
+        <svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>清除
+    </button>
+</div>
+
+<div id="infoBox"></div>
+<div id="measureHint"></div>
+
+<div id="zoomPanel">
+    <button class="zoom-btn" onclick="zoomStep(-1)" title="放大">
+        <svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
+    </button>
+    <div class="zoom-slider-track" id="zoomTrack">
+        <div class="zoom-slider-fill" id="zoomFill"></div>
+        <div class="zoom-slider-thumb" id="zoomThumb"></div>
+    </div>
+    <button class="zoom-btn" onclick="zoomStep(1)" title="缩小">
+        <svg viewBox="0 0 24 24"><path d="M19 13H5v-2h14v2z"/></svg>
+    </button>
+    <div class="zoom-label" id="zoomLabel"></div>
+</div>
+
+<script>
+const params = new URLSearchParams(location.search);
+const folder = params.get('folder') || '';
+const name = params.get('name') || '三维模型';
+
+if (window.__PLATFORM_CONFIG && window.__PLATFORM_CONFIG.cesium_ion_token) {
+    Cesium.Ion.defaultAccessToken = window.__PLATFORM_CONFIG.cesium_ion_token;
+}
+
+const viewer = new Cesium.Viewer('viewer', {
+    baseLayerPicker: false, geocoder: false, homeButton: false,
+    sceneModePicker: false, navigationHelpButton: false,
+    animation: false, timeline: false, fullscreenButton: false,
+    selectionIndicator: false, infoBox: false,
+    baseLayer: false,
+    terrainProvider: new Cesium.EllipsoidTerrainProvider(),
+    requestRenderMode: true,
+    maximumRenderTimeChange: Infinity,
+});
+
+const scene = viewer.scene;
+scene.backgroundColor = Cesium.Color.fromCssColorString('#111318');
+scene.globe.show = false;
+scene.skyBox.show = false;
+scene.skyAtmosphere.show = false;
+scene.sun.show = false;
+scene.moon.show = false;
+scene.fog.enabled = false;
+scene.light = new Cesium.DirectionalLight({ direction: new Cesium.Cartesian3(0.5, -1, -0.5) });
+
+scene.screenSpaceCameraController.minimumZoomDistance = 1;
+scene.screenSpaceCameraController.maximumZoomDistance = 50000;
+scene.screenSpaceCameraController.zoomEventTypes = [];
+scene.screenSpaceCameraController._zoomFactor = 3;
+
+const urls = [
+    '/3d/' + encodeURI(folder) + '/3dtiles/tileset.json',
+    '/3d/' + encodeURI(folder) + '/tileset.json',
+];
+
+// ═══════════════════════════════════════════════════════════
+// 模型加载
+// ═══════════════════════════════════════════════════════════
+async function loadModel() {
+    for (const url of urls) {
+        try {
+            const tileset = await Cesium.Cesium3DTileset.fromUrl(url, {
+                maximumScreenSpaceError: 4,
+                maximumMemoryUsage: 1536,
+                skipLevelOfDetail: true,
+                baseScreenSpaceError: 1024,
+                skipScreenSpaceErrorFactor: 16,
+                skipLevels: 1,
+                immediatelyLoadDesiredLevelOfDetail: true,
+                loadSiblings: false,
+                cullWithChildrenBounds: true,
+                dynamicScreenSpaceError: true,
+                dynamicScreenSpaceErrorDensity: 0.00278,
+                dynamicScreenSpaceErrorFactor: 4.0,
+            });
+
+            scene.primitives.add(tileset);
+            document.getElementById('ldSub').textContent = '模型已找到，正在渲染...';
+
+            viewer.zoomTo(tileset, new Cesium.HeadingPitchRange(
+                0, Cesium.Math.toRadians(-30), 0
+            )).then(() => {
+                viewer.requestRenderMode = false;
+            });
+
+            let hideTimer = null;
+            tileset.initialTilesLoaded.addEventListener(() => {
+                if (!hideTimer) {
+                    hideTimer = setTimeout(() => {
+                        document.getElementById('overlay').classList.add('done');
+                        document.getElementById('measureBar').classList.add('show');
+                        document.getElementById('zoomPanel').classList.add('show');
+                        notify('loaded');
+                    }, 300);
+                }
+            });
+
+            setTimeout(() => {
+                if (!hideTimer) {
+                    document.getElementById('overlay').classList.add('done');
+                    document.getElementById('measureBar').classList.add('show');
+                    document.getElementById('zoomPanel').classList.add('show');
+                    notify('loaded');
+                    hideTimer = true;
+                }
+            }, 8000);
+
+            setTimeout(() => { document.getElementById('hint').classList.add('hide'); }, 5000);
+            return;
+        } catch (e) { continue; }
+    }
+
+    document.getElementById('ldText').className = 'ld-err';
+    document.getElementById('ldText').textContent = '模型加载失败';
+    document.getElementById('ldSub').textContent = '请确认 3D Tiles 已转换（运行 convert_osgb.py）';
+    notify('error');
+}
+
+function notify(type) {
+    try { window.parent.postMessage({ type: 'm3d', status: type, name: name }, '*'); } catch(e) {}
+}
+
+// ═══════════════════════════════════════════════════════════
+// 测量工具
+// ═══════════════════════════════════════════════════════════
+let currentTool = null;
+let distPoints = [];
+let measureEntities = [];
+
+function toggleTool(tool) {
+    if (currentTool === tool) { currentTool = null; }
+    else { currentTool = tool; distPoints = []; }
+
+    document.getElementById('btnDist').classList.toggle('on', currentTool === 'dist');
+
+    const hintEl = document.getElementById('measureHint');
+    if (currentTool === 'dist') {
+        hintEl.textContent = '点击第一个测量点';
+        hintEl.classList.add('show');
+    } else {
+        hintEl.classList.remove('show');
+        document.getElementById('infoBox').classList.remove('show');
+    }
+    viewer.scene.canvas.style.cursor = currentTool ? 'crosshair' : '';
+}
+
+function clearMeasure() {
+    measureEntities.forEach(e => viewer.entities.remove(e));
+    measureEntities = [];
+    distPoints = [];
+    document.getElementById('infoBox').classList.remove('show');
+    document.getElementById('measureHint').classList.remove('show');
+    if (currentTool) toggleTool(currentTool);
+    scene.requestRender();
+}
+
+function addPoint(cartesian, color, size) {
+    const e = viewer.entities.add({
+        position: cartesian,
+        point: { pixelSize: size||8, color: Cesium.Color.fromCssColorString(color||'#58a6ff'),
+            outlineColor: Cesium.Color.WHITE, outlineWidth: 1.5,
+            disableDepthTestDistance: Number.POSITIVE_INFINITY },
+    });
+    measureEntities.push(e);
+    scene.requestRender();
+    return e;
+}
+
+function addLine(p1, p2) {
+    const e = viewer.entities.add({
+        polyline: { positions: [p1, p2], width: 2.5,
+            material: new Cesium.PolylineDashMaterialProperty({ color: Cesium.Color.fromCssColorString('#ffd700'), dashLength: 12 }),
+            disableDepthTestDistance: Number.POSITIVE_INFINITY },
+    });
+    measureEntities.push(e);
+    scene.requestRender();
+    return e;
+}
+
+function addLabel(cartesian, text) {
+    const e = viewer.entities.add({
+        position: cartesian,
+        label: { text, font: 'bold 13px Microsoft YaHei',
+            fillColor: Cesium.Color.WHITE, outlineColor: Cesium.Color.BLACK, outlineWidth: 3,
+            style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+            pixelOffset: new Cesium.Cartesian2(0, -22),
+            disableDepthTestDistance: Number.POSITIVE_INFINITY,
+            showBackground: true,
+            backgroundColor: new Cesium.Color(0,0,0,0.65),
+            backgroundPadding: new Cesium.Cartesian2(6,4) },
+    });
+    measureEntities.push(e);
+    scene.requestRender();
+    return e;
+}
+
+function formatDist(m) {
+    if (m >= 1000) return (m/1000).toFixed(3)+' km';
+    if (m >= 1) return m.toFixed(2)+' m';
+    return (m*100).toFixed(1)+' cm';
+}
+
+function handleMeasureClick(windowPos) {
+    if (!scene.pickPositionSupported) return;
+    const worldPos = scene.pickPosition(windowPos);
+    if (!Cesium.defined(worldPos)) return;
+
+    if (currentTool === 'dist') {
+        distPoints.push(worldPos);
+        if (distPoints.length === 1) {
+            addPoint(worldPos, '#3fb950', 9);
+            document.getElementById('measureHint').textContent = '点击第二个测量点';
+        } else if (distPoints.length === 2) {
+            const p1 = distPoints[0], p2 = distPoints[1];
+            addPoint(p2, '#f85149', 9);
+            addLine(p1, p2);
+
+            const dist3d = Cesium.Cartesian3.distance(p1, p2);
+            const mid = Cesium.Cartesian3.midpoint(p1, p2, new Cesium.Cartesian3());
+            addLabel(mid, formatDist(dist3d));
+
+            const c1 = Cesium.Cartographic.fromCartesian(p1);
+            const c2 = Cesium.Cartographic.fromCartesian(p2);
+            const geodesic = new Cesium.EllipsoidGeodesic(c1, c2);
+            const surfDist = geodesic.surfaceDistance;
+            const dh = Math.abs(c1.height - c2.height);
+
+            document.getElementById('infoBox').innerHTML =
+                '<div class="ib-label">距离测量结果</div>' +
+                '<div class="ib-val">' + formatDist(dist3d) + '</div>' +
+                '<div class="ib-row">' +
+                '<div class="ib-item"><div class="k">水平距离</div><div class="v">' + formatDist(surfDist) + '</div></div>' +
+                '<div class="ib-item"><div class="k">高差</div><div class="v">' + formatDist(dh) + '</div></div>' +
+                '</div>';
+            document.getElementById('infoBox').classList.add('show');
+
+            distPoints = [];
+            document.getElementById('measureHint').textContent = '点击第一个测量点（可继续测量）';
+        }
+    }
+}
+
+const measureHandler = new Cesium.ScreenSpaceEventHandler(scene.canvas);
+measureHandler.setInputAction(function(click) {
+    if (!currentTool) return;
+    handleMeasureClick(click.position);
+}, Cesium.ScreenSpaceEventType.LEFT_CLICK);
+
+document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && currentTool) toggleTool(currentTool);
+});
+
+// ═══════════════════════════════════════════════════════════
+// 缩放控制
+// ═══════════════════════════════════════════════════════════
+const ZOOM_MIN = 5;
+const ZOOM_MAX = 50000;
+const WHEEL_FACTOR = 0.15;
+
+let zoomDragging = false;
+
+function getCameraDistance() {
+  const cam = viewer.camera;
+  if (scene.primitives.length > 0) {
+    try {
+      const tileset = scene.primitives.get(0);
+      const center = tileset.boundingSphere.center;
+      return Cesium.Cartesian3.distance(cam.positionWC, center);
+    } catch(e) {}
+  }
+  return cam.positionCartographic.height || 1000;
+}
+
+function distToSlider(dist) {
+  const logMin = Math.log(ZOOM_MIN);
+  const logMax = Math.log(ZOOM_MAX);
+  const logDist = Math.log(Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, dist)));
+  return (logDist - logMin) / (logMax - logMin);
+}
+
+function sliderToDist(ratio) {
+  const logMin = Math.log(ZOOM_MIN);
+  const logMax = Math.log(ZOOM_MAX);
+  return Math.exp(logMin + ratio * (logMax - logMin));
+}
+
+function updateSliderUI() {
+  const dist = getCameraDistance();
+  const ratio = distToSlider(dist);
+  const track = document.getElementById('zoomTrack');
+  const thumb = document.getElementById('zoomThumb');
+  const fill = document.getElementById('zoomFill');
+  const label = document.getElementById('zoomLabel');
+  const h = track.clientHeight;
+
+  const pos = ratio * h;
+  thumb.style.top = pos + 'px';
+  fill.style.height = (h - pos) + 'px';
+
+  if (dist >= 1000) label.textContent = (dist/1000).toFixed(1) + ' km';
+  else label.textContent = Math.round(dist) + ' m';
+}
+
+function zoomCamera(factor) {
+  const cam = viewer.camera;
+  const dir = Cesium.Cartesian3.normalize(cam.direction, new Cesium.Cartesian3());
+  const dist = getCameraDistance();
+  const moveAmount = dist * factor;
+  cam.moveForward(moveAmount);
+  scene.requestRender();
+  requestAnimationFrame(updateSliderUI);
+}
+
+function zoomStep(direction) {
+  zoomCamera(direction < 0 ? 0.2 : -0.2);
+}
+
+function applySliderZoom(ratio) {
+  const targetDist = sliderToDist(ratio);
+  const currentDist = getCameraDistance();
+  const diff = targetDist - currentDist;
+  const cam = viewer.camera;
+  const dir = Cesium.Cartesian3.normalize(cam.direction, new Cesium.Cartesian3());
+  cam.moveForward(-diff);
+  scene.requestRender();
+  requestAnimationFrame(updateSliderUI);
+}
+
+(function initZoomSlider() {
+  const track = document.getElementById('zoomTrack');
+  const thumb = document.getElementById('zoomThumb');
+
+  function onPointerDown(e) {
+    zoomDragging = true;
+    thumb.style.cursor = 'grabbing';
+    e.preventDefault();
+    handleDrag(e);
+  }
+
+  function onPointerMove(e) {
+    if (!zoomDragging) return;
+    e.preventDefault();
+    handleDrag(e);
+  }
+
+  function onPointerUp() {
+    zoomDragging = false;
+    thumb.style.cursor = 'grab';
+  }
+
+  function handleDrag(e) {
+    const rect = track.getBoundingClientRect();
+    const y = (e.clientY || e.touches?.[0]?.clientY || 0) - rect.top;
+    const ratio = Math.max(0, Math.min(1, y / rect.height));
+    applySliderZoom(ratio);
+  }
+
+  thumb.addEventListener('mousedown', onPointerDown);
+  track.addEventListener('mousedown', (e) => { zoomDragging = true; handleDrag(e); });
+  document.addEventListener('mousemove', onPointerMove);
+  document.addEventListener('mouseup', onPointerUp);
+
+  thumb.addEventListener('touchstart', onPointerDown, { passive: false });
+  document.addEventListener('touchmove', (e) => { if (zoomDragging) { e.preventDefault(); handleDrag(e); }}, { passive: false });
+  document.addEventListener('touchend', onPointerUp);
+})();
+
+scene.canvas.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  const direction = e.deltaY > 0 ? -1 : 1;
+  zoomCamera(direction * WHEEL_FACTOR);
+}, { passive: false });
+
+scene.postRender.addEventListener(updateSliderUI);
+
+// ═══════════════════════════════════════════════════════════
+// 启动
+// ═══════════════════════════════════════════════════════════
+loadModel();
+</script>
+</body>
+</html>

@@ -1,0 +1,161 @@
+# ============================================================
+# 文物数字档案平台 —— 项目配置
+# 首次使用前请根据本县/区实际情况修改本文件。
+# 敏感字段（API Key）可写成 "${环境变量名}"，程序启动时自动替换。
+# ============================================================
+
+# ── 项目基本信息 ─────────────────────────────────────────────
+project:
+  # 县/区名称（作为所有 UI 与文档中的主体名）
+  name: "济宁市"
+  # 完整平台标题（浏览器标签、页面头显示用）
+  full_name: "济宁市不可移动文物数字档案平台"
+  # 数据截止日期（可选，仅做展示用）
+  data_cutoff: "2026-04-21"
+  # 数据来源（可选，页面脚注显示）
+  data_source: "公开演示数据（非真实档案）"
+
+# ── 地理信息 ─────────────────────────────────────────────────
+# 默认指向山东省济宁市全市范围；前端"设置 → 主视角"可级联下拉切到任一山东县/区，
+# 切到本省外的县/区时直接改这两组数值即可。
+geo:
+  # 地图初始视角中心（经度、纬度、相机高度，单位米）
+  center:
+    lng: 116.587
+    lat: 35.415
+    alt: 90000
+  # 行政区划外接矩形（离线瓦片范围、DEM 裁剪均基于此）
+  bounds:
+    west: 115.45
+    south: 34.45
+    east: 117.55
+    north: 35.95
+  # 档案坐标点的源坐标系（step02 用于将文物点位统一到 WGS-84）：
+  #   wgs84    国际标准（推荐；GPS 原始测量值）
+  #   gcj02    高德/国测局火星坐标（国内部分导出数据使用）
+  #   cgcs2000 国家大地 2000（与 WGS-84 差异亚米级，按 WGS-84 处理）
+  # demo 数据已经是 WGS-84，切到真实数据后视档案情况调整。
+  source_crs: "wgs84"
+
+  # 行政边界 Shapefile 的投影（step06 用于把 SHP 反投影到 WGS-84）：
+  #   none / wgs84 / cgcs2000  已是经纬度，无需反投影
+  #   gauss_kruger             高斯-克吕格投影（国内测绘成果最常见）
+  #   gcj02                    shp 本就是 GCJ-02 经纬度（少见）
+  # 当 projection: gauss_kruger 时，需设置本县所在经度带的中央经线。
+  # 常见省份参考：山东 117 / 江苏 120 / 安徽 117 / 河南 114 / 湖北 111 / 四川 105
+  #
+  # is_gcj02 = true 表示原始 shp 是"在 GCJ-02 经纬度上再做的高斯投影"
+  # （国内四普下发的镇街界常见这一类），开启后会在反投影后再做一次
+  # GCJ-02 → WGS-84 修正（~500m），保证和文物点位叠图时不漂移。
+  # 判断方法：先按 false 跑一次，如果发现多数点都系统性地向某一方向
+  # 偏出边界约 500 m，把它改成 true 即可。
+  #
+  # demo 数据的边界已经是 WGS-84 GeoJSON，不走 step06 反投影流程。
+  boundaries:
+    projection: "none"
+    central_meridian: 120.0
+    is_gcj02: false
+
+  # ── 坐标系显示与转换 ─────────────────────────────────────
+  # 全平台数据内部一律 WGS-84 经纬度，下面这些只控制 UI 显示与导出转换。
+  # 默认坐标读数 CRS（屏幕底部状态条 / CRS 检视面板）：
+  #   wgs84 / cgcs2000 / cgcs2000_gk_3 / cgcs2000_gk_6 / gcj02 / bd09 / web_mercator
+  display_crs: "wgs84"
+  # 高斯-克吕格 (CGCS2000) 默认参数。前端在设置面板里可临时覆盖。
+  gauss_kruger:
+    zone_width: 3              # 3°带 (测绘行业主流) / 6°带 (老规范)
+    central_meridian: "auto"   # 数值 (如 117.0) 或 "auto" 按经度自动选带
+    zone_prefix: true          # GK 的 x 前缀是否带带号 (例 38500000.0)
+  # CGCS2000 ↔ WGS84 7 参数 (Bursa-Wolf) 变换。null 时退化为 identity 近似
+  # (米级精度,已经满足绝大多数文物 GIS 工作)。需要 cm 级精度时,在这里填
+  # 测绘行政主管部门给出的 7 参（dx,dy,dz 单位 m, rx,ry,rz 单位角秒, ds 单位 ppm）。
+  cgcs2000:
+    helmert_params: null
+    # 示例（请改成你单位的实际值）：
+    # helmert_params:
+    #   dx: 0.5
+    #   dy: -0.3
+    #   dz: 0.2
+    #   rx: 0.01
+    #   ry: 0.02
+    #   rz: -0.01
+    #   ds: 0.1
+
+# ── 行政区划 ─────────────────────────────────────────────────
+administrative:
+  county_name: "演示县"
+  # 乡镇列表（按希望在地图/图表上显示的顺序排列）。
+  # 留空 [] 则 step06 会从边界 GeoJSON 自动提取并按字母顺序排列，
+  # 可在首次运行后回到这里手动调整顺序。
+  # 模板默认仅示范一个街道（示范街道），请替换为贵县/区的真实乡镇清单。
+  townships:
+    - "示范街道"
+
+# ── 功能开关 ─────────────────────────────────────────────────
+# auto  = 自动检测对应数据目录是否为空，空则关闭该功能
+# true  = 强制开启（缺数据会报错）
+# false = 强制关闭
+features:
+  enable_3d_model: auto       # 三维模型查看器
+  enable_worklog: auto        # 工作日志查看器
+  enable_dem: auto            # 本地 DEM 地形
+  enable_ai_chat: true        # AI 知识库问答（需 API Key）
+
+# ── 外部 API ─────────────────────────────────────────────────
+api:
+  # SiliconFlow 大模型（AI 问答功能）
+  siliconflow:
+    key: "${SILICONFLOW_KEY}"
+    base_url: "https://api.siliconflow.cn/v1"
+    default_model: "deepseek-ai/DeepSeek-V3.2"
+    available_models:
+      - id: "deepseek-ai/DeepSeek-V3.2"
+        name: "DeepSeek V3.2"
+      - id: "zai-org/GLM-5.1-Pro"
+        name: "GLM 5.1 Pro"
+      - id: "moonshotai/Kimi-K2.5"
+        name: "Kimi K2.5"
+    # 单次请求最大上下文条数
+    top_k_relics: 8
+    top_k_worklog: 10
+    history_turns: 10
+    temperature: 0.2
+
+  # Cesium Ion（在线高精度地形、可选）
+  cesium_ion:
+    token: "${CESIUM_ION_TOKEN}"
+
+# ── 服务设置 ─────────────────────────────────────────────────
+server:
+  host: "127.0.0.1"           # 改为 0.0.0.0 可供局域网访问
+  port: 8000
+  # 是否启用访问登录（admin 路由），true 时需在下方设置用户
+  enable_auth: false
+  users:
+    - username: "admin"
+      password: "changeme"
+
+# ── 数据管线参数 ─────────────────────────────────────────────
+# 一般不用改。如需调优各脚本行为在此修改。
+pipeline:
+  step01_convert_docs:
+    # 调用大模型将 DOCX 转 Markdown 时使用的模型
+    model: "deepseek-ai/DeepSeek-V3.2"
+    # 并发数（过大易触发 API 限流）
+    max_workers: 4
+    # 出错重试次数
+    max_retries: 3
+
+  step02_build_dataset:
+    # 高风险文物清单保留的 Top N（按 risk_score 降序）
+    high_risk_top_n: 50
+
+  step03_extract_photos:
+    # true = 若目标图片已存在则不从 DOCX 重新解压（断点续跑友好）
+    skip_existing: true
+
+  step04_extract_drawings:
+    skip_existing: true
+
+  step05_convert_worklogs:
+    # 当前版本无可调项；文件命名与布局固定为 YYYYMMDD*.xlsx
