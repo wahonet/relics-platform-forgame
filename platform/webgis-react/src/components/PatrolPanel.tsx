@@ -43,7 +43,6 @@ const STATUS_LABEL: Record<string, string> = {
 
 export function PatrolPanel() {
   const open = useUIStore((s) => s.patrolPanelOpen);
-  const setUI = useUIStore((s) => s.set);
   const showToast = useUIStore((s) => s.showToast);
 
   const picking = usePatrolStore((s) => s.picking);
@@ -190,16 +189,10 @@ export function PatrolPanel() {
     <>
       <div className="patrol-panel">
         <div className="pp-hdr">
-          <h3>文物巡查</h3>
+          <h3>巡查规划</h3>
           <span className="pp-hint">
             {config?.amap_enabled ? "高德路径已启用" : "直线连接(未配置高德 Key)"}
           </span>
-          <button
-            className="pp-close"
-            onClick={() => setUI({ patrolPanelOpen: false })}
-          >
-            ×
-          </button>
         </div>
 
         <div className="pp-tabs">

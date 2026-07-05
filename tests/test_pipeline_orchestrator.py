@@ -8,14 +8,14 @@ import run_pipeline
 
 def test_pipeline_includes_sqlite_build_step():
     ids = [step["id"] for step in run_pipeline.STEPS]
-    assert ids == ["01", "02", "03"]
+    assert ids == ["00", "01", "02", "03"]
     assert run_pipeline.STEPS[-1]["script"] == "step03_build_db.py"
 
 
 def test_select_steps_supports_skip():
     args = SimpleNamespace(only_id=None, from_id=None, to_id=None, skip_ids=["02"])
     selected = run_pipeline._select_steps(args)
-    assert [step["id"] for step in selected] == ["01", "03"]
+    assert [step["id"] for step in selected] == ["00", "01", "03"]
 
 
 def test_select_steps_supports_range_and_skip():

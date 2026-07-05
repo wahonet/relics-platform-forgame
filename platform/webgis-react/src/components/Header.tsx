@@ -6,24 +6,16 @@ import type { AppTab } from "../App";
 const NAV_TABS: { tab: AppTab; label: string; to: string }[] = [
   { tab: "map", label: "地图总览", to: "/" },
   { tab: "dashboard", label: "资源概览", to: "/dashboard" },
-  { tab: "catalog", label: "数据资源目录", to: "/catalog" },
+  { tab: "patrol", label: "文物巡查", to: "/patrol" },
   { tab: "admin", label: "系统管理", to: "/admin" },
 ];
 
 export function Header({ activeTab }: { activeTab: AppTab }) {
   const config = usePlatformStore((s) => s.config);
   const setUI = useUIStore((s) => s.set);
-  const patrolOpen = useUIStore((s) => s.patrolPanelOpen);
   const navigate = useNavigate();
-  const total = config?.stats?.relics_total ?? 0;
   const aiEnabled = config?.features?.ai_chat ?? false;
   const onMap = activeTab === "map";
-
-  const openPatrol = () => {
-    // 不在地图标签时先切回地图,再展开巡查面板
-    if (!onMap) navigate("/");
-    setUI({ patrolPanelOpen: !patrolOpen || !onMap, filterPanelOpen: false });
-  };
 
   return (
     <div className="header">
@@ -39,18 +31,9 @@ export function Header({ activeTab }: { activeTab: AppTab }) {
             {n.label}
           </Link>
         ))}
-        <button
-          className={"hdr-nav-item as-btn" + (onMap && patrolOpen ? " on" : "")}
-          onClick={openPatrol}
-        >
-          文物巡查
-        </button>
       </nav>
 
       <div className="hdr-right">
-        <span className="badge">
-          文物总量: <b>{total}</b>
-        </span>
         {aiEnabled ? (
           <button
             className="tb"

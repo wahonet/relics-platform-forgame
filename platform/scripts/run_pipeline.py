@@ -26,22 +26,29 @@ SCRIPTS_DIR = Path(__file__).resolve().parent
 
 STEPS = [
     {
+        "id": "00",
+        "name": "档案提取",
+        "script": "step00_convert_docs.py",
+        "requires": ["docs"],
+        "optional": True,
+    },
+    {
         "id": "01",
-        "name": "Import relics from Excel/CSV",
+        "name": "数据导入",
         "script": "step01_import_relics.py",
         "requires": ["relics_source"],
         "optional": False,
     },
     {
         "id": "02",
-        "name": "Prepare administrative boundaries",
+        "name": "边界处理",
         "script": "step02_prepare_boundaries.py",
         "requires": ["boundaries"],
         "optional": True,
     },
     {
         "id": "03",
-        "name": "Build SQLite database",
+        "name": "数据库构建",
         "script": "step03_build_db.py",
         "requires": [],
         "optional": False,
@@ -83,20 +90,28 @@ def _artifact(label: str, path: Path, patterns: tuple[str, ...] = (), kind: str 
 
 def _step_artifacts(step_id: str) -> dict:
     paths = get_paths()
+    md_art = _artifact("Markdown 档案", paths.input_markdown, ("*.md",))
+    xls_art = _artifact("台账表格", paths.input_relics, ("*.xlsx", "*.xls", "*.csv"))
+    # step01 两种数据源二选一:优先展示已存在的那种,都缺时展示 markdown
+    step01_input = md_art if (md_art["exists"] or not xls_art["exists"]) else xls_art
     return {
+        "00": {
+            "inputs": [_artifact("登记表 docx", paths.input_docs, ("*.docx",))],
+            "outputs": [_artifact("Markdown 档案", paths.input_markdown, ("*.md",))],
+        },
         "01": {
-            "inputs": [_artifact("Relics spreadsheet", paths.input_relics, ("*.xlsx", "*.xls", "*.csv"))],
+            "inputs": [step01_input],
             "outputs": [
-                _artifact("relics_full.json", paths.output_dataset / "relics_full.json", kind="file"),
-                _artifact("photo_index.csv", paths.output_dataset / "photo_index.csv", kind="file"),
+                _artifact("标准数据集", paths.output_dataset / "relics_full.json", kind="file"),
+                _artifact("照片索引", paths.output_dataset / "photo_index.csv", kind="file"),
             ],
         },
         "02": {
-            "inputs": [_artifact("Boundary sources", paths.input_boundaries, ("*.shp", "*.geojson", "*.json"))],
-            "outputs": [_artifact("Boundary GeoJSON", paths.output_boundaries, ("*.geojson", "*.json"))],
+            "inputs": [_artifact("边界源数据", paths.input_boundaries, ("*.shp", "*.geojson", "*.json"))],
+            "outputs": [_artifact("边界 GeoJSON", paths.output_boundaries, ("*.geojson", "*.json"))],
         },
         "03": {
-            "inputs": [_artifact("relics_full.json", paths.output_dataset / "relics_full.json", kind="file")],
+            "inputs": [_artifact("标准数据集", paths.output_dataset / "relics_full.json", kind="file")],
             "outputs": [_artifact("relics.db", paths.output_dataset / "relics.db", kind="file")],
         },
     }.get(step_id, {"inputs": [], "outputs": []})
@@ -221,6 +236,8 @@ def main() -> int:
         return 0
 
     log = get_logger("pipeline")
+    log.info("=" * 56)
+    log.info("pipeline 启动 | argv: %s", " ".join(sys.argv[1:]) or "(全部步骤)")
     selected = _select_steps(args)
 
     if not selected:

@@ -1,22 +1,17 @@
-"""Step 01 | 从文物台账 Excel/CSV 导入,生成标准化数据集。
+"""Step 01 | 导入文物数据,生成标准化数据集。
 
-输入:
-    data/input/01_relics/*.xlsx | *.csv     文物台账(第一个匹配文件)
-    data/input/01_relics/protection_zones.geojson   两线范围面(可选)
-    data/input/02_media/photos/{code}/*     照片(可选)
-    data/input/02_media/drawings/{code}/*   图纸(可选)
-    data/input/06_archive_docs/{code}/{sanpu|sipu}/*.pdf   普查档案(可选)
+数据源(按优先级):
+    A. Markdown 档案  data/input/01_relics/markdown/{分组}/*.md
+       (step00 从四普登记表 docx 提取的产物,含简介/DMS坐标/本体边界/清单)
+       照片与图纸直接从 data/input/00_docs 对应 docx 内嵌图片按清单顺序抽取。
+    B. 台账 Excel/CSV data/input/01_relics/*.xlsx|csv (旧格式,兼容保留)
 
 输出:
     data/output/dataset/relics_full.json
     data/output/dataset/relics_points.geojson
-    data/output/dataset/relics_polygons.geojson   (若有两线面数据)
+    data/output/dataset/relics_polygons.geojson   (本体边界 kind=body + 两线面)
     data/output/dataset/photo_index.csv / drawing_index.csv
     data/output/photos/{code}/... / data/output/drawings/{code}/...
-
-台账列名(容错匹配,详见 _COLUMN_ALIASES):
-    编号 名称 级别 类别 年代 县区 乡镇 村 地址 经度 纬度 高程
-    简介 保存状况 保护范围 建设控制地带 数据层级 公布批次
 """
 from __future__ import annotations
 
@@ -28,10 +23,11 @@ from pathlib import Path
 
 from _common import get_logger, get_paths, load_config
 from codes import normalize_category, normalize_rank, parse_coord
+from md_archive import extract_media_from_docx, parse_archive_md
 
 log = get_logger("step01_import_relics")
 
-# 台账中文列名 → 内部字段
+# ── 台账中文列名 → 内部字段(Excel 兼容路径用) ─────────────────
 _COLUMN_ALIASES: dict[str, str] = {
     "编号": "archive_code", "档案编号": "archive_code", "文物编号": "archive_code", "code": "archive_code",
     "名称": "name", "文物名称": "name", "name": "name",
@@ -64,6 +60,159 @@ _TIER_ALIASES = {
 _CONDITIONS = ("好", "较好", "一般", "较差", "差")
 
 
+# ════════════════════════════════════════════════════════════
+# A. Markdown 档案导入
+# ════════════════════════════════════════════════════════════
+
+def _find_docx_for(md_path: Path, code: str, docs_root: Path) -> Path | None:
+    """按分组同名/档案号前缀匹配源 docx(照片图纸内嵌其中)。"""
+    if not docs_root.exists():
+        return None
+    group = md_path.parent.name
+    candidates = []
+    group_dir = docs_root / group
+    if group_dir.exists():
+        candidates.append(group_dir / f"{md_path.stem}.docx")
+        candidates.extend(sorted(group_dir.glob(f"{code}*.docx")))
+    candidates.append(docs_root / f"{md_path.stem}.docx")
+    candidates.extend(sorted(docs_root.glob(f"{code}*.docx")))
+    for c in candidates:
+        if c.exists():
+            return c
+    return None
+
+
+def _copy_media_dir(src_root: Path, dst_root: Path, code: str,
+                    kinds: tuple[str, ...]) -> list[dict]:
+    """input/02_media/{photos|drawings}/{code}/ → output;返回索引行。"""
+    index: list[dict] = []
+    code_dir = src_root / code
+    if not code_dir.exists():
+        return index
+    for f in sorted(code_dir.rglob("*")):
+        if not f.is_file() or f.suffix.lower() not in kinds:
+            continue
+        rel = f"{code}/{f.name}"
+        dst = dst_root / rel
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        if not dst.exists():
+            shutil.copy2(f, dst)
+        index.append({"archive_code": code, "path": rel})
+    return index
+
+
+def import_from_markdown(paths, cfg: dict) -> tuple[list[dict], list[dict], list[dict], list[dict]] | None:
+    """解析 markdown 档案。返回 (relics, photo_index, drawing_index, boundary_features);
+    没有 md 文件时返回 None(让调用方走 Excel 路径)。"""
+    md_root = paths.input_markdown
+    md_files: list[Path] = []
+    if md_root.exists():
+        md_files = sorted(p for p in md_root.rglob("*.md") if not p.name.endswith("_QC.md"))
+    if not md_files:
+        return None
+
+    log.info("[MD] 发现 %d 个 markdown 档案: %s", len(md_files), md_root)
+
+    full_tier_county = ((cfg.get("administrative") or {}).get("full_tier_county") or "").strip()
+    src_crs = ((cfg.get("geo") or {}).get("source_crs") or "wgs84").lower()
+
+    relics: list[dict] = []
+    photo_index: list[dict] = []
+    drawing_index: list[dict] = []
+    boundary_features: list[dict] = []
+    seen: set[str] = set()
+    n_fail = n_media_docx = n_media_dir = 0
+
+    for md_path in md_files:
+        group = md_path.parent.name if md_path.parent != md_root else ""
+        try:
+            r = parse_archive_md(md_path, group_name=group)
+        except Exception as e:  # noqa: BLE001
+            log.warning("[MD] 解析失败 %s: %s", md_path.name, e)
+            n_fail += 1
+            continue
+
+        code = r.get("archive_code") or ""
+        name = r.get("name") or ""
+        if not code or not name:
+            log.warning("[MD] 缺编号或名称,跳过: %s", md_path.name)
+            n_fail += 1
+            continue
+        if code in seen:
+            log.warning("[MD] 重复编号,跳过: %s (%s)", code, md_path.name)
+            continue
+        if r.get("center_lng") is None or r.get("center_lat") is None:
+            log.warning("[MD] 无有效坐标,跳过: %s %s", code, name)
+            n_fail += 1
+            continue
+        seen.add(code)
+
+        if src_crs == "gcj02":
+            from _common import gcj02_to_wgs84
+            r["center_lng"], r["center_lat"] = gcj02_to_wgs84(r["center_lng"], r["center_lat"])
+
+        boundary_points = r.pop("_boundary_points", [])
+        drawings_meta = r.pop("_drawings_meta", [])
+        photos_meta = r.pop("_photos_meta", [])
+
+        # 保存状况兜底 + 层级判定(全量层县 → full)
+        cond = r.get("condition_level", "")
+        r["condition_level"] = cond if cond in _CONDITIONS else (cond or "一般")
+        r["tier"] = "full" if (full_tier_county and full_tier_county in (r.get("county") or "")) else "city"
+        r["heritage_level"] = r.get("heritage_level") or "尚未核定公布为文物保护单位的不可移动文物"
+        r["category_main"] = r.get("category_main") or "其他"
+        if not r.get("era_stats"):
+            r["era_stats"] = r.get("era", "")
+        r["center_alt"] = r.get("center_alt") if r.get("center_alt") is not None else 0.0
+        r["category_code"] = normalize_category(r.get("category_main"))
+        r["rank_code"] = normalize_rank(r.get("heritage_level"))
+
+        # 本体边界(≥3 个边界点成面, kind=body)
+        r["has_boundary"] = len(boundary_points) >= 3
+        r["boundary_count"] = len(boundary_points)
+        if r["has_boundary"]:
+            ring = [[p["lng"], p["lat"]] for p in boundary_points]
+            ring.append(ring[0])
+            boundary_features.append({
+                "type": "Feature",
+                "properties": {"archive_code": code, "kind": "body", "name": name},
+                "geometry": {"type": "Polygon", "coordinates": [ring]},
+            })
+
+        # 媒体:优先从源 docx 抽取内嵌图片,否则回退 02_media 目录
+        docx = _find_docx_for(md_path, code, paths.input_docs)
+        if docx and (drawings_meta or photos_meta):
+            try:
+                d_rows, p_rows = extract_media_from_docx(
+                    docx, code, drawings_meta, photos_meta,
+                    paths.output_drawings, paths.output_photos,
+                )
+                drawing_index.extend(d_rows)
+                photo_index.extend(p_rows)
+                n_media_docx += 1
+            except Exception as e:  # noqa: BLE001
+                log.warning("[MD] %s 抽取 docx 图片失败: %s", code, e)
+        else:
+            p_rows = _copy_media_dir(paths.input_media / "photos", paths.output_photos,
+                                     code, (".jpg", ".jpeg", ".png", ".webp"))
+            d_rows = _copy_media_dir(paths.input_media / "drawings", paths.output_drawings,
+                                     code, (".jpg", ".jpeg", ".png", ".webp", ".pdf"))
+            photo_index.extend(p_rows)
+            drawing_index.extend(d_rows)
+            if p_rows or d_rows:
+                n_media_dir += 1
+
+        relics.append(r)
+
+    log.info("[MD] 解析成功 %d / 失败 %d;媒体来源: docx %d 处 / 目录 %d 处",
+             len(relics), n_fail, n_media_docx, n_media_dir)
+    return relics, photo_index, drawing_index, boundary_features
+
+
+# ════════════════════════════════════════════════════════════
+# B. Excel/CSV 台账导入(旧格式兼容)
+# ════════════════════════════════════════════════════════════
+
 def _find_source(input_dir: Path) -> Path | None:
     for pat in ("*.xlsx", "*.xls", "*.csv"):
         files = sorted(p for p in input_dir.glob(pat) if not p.name.startswith("~"))
@@ -73,7 +222,6 @@ def _find_source(input_dir: Path) -> Path | None:
 
 
 def _read_rows(src: Path) -> list[dict]:
-    """读台账 → [{中文列: 值}]。"""
     if src.suffix.lower() == ".csv":
         with src.open("r", encoding="utf-8-sig") as f:
             return list(csv.DictReader(f))
@@ -101,7 +249,6 @@ def _read_rows(src: Path) -> list[dict]:
 
 
 def _normalize_row(raw: dict) -> dict:
-    """中文列 → 内部字段,并做基础清洗。"""
     r: dict = {}
     for k, v in raw.items():
         key = _COLUMN_ALIASES.get(str(k).strip())
@@ -140,8 +287,6 @@ def _normalize_row(raw: dict) -> dict:
 
 
 def _copy_media(src_root: Path, dst_root: Path, kinds: tuple[str, ...]) -> list[dict]:
-    """input/02_media/{photos|drawings}/{code}/* → output/{photos|drawings}/{code}/*。
-    返回索引 [{archive_code, path}]。已存在的同名文件跳过。"""
     index: list[dict] = []
     if not src_root.exists():
         return index
@@ -161,8 +306,49 @@ def _copy_media(src_root: Path, dst_root: Path, kinds: tuple[str, ...]) -> list[
     return index
 
 
+def import_from_excel(paths, cfg: dict) -> tuple[list[dict], list[dict], list[dict], list[dict]] | None:
+    src = _find_source(paths.input_relics)
+    if not src:
+        return None
+    src_crs = ((cfg.get("geo") or {}).get("source_crs") or "wgs84").lower()
+
+    log.info("[Excel] 台账: %s", src.name)
+    raw_rows = _read_rows(src)
+    log.info("[Excel] 读到 %d 行", len(raw_rows))
+
+    relics: list[dict] = []
+    seen: set[str] = set()
+    for raw in raw_rows:
+        r = _normalize_row(raw)
+        if not r:
+            continue
+        if r["archive_code"] in seen:
+            log.warning("重复编号,跳过: %s", r["archive_code"])
+            continue
+        seen.add(r["archive_code"])
+        if src_crs == "gcj02":
+            from _common import gcj02_to_wgs84
+            r["center_lng"], r["center_lat"] = gcj02_to_wgs84(r["center_lng"], r["center_lat"])
+        r["category_code"] = normalize_category(r.get("category_main"))
+        r["rank_code"] = normalize_rank(r.get("heritage_level"))
+        relics.append(r)
+
+    if not relics:
+        log.error("有效记录为 0,请检查台账列名与内容")
+        return None
+
+    photo_index = _copy_media(paths.input_media / "photos", paths.output_photos,
+                              (".jpg", ".jpeg", ".png", ".webp"))
+    drawing_index = _copy_media(paths.input_media / "drawings", paths.output_drawings,
+                                (".jpg", ".jpeg", ".png", ".webp", ".pdf"))
+    return relics, photo_index, drawing_index, []
+
+
+# ════════════════════════════════════════════════════════════
+# 公共产物输出
+# ════════════════════════════════════════════════════════════
+
 def _scan_archive_docs(root: Path) -> dict[str, dict[str, int]]:
-    """{code: {"sanpu": n, "sipu": n}}"""
     out: dict[str, dict[str, int]] = {}
     if not root.exists():
         return out
@@ -198,59 +384,63 @@ def _write_points_geojson(relics: list[dict], out: Path) -> None:
     )
 
 
+def _write_polygons_geojson(boundary_features: list[dict], paths, out: Path) -> None:
+    """本体边界(md 解析) + 两线范围面(protection_zones.geojson,若有)合并输出。"""
+    feats = list(boundary_features)
+    zones = paths.input_relics / "protection_zones.geojson"
+    if zones.exists():
+        try:
+            data = json.loads(zones.read_text(encoding="utf-8"))
+            extra = data.get("features") or []
+            feats.extend(extra)
+            log.info("[导出] 合并两线范围面 %d 个要素", len(extra))
+        except Exception as e:  # noqa: BLE001
+            log.warning("[导出] protection_zones.geojson 解析失败: %s", e)
+    if not feats:
+        return
+    out.write_text(
+        json.dumps({"type": "FeatureCollection", "features": feats}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    log.info("[导出] relics_polygons.geojson: %d 个面", len(feats))
+
+
+def _write_index_csv(rows: list[dict], out: Path, fields: list[str]) -> None:
+    with out.open("w", encoding="utf-8-sig", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=fields, extrasaction="ignore")
+        w.writeheader()
+        w.writerows(rows)
+
+
 def main() -> int:
     paths = get_paths()
     cfg = load_config()
-    src_crs = ((cfg.get("geo") or {}).get("source_crs") or "wgs84").lower()
 
-    src = _find_source(paths.input_relics)
-    if not src:
+    result = import_from_markdown(paths, cfg)
+    source = "markdown"
+    if result is None:
+        result = import_from_excel(paths, cfg)
+        source = "excel"
+    if result is None:
         if (paths.output_dataset / "relics_full.json").exists():
-            log.info("未找到台账,但 relics_full.json 已存在(可能来自演示数据生成器),跳过导入。")
+            log.info("未找到 markdown 档案或台账,但 relics_full.json 已存在,跳过导入。")
             return 0
-        log.error("未在 %s 找到台账 (*.xlsx / *.csv)。可先运行 tools/generate_demo_data.py 生成演示数据。",
-                  paths.input_relics)
+        log.error("未找到数据源。请把 markdown 档案放入 %s,或台账 Excel/CSV 放入 %s。",
+                  paths.input_markdown, paths.input_relics)
         return 2
 
-    log.info("[导入] 台账: %s", src.name)
-    raw_rows = _read_rows(src)
-    log.info("[导入] 读到 %d 行", len(raw_rows))
+    relics, photo_index, drawing_index, boundary_features = result
 
-    relics: list[dict] = []
-    seen: set[str] = set()
-    for raw in raw_rows:
-        r = _normalize_row(raw)
-        if not r:
-            continue
-        if r["archive_code"] in seen:
-            log.warning("重复编号,跳过: %s", r["archive_code"])
-            continue
-        seen.add(r["archive_code"])
+    # 普查档案 PDF / 三维模型标记 + 媒体计数
+    archives = _scan_archive_docs(paths.input_archive_docs)
+    models_root = paths.input_models_3d
 
-        if src_crs == "gcj02":
-            from _common import gcj02_to_wgs84
-            r["center_lng"], r["center_lat"] = gcj02_to_wgs84(r["center_lng"], r["center_lat"])
-
-        relics.append(r)
-
-    if not relics:
-        log.error("有效记录为 0,请检查台账列名与内容")
-        return 2
-
-    # 媒体归位 + 计数
-    photo_index = _copy_media(paths.input_media / "photos", paths.output_photos,
-                              (".jpg", ".jpeg", ".png", ".webp"))
-    drawing_index = _copy_media(paths.input_media / "drawings", paths.output_drawings,
-                                (".jpg", ".jpeg", ".png", ".webp", ".pdf"))
     photo_count: dict[str, int] = {}
     for p in photo_index:
         photo_count[p["archive_code"]] = photo_count.get(p["archive_code"], 0) + 1
     drawing_count: dict[str, int] = {}
     for d in drawing_index:
         drawing_count[d["archive_code"]] = drawing_count.get(d["archive_code"], 0) + 1
-
-    archives = _scan_archive_docs(paths.input_archive_docs)
-    models_root = paths.input_models_3d
 
     for r in relics:
         code = r["archive_code"]
@@ -261,35 +451,25 @@ def main() -> int:
         r["has_archive_fpu"] = bool(arch.get("sipu"))
         model_dir = models_root / code
         r["has_3d"] = model_dir.exists() and any(model_dir.iterdir()) if model_dir.exists() else bool(r.get("has_3d"))
-        r["category_code"] = normalize_category(r.get("category_main"))
-        r["rank_code"] = normalize_rank(r.get("heritage_level"))
 
     paths.output_dataset.mkdir(parents=True, exist_ok=True)
     out_json = paths.output_dataset / "relics_full.json"
     out_json.write_text(json.dumps(relics, ensure_ascii=False, indent=1), encoding="utf-8")
-    log.info("[导入] relics_full.json: %d 条", len(relics))
+    log.info("[导出] relics_full.json: %d 条 (数据源: %s)", len(relics), source)
 
     _write_points_geojson(relics, paths.output_dataset / "relics_points.geojson")
+    _write_polygons_geojson(boundary_features, paths, paths.output_dataset / "relics_polygons.geojson")
 
-    zones = paths.input_relics / "protection_zones.geojson"
-    if zones.exists():
-        shutil.copy2(zones, paths.output_dataset / "relics_polygons.geojson")
-        log.info("[导入] 两线范围面: 已复制 protection_zones.geojson")
-
-    with (paths.output_dataset / "photo_index.csv").open("w", encoding="utf-8-sig", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=["archive_code", "path"])
-        w.writeheader()
-        w.writerows(photo_index)
-    with (paths.output_dataset / "drawing_index.csv").open("w", encoding="utf-8-sig", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=["archive_code", "path"])
-        w.writeheader()
-        w.writerows(drawing_index)
-    log.info("[导入] 照片 %d 张 / 图纸 %d 张", len(photo_index), len(drawing_index))
+    _write_index_csv(photo_index, paths.output_dataset / "photo_index.csv",
+                     ["archive_code", "path", "photo_no", "description"])
+    _write_index_csv(drawing_index, paths.output_dataset / "drawing_index.csv",
+                     ["archive_code", "path", "drawing_no", "drawing_name"])
+    log.info("[导出] 照片 %d 张 / 图纸 %d 张", len(photo_index), len(drawing_index))
 
     by_tier = {"city": 0, "full": 0}
     for r in relics:
         by_tier[r.get("tier", "city")] = by_tier.get(r.get("tier", "city"), 0) + 1
-    log.info("[导入] 完成。基础层 %d 条 / 全量层 %d 条", by_tier.get("city", 0), by_tier.get("full", 0))
+    log.info("[导出] 完成。基础层 %d 条 / 全量层 %d 条", by_tier.get("city", 0), by_tier.get("full", 0))
     return 0
 
 

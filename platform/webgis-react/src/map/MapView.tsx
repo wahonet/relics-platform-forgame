@@ -10,6 +10,7 @@ import { RouteLayer, setRouteLayer } from "./RouteLayer";
 import { useUIStore } from "../stores/uiStore";
 import { useFilterStore } from "../stores/filterStore";
 import { useRelicsStore } from "../stores/relicsStore";
+import { usePlatformStore } from "../stores/platformStore";
 import { useHomeViewStore } from "../stores/homeViewStore";
 import { useMouseCoordStore } from "../stores/mouseCoordStore";
 import { usePatrolStore } from "../stores/patrolStore";
@@ -351,33 +352,60 @@ export function MapView({ onCompassRotate, onScaleUpdate }: MapViewProps) {
     };
   }, [selectedRelic?.archive_code, selectedRelic?.has_boundary]);
 
+  // 初始视口:优先用户保存的主视角;否则等平台配置加载完成后按市域范围取景。
+  // (viewer 创建时配置往往尚未拉取完成,useCesiumViewer 里只是兜底占位)
+  const platformLoaded = usePlatformStore((s) => s.loaded);
   const homeAppliedRef = useRef(false);
   useEffect(() => {
     if (homeAppliedRef.current) return;
     const viewer = viewerRef.current;
-    if (!viewer || !homeView) return;
+    if (!viewer) return;
+    const dest = homeView
+      ? Cesium.Cartesian3.fromDegrees(homeView.lng, homeView.lat, homeView.h)
+      : platformLoaded
+        ? configHomeDestination()
+        : null;
+    if (!dest) return;
     viewer.camera.flyTo({
-      destination: Cesium.Cartesian3.fromDegrees(homeView.lng, homeView.lat, homeView.h),
+      destination: dest,
       orientation: { heading: 0, pitch: Cesium.Math.toRadians(-90), roll: 0 },
       duration: 0,
     });
     homeAppliedRef.current = true;
-  }, [viewerRef, homeView]);
+  }, [viewerRef, homeView, platformLoaded]);
 
   return <div ref={containerRef} className="map-container" />;
+}
+
+/**
+ * 无用户主视角时的默认取景:优先按 config.geo.bounds 整域取景
+ * (Cesium 自动算相机高度,任何窗口比例下都能完整装下全市),
+ * 无 bounds 时退回 center 点位。
+ */
+function configHomeDestination(): Cesium.Cartesian3 | Cesium.Rectangle | null {
+  const geo = window.__PLATFORM_CONFIG?.geo;
+  const b = geo?.bounds;
+  if (b && b.west < b.east && b.south < b.north) {
+    // 四周留 ~15% 边距,还原大屏"市域居中、周边压暗"的构图
+    const padLng = (b.east - b.west) * 0.15;
+    const padLat = (b.north - b.south) * 0.15;
+    return Cesium.Rectangle.fromDegrees(
+      b.west - padLng, b.south - padLat, b.east + padLng, b.north + padLat,
+    );
+  }
+  const c = geo?.center;
+  if (c) return Cesium.Cartesian3.fromDegrees(c.lng, c.lat, c.alt ?? 220_000);
+  return null;
 }
 
 export function flyHomeFn(viewer: Cesium.Viewer | null): void {
   if (!viewer) return;
   const home = useHomeViewStore.getState().view;
-  const cfg = window.__PLATFORM_CONFIG;
-  const dest = home || {
-    lng: cfg?.geo?.center?.lng ?? 116.34,
-    lat: cfg?.geo?.center?.lat ?? 35.41,
-    h: cfg?.geo?.center?.alt ?? 75000,
-  };
+  const dest = home
+    ? Cesium.Cartesian3.fromDegrees(home.lng, home.lat, home.h)
+    : configHomeDestination() ?? Cesium.Cartesian3.fromDegrees(116.587, 35.415, 220_000);
   viewer.camera.flyTo({
-    destination: Cesium.Cartesian3.fromDegrees(dest.lng, dest.lat, dest.h),
+    destination: dest,
     orientation: { heading: 0, pitch: Cesium.Math.toRadians(-90), roll: 0 },
     duration: 1.2,
   });

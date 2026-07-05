@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useUIStore } from "../stores/uiStore";
 import { useFilterStore } from "../stores/filterStore";
 import { useRelicsStore } from "../stores/relicsStore";
+import { usePlatformStore } from "../stores/platformStore";
 import { flyHomeFn } from "../map/MapView";
 import { getViewer } from "../map/viewerRegistry";
 import { passFilter } from "./FilterPanel";
@@ -9,10 +10,12 @@ import { DIMS } from "../utils/dict";
 import type { BaseLayerType } from "../types";
 
 const BASE_OPTIONS: { value: BaseLayerType; label: string }[] = [
-  { value: "arcgis_sat", label: "离线影像" },
-  { value: "osm", label: "离线矢量" },
+  { value: "tianditu_img", label: "在线影像 (天地图)" },
+  { value: "tianditu_vec", label: "在线矢量 (天地图)" },
   { value: "gaode_sat", label: "在线影像 (高德)" },
   { value: "gaode_vec", label: "在线矢量 (高德)" },
+  { value: "arcgis_sat", label: "离线影像" },
+  { value: "osm", label: "离线矢量" },
   { value: "none", label: "无底图" },
 ];
 
@@ -62,6 +65,15 @@ export function Toolbar() {
   const baseMenuRef = useRef<HTMLDivElement>(null);
   const boundaryMenuRef = useRef<HTMLDivElement>(null);
 
+  const tiandituEnabled = usePlatformStore((s) => !!s.config?.features?.tianditu);
+  const baseOptions = useMemo(
+    () =>
+      tiandituEnabled
+        ? BASE_OPTIONS
+        : BASE_OPTIONS.filter((o) => !o.value.startsWith("tianditu")),
+    [tiandituEnabled],
+  );
+
   useEffect(() => {
     const handler = (e: MouseEvent) => {
       const t = e.target as Node;
@@ -77,7 +89,7 @@ export function Toolbar() {
   }, []);
 
   const baseLabel =
-    BASE_OPTIONS.find((o) => o.value === baseLayer)?.label || "底图影像";
+    baseOptions.find((o) => o.value === baseLayer)?.label || "底图影像";
 
   const onReset = () => {
     const cats = useRelicsStore.getState().all.map((r) => r.category_main || "");
@@ -130,7 +142,7 @@ export function Toolbar() {
               className="dropdown-menu open"
               style={{ left: 0, top: "calc(100% + 4px)" }}
             >
-              {BASE_OPTIONS.map((opt) => (
+              {baseOptions.map((opt) => (
                 <div
                   key={opt.value}
                   className={

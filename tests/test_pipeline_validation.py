@@ -8,7 +8,9 @@ import run_pipeline
 
 def _fake_paths(root):
     return SimpleNamespace(
+        input_docs=root / "data" / "input" / "00_docs",
         input_relics=root / "data" / "input" / "01_relics",
+        input_markdown=root / "data" / "input" / "01_relics" / "markdown",
         input_media=root / "data" / "input" / "02_media",
         input_boundaries=root / "data" / "input" / "03_boundaries",
         input_dem=root / "data" / "input" / "04_dem",
@@ -35,10 +37,12 @@ def test_step_evaluation_reports_inputs_and_outputs(tmp_path, monkeypatch):
     step = next(s for s in run_pipeline.STEPS if s["id"] == "01")
     result = run_pipeline._evaluate_step(step, features={})
 
+    # 无 markdown 档案时,step01 输入应回退展示台账 Excel/CSV
+    assert result["inputs"][0]["label"] == "台账表格"
     assert result["inputs"][0]["exists"] is True
     assert result["inputs"][0]["count"] == 1
     assert result["outputs"][0]["exists"] is False
-    assert result["missing_outputs"][0]["label"] == "relics_full.json"
+    assert result["missing_outputs"][0]["label"] == "标准数据集"
 
 
 def test_manifest_writer_records_selected_steps(tmp_path, monkeypatch):
@@ -46,7 +50,7 @@ def test_manifest_writer_records_selected_steps(tmp_path, monkeypatch):
     monkeypatch.setattr(run_pipeline, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(run_pipeline, "get_paths", lambda: paths)
 
-    selected = [run_pipeline.STEPS[0]]
+    selected = [next(s for s in run_pipeline.STEPS if s["id"] == "01")]
     manifest_path = run_pipeline._write_manifest(
         [{"id": "01", "status": "done"}],
         "done",

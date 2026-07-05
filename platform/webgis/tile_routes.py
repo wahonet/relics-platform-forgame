@@ -32,6 +32,12 @@ _EMPTY_TILE = base64.b64decode(
     "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAeAMBPAAB2ClDBAAAAABJRU5ErkJggg=="
 )
 
+_TDT_WMTS = (
+    "https://t{{s}}.tianditu.gov.cn/{layer}_w/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0"
+    "&LAYER={layer}&STYLE=default&TILEMATRIXSET=w&FORMAT=tiles"
+    "&TILEMATRIX={{z}}&TILEROW={{y}}&TILECOL={{x}}&tk={{tk}}"
+)
+
 TILE_URLS = {
     "arcgis_sat": "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
     "osm": "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
@@ -39,6 +45,12 @@ TILE_URLS = {
     # 卫星影像走 wprd 域名:webst0X 在部分网络环境不可达,会导致只显示路网标注
     "gaode_sat": "https://wprd0{s}.is.autonavi.com/appmaptile?x={x}&y={y}&z={z}&lang=zh_cn&size=1&scl=1&style=6",
     "gaode_vec": "https://wprd0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=7&x={x}&y={y}&z={z}",
+    # 天地图 WMTS(需 config.api.tianditu.key,建议申请"服务端"类型 key)
+    # img=影像底图 cia=影像注记 vec=矢量底图 cva=矢量注记
+    "tianditu_img": _TDT_WMTS.format(layer="img"),
+    "tianditu_cia": _TDT_WMTS.format(layer="cia"),
+    "tianditu_vec": _TDT_WMTS.format(layer="vec"),
+    "tianditu_cva": _TDT_WMTS.format(layer="cva"),
 }
 
 OFFLINE_ONLY_PROVIDERS = {"arcgis_sat", "osm"}
@@ -108,13 +120,36 @@ def _offline_only() -> bool:
     return bool(features.get("offline_only"))
 
 
+def _tianditu_key() -> str:
+    """config.api.tianditu.key;未配置或仍是 ${VAR} 占位时返回空串。"""
+    api = (_get_config().get("api") or {})
+    key = ((api.get("tianditu") or {}).get("key") or "").strip()
+    if key.startswith("${") and key.endswith("}"):
+        return ""
+    return key
+
+
 def _fetch_tile(provider: str, z: int, x: int, y: int) -> bytes | None:
     tpl = TILE_URLS.get(provider)
     if not tpl:
         return None
-    s = str((x % 4) + 1) if provider.startswith("gaode") else str(x % 4)
-    url = tpl.format(s=s, x=x, y=y, z=z)
-    headers = {"User-Agent": "Mozilla/5.0"}
+    if provider.startswith("gaode"):
+        s = str((x % 4) + 1)
+    elif provider.startswith("tianditu"):
+        s = str((x + y) % 8)  # 天地图子域 t0-t7
+    else:
+        s = str(x % 4)
+    tk = ""
+    if provider.startswith("tianditu"):
+        tk = _tianditu_key()
+        if not tk:
+            return None
+    url = tpl.format(s=s, x=x, y=y, z=z, tk=tk)
+    if provider.startswith("tianditu"):
+        # 服务端类型 key 会拒绝浏览器 UA(Mozilla/*),必须用非浏览器 UA 访问
+        headers = {"User-Agent": "RelicsPlatform/2.0"}
+    else:
+        headers = {"User-Agent": "Mozilla/5.0"}
     if provider.startswith("gaode"):
         headers["Referer"] = "https://www.amap.com/"
     req = urllib.request.Request(url, headers=headers)

@@ -22,8 +22,9 @@ interface PlatformConfig {
     ai_chat: boolean;
     models_3d: boolean;
     patrol: boolean;
-    catalog: boolean;
     amap_route?: boolean;
+    /** 已配置天地图 key,地图页显示天地图底图选项。 */
+    tianditu?: boolean;
   };
   cesium_ion_token?: string;
   ai_chat?: {

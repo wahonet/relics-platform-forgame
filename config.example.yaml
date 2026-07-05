@@ -108,11 +108,20 @@ api:
     top_k_relics: 8
     history_turns: 10
     temperature: 0.2
+    # step00 档案提取(docx→Markdown)的并发请求数,1-8;账号限流严可调低
+    extract_concurrency: 2
+    # step00 档案提取(docx→markdown)的并发请求数,1-8;调大提速但更容易限流
+    extract_concurrency: 2
 
   # 高德开放平台（巡查路线规划,免费申请: https://lbs.amap.com/）
   # 类型选"Web服务";未配置时路线降级为直线连接,导航跳转不受影响
   amap:
     web_key: "${AMAP_WEB_KEY}"
+
+  # 天地图（国家地理信息公共服务平台,免费申请: https://console.tianditu.gov.cn/）
+  # 类型选"服务端";配置后地图页出现"天地图影像/矢量"底图选项
+  tianditu:
+    key: "${TIANDITU_KEY}"
 
   # Cesium Ion（在线高精度地形、可选）
   cesium_ion:

@@ -3,7 +3,6 @@ import { Link } from "react-router-dom";
 import ReactECharts from "echarts-for-react";
 import { fetchDashboardStats } from "../api/stats";
 import { fetchPatrolStats } from "../api/patrol";
-import { fetchCatalog, listApplications } from "../api/catalog";
 import type { DashboardStats, PatrolStats, NameValue } from "../types";
 
 const AXIS = { color: "#8b99ad", fontSize: 11 };
@@ -38,16 +37,12 @@ function Num({ v }: { v: number | string }) {
 export default function DashboardPage() {
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [patrol, setPatrol] = useState<PatrolStats | null>(null);
-  const [datasetCount, setDatasetCount] = useState(0);
-  const [applicationCount, setApplicationCount] = useState(0);
   const [now, setNow] = useState(new Date());
 
   useEffect(() => {
     document.title = "资源概览 — 济宁市文物保护利用平台";
     fetchDashboardStats().then(setStats).catch(() => undefined);
     fetchPatrolStats().then(setPatrol).catch(() => undefined);
-    fetchCatalog().then((d) => setDatasetCount(d.length)).catch(() => undefined);
-    listApplications().then((a) => setApplicationCount(a.length)).catch(() => undefined);
     const t = setInterval(() => setNow(new Date()), 1000);
     return () => clearInterval(t);
   }, []);
@@ -298,22 +293,6 @@ export default function DashboardPage() {
 
       <div className="bs-foot">
         <div className="bs-flow">
-          <h3>开放共享</h3>
-          <div className="bs-flow-items">
-            <div>
-              <Num v={datasetCount} />
-              <span>数据资源目录</span>
-            </div>
-            <div>
-              <Num v={applicationCount} />
-              <span>共享申请</span>
-            </div>
-            <Link to="/catalog" className="bs-link">
-              进入资源目录 →
-            </Link>
-          </div>
-        </div>
-        <div className="bs-flow">
           <h3>巡查应用</h3>
           <div className="bs-flow-items">
             <div>
@@ -328,7 +307,7 @@ export default function DashboardPage() {
               <Num v={patrol?.overdue_count ?? 0} />
               <span>待巡查(逾期)</span>
             </div>
-            <Link to="/?patrol=1" className="bs-link">
+            <Link to="/patrol" className="bs-link">
               进入巡查规划 →
             </Link>
           </div>

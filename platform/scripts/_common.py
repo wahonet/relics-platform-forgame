@@ -42,7 +42,9 @@ CONFIG_EXAMPLE_PATH: Path = PROJECT_ROOT / "config.example.yaml"
 @dataclass(frozen=True)
 class Paths:
     root: Path
-    input_relics: Path         # 文物台账 Excel / CSV (step01 导入源)
+    input_docs: Path           # 四普登记表 docx (step00 转 markdown 的源)
+    input_relics: Path         # 文物台账 Excel / CSV (step01 兼容导入源)
+    input_markdown: Path       # markdown 档案 (step00 输出 / 也可直接放入)
     input_media: Path          # photos/{code}/, drawings/{code}/ 原始媒体
     input_archive_docs: Path   # {code}/{sanpu|sipu}/*.pdf 普查档案(嘉祥全量层)
     input_boundaries: Path     # 行政边界 Shapefile / GeoJSON
@@ -60,7 +62,9 @@ def get_paths() -> Paths:
     root = PROJECT_ROOT
     return Paths(
         root=root,
+        input_docs=root / "data" / "input" / "00_docs",
         input_relics=root / "data" / "input" / "01_relics",
+        input_markdown=root / "data" / "input" / "01_relics" / "markdown",
         input_media=root / "data" / "input" / "02_media",
         input_archive_docs=root / "data" / "input" / "06_archive_docs",
         input_boundaries=root / "data" / "input" / "03_boundaries",
@@ -187,6 +191,7 @@ def get_logger(step_name: str) -> logging.Logger:
 
 @dataclass
 class FeatureStatus:
+    has_docs: bool
     has_relics_source: bool
     has_archive_docs: bool
     has_boundaries: bool
@@ -195,6 +200,7 @@ class FeatureStatus:
     @property
     def as_dict(self) -> dict:
         return {
+            "docs": self.has_docs,
             "relics_source": self.has_relics_source,
             "archive_docs": self.has_archive_docs,
             "boundaries": self.has_boundaries,
@@ -212,7 +218,9 @@ def detect_features() -> FeatureStatus:
     """扫描 data/input 判断各功能模块是否有数据,供 auto 模式下的 feature toggle 使用。"""
     p = get_paths()
     return FeatureStatus(
-        has_relics_source=_non_empty(p.input_relics, ("*.xlsx", "*.xls", "*.csv"))
+        has_docs=_non_empty(p.input_docs, ("*.docx",)),
+        has_relics_source=_non_empty(p.input_markdown, ("*.md",))
+        or _non_empty(p.input_relics, ("*.xlsx", "*.xls", "*.csv"))
         or (p.output_dataset / "relics_full.json").exists(),
         has_archive_docs=_non_empty(p.input_archive_docs, ("*.pdf", "*.PDF")),
         has_boundaries=_non_empty(
@@ -244,7 +252,8 @@ def print_status() -> None:
     feat = detect_features()
     print("\n[数据] 输入检测:")
     label_map = {
-        "relics_source": "文物台账 Excel/CSV",
+        "docs": "普查登记表 docx",
+        "relics_source": "文物档案 Markdown / 台账 Excel",
         "archive_docs": "普查档案 PDF",
         "boundaries": "行政边界",
         "models_3d": "3D 模型",

@@ -10,6 +10,18 @@ import {
 
 export type RenderQuality = "standard" | "hd" | "ultra";
 
+/** 主题配色。dark=深墨蓝(默认) light=经典亮白 navy=藏青政务 green=青碧 */
+export type ThemeId = "dark" | "light" | "navy" | "green";
+
+export function applyTheme(theme: ThemeId): void {
+  document.documentElement.dataset.theme = theme;
+  try {
+    localStorage.setItem("theme", theme);
+  } catch {
+    /* ignore */
+  }
+}
+
 interface UIState {
   filterPanelOpen: boolean;
   chatPanelOpen: boolean;
@@ -35,7 +47,7 @@ interface UIState {
   renderQuality: RenderQuality;
   hideRelicPoints: boolean;
   uiSize: "sm" | "md" | "lg";
-  theme: "blue" | "purple" | "gold" | "pink";
+  theme: ThemeId;
   activeGroup: string;
 
   selectedRelic: RelicSummary | null;
@@ -80,7 +92,8 @@ export const useUIStore = create<UIState>((set, get) => ({
   helpPanelOpen: false,
   patrolPanelOpen: false,
 
-  baseLayer: "arcgis_sat",
+  // 默认在线影像(天地图);未配置天地图 key 时由 platformStore 回退到高德
+  baseLayer: "tianditu_img",
   baseLayerAlpha: 90,
 
   bndCounty: true,
@@ -101,7 +114,12 @@ export const useUIStore = create<UIState>((set, get) => ({
   })(),
   hideRelicPoints: false,
   uiSize: "md",
-  theme: "blue",
+  theme: ((): ThemeId => {
+    const v = localStorage.getItem("theme");
+    const t = (v === "light" || v === "navy" || v === "green" || v === "dark") ? v : "dark";
+    document.documentElement.dataset.theme = t;
+    return t;
+  })(),
   activeGroup: "category_main",
 
   selectedRelic: null,

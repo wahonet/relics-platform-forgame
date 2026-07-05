@@ -21,6 +21,7 @@ from typing import Optional
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
+from starlette.concurrency import run_in_threadpool
 
 from _common import CONFIG_PATH, PROJECT_ROOT, detect_features, load_config
 import run_pipeline as _pipeline
@@ -62,7 +63,52 @@ _task_lock = threading.Lock()
 _task: dict = {}  # id/label/status/started/finished/returncode/log
 
 
+ADMIN_TASK_LOG_DIR = PROJECT_ROOT / "data" / "output" / "logs" / "admin_tasks"
+
+
+def _reload_store() -> bool:
+    """管线跑完后热重载数据集与 AI 上下文,不用重启服务。"""
+    try:
+        from _common import get_paths, load_config as _load_cfg
+        from data_loader import store
+        from routers import chat as _chat
+
+        paths = get_paths()
+        cfg = _load_cfg()
+        b = (cfg.get("geo") or {}).get("bounds") or {}
+        bbox = (
+            b.get("west", -180.0), b.get("south", -90.0),
+            b.get("east", 180.0), b.get("north", 90.0),
+        )
+        store.load(
+            str(paths.output_dataset),
+            archive_docs_dir=str(paths.input_archive_docs) if paths.input_archive_docs.exists() else "",
+            bounds=bbox,
+        )
+        try:
+            _chat.init_chat()
+        except Exception:  # noqa: BLE001
+            pass
+        return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def _run_subprocess(task: dict, cmd: list[str]) -> None:
+    """跑子进程并把输出同时写入内存(页面实时显示)与磁盘日志(完整留档)。"""
+    log_fh = None
+    try:
+        ADMIN_TASK_LOG_DIR.mkdir(parents=True, exist_ok=True)
+        stamp = time.strftime("%Y%m%d_%H%M%S")
+        log_path = ADMIN_TASK_LOG_DIR / f"{stamp}_{task['id']}.log"
+        task["log_file"] = str(log_path)
+        log_fh = log_path.open("w", encoding="utf-8")
+        log_fh.write(f"# {task.get('label', '')}\n# {' '.join(cmd)}\n"
+                     f"# started {time.strftime('%Y-%m-%d %H:%M:%S')}\n\n")
+        log_fh.flush()
+    except OSError:
+        log_fh = None
+
     try:
         proc = subprocess.Popen(
             cmd,
@@ -75,19 +121,40 @@ def _run_subprocess(task: dict, cmd: list[str]) -> None:
         )
         assert proc.stdout is not None
         for line in proc.stdout:
-            task["log"].append(line.rstrip("\n"))
-            # 日志上限,避免内存无限增长
+            stripped = line.rstrip("\n")
+            task["log"].append(stripped)
+            # 内存日志上限,避免无限增长;磁盘日志始终完整
             if len(task["log"]) > 2000:
                 del task["log"][:500]
+            if log_fh:
+                try:
+                    log_fh.write(stripped + "\n")
+                    log_fh.flush()
+                except OSError:
+                    pass
         proc.wait()
         task["returncode"] = proc.returncode
         task["status"] = "done" if proc.returncode == 0 else "error"
+        if proc.returncode == 0:
+            if _reload_store():
+                task["log"].append("[admin] 数据集已热重载,前端刷新即可看到新数据")
+                if log_fh:
+                    log_fh.write("[admin] 数据集已热重载\n")
+            else:
+                task["log"].append("[admin] 热重载失败,请重启服务加载新数据")
     except Exception as e:  # noqa: BLE001
         task["log"].append(f"[admin] 任务异常: {e}")
         task["status"] = "error"
         task["returncode"] = -1
     finally:
         task["finished"] = time.time()
+        if log_fh:
+            try:
+                log_fh.write(f"\n# finished {time.strftime('%Y-%m-%d %H:%M:%S')}"
+                             f" exit={task['returncode']}\n")
+                log_fh.close()
+            except OSError:
+                pass
 
 
 class RunBody(BaseModel):
@@ -142,6 +209,7 @@ async def pipeline_task(tail: int = 200):
         "finished": _task["finished"],
         "returncode": _task["returncode"],
         "log": _task["log"][-tail:],
+        "log_file": _task.get("log_file", ""),
     }
 
 
@@ -167,6 +235,7 @@ async def get_api_config():
     sf = api.get("siliconflow") or {}
     amap = api.get("amap") or {}
     ion = api.get("cesium_ion") or {}
+    tdt = api.get("tianditu") or {}
     return {
         "siliconflow": {
             "configured": _configured(sf.get("key", "")),
@@ -182,6 +251,10 @@ async def get_api_config():
             "configured": _configured(ion.get("token", "")),
             "masked": _mask(ion.get("token", "")),
         },
+        "tianditu": {
+            "configured": _configured(tdt.get("key", "")),
+            "masked": _mask(tdt.get("key", "")),
+        },
         "config_path": str(CONFIG_PATH),
         "runtime": {
             "ai_ready": ai_service.ready(),
@@ -190,10 +263,51 @@ async def get_api_config():
     }
 
 
+# 模型列表里排除非对话类模型(嵌入/重排/语音/图像/视频)
+_NON_CHAT_KEYWORDS = (
+    "embedding", "bge-", "rerank", "whisper", "sensevoice", "cosyvoice",
+    "stable-diffusion", "flux", "kolors", "wan-ai", "tts", "voice", "video",
+)
+
+
+@router.get("/models")
+async def list_ai_models():
+    """从 SiliconFlow /models 拉取账号可用的对话模型列表。
+
+    未配置 Key 或请求失败时回退到 config.yaml 的 available_models,
+    保证管理页始终有可选项。
+    """
+    cfg = load_config()
+    sf = (cfg.get("api") or {}).get("siliconflow") or {}
+    current = sf.get("default_model", "")
+    fallback = sf.get("available_models", []) or []
+
+    client = ai_service.get_client()
+    if client is None:
+        return {"models": fallback, "current": current, "source": "config",
+                "error": "未配置 SiliconFlow API Key"}
+    try:
+        resp = await run_in_threadpool(client.models.list)
+        ids = sorted({m.id for m in (resp.data or [])})
+        chat_ids = [
+            i for i in ids
+            if not any(kw in i.lower() for kw in _NON_CHAT_KEYWORDS)
+        ]
+        models = [{"id": i, "name": i} for i in chat_ids]
+        if not models:
+            return {"models": fallback, "current": current, "source": "config",
+                    "error": "API 未返回可用对话模型"}
+        return {"models": models, "current": current, "source": "api"}
+    except Exception as e:  # noqa: BLE001
+        return {"models": fallback, "current": current, "source": "config", "error": str(e)}
+
+
 class ConfigBody(BaseModel):
     siliconflow_key: Optional[str] = None
     amap_web_key: Optional[str] = None
     cesium_ion_token: Optional[str] = None
+    tianditu_key: Optional[str] = None
+    default_model: Optional[str] = None
 
 
 def _replace_yaml_scalar(text: str, section: str, key: str, value: str) -> str:
@@ -235,6 +349,17 @@ def _replace_yaml_scalar(text: str, section: str, key: str, value: str) -> str:
     raise ValueError(f"config.yaml 的 {section}: 段内找不到 {key}:")
 
 
+def _append_api_subsection(text: str, section: str, key: str, value: str) -> str:
+    """旧版 config.yaml 缺少某 api 子段时,在 `api:` 块开头插入该子段。"""
+    lines = text.split("\n")
+    for i, line in enumerate(lines):
+        if re.match(r"^api:\s*(#.*)?$", line):
+            escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+            lines[i + 1:i + 1] = [f"  {section}:", f'    {key}: "{escaped}"']
+            return "\n".join(lines)
+    raise ValueError("config.yaml 中找不到 api: 段")
+
+
 @router.put("/config")
 async def save_api_config(body: ConfigBody):
     if not CONFIG_PATH.exists():
@@ -243,8 +368,10 @@ async def save_api_config(body: ConfigBody):
     text = CONFIG_PATH.read_text(encoding="utf-8")
     updates = [
         ("siliconflow", "key", body.siliconflow_key),
+        ("siliconflow", "default_model", body.default_model),
         ("amap", "web_key", body.amap_web_key),
         ("cesium_ion", "token", body.cesium_ion_token),
+        ("tianditu", "key", body.tianditu_key),
     ]
     changed = False
     for section, key, value in updates:
@@ -254,6 +381,13 @@ async def save_api_config(body: ConfigBody):
             text = _replace_yaml_scalar(text, section, key, value.strip())
             changed = True
         except ValueError as e:
+            if f"找不到 {section}:" in str(e):
+                try:
+                    text = _append_api_subsection(text, section, key, value.strip())
+                    changed = True
+                    continue
+                except ValueError as e2:
+                    raise HTTPException(400, str(e2)) from e2
             raise HTTPException(400, str(e)) from e
 
     if not changed:

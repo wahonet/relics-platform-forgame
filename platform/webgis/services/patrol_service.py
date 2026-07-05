@@ -6,7 +6,6 @@
 表:
 - patrol_routes    巡查路线 (relic_codes 有序 JSON, token 供移动端扫码)
 - patrol_records   打卡记录 (照片、定位比对、AI 评估)
-- catalog_applications  数据资源目录的使用申请(开放共享演示流程)
 
 巡查频次策略(可在 config.patrol.frequency_days 覆盖):
     差 → 30 天 / 较差 → 60 / 一般 → 90 / 较好 → 180 / 好 → 180
@@ -63,19 +62,6 @@ CREATE TABLE IF NOT EXISTS patrol_records (
 );
 CREATE INDEX IF NOT EXISTS idx_precords_route ON patrol_records(route_id);
 CREATE INDEX IF NOT EXISTS idx_precords_code  ON patrol_records(relic_code);
-
-CREATE TABLE IF NOT EXISTS catalog_applications (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    dataset_id  TEXT NOT NULL,
-    applicant   TEXT NOT NULL,
-    org         TEXT,
-    purpose     TEXT,
-    contact     TEXT,
-    status      TEXT DEFAULT 'pending',         -- pending / approved / rejected
-    reply       TEXT DEFAULT '',
-    created_at  INTEGER,
-    reviewed_at INTEGER
-);
 """
 
 
@@ -134,15 +120,7 @@ class PatrolDB:
             self.frequency_days = merged
         conn = self._conn()
         conn.executescript(SCHEMA)
-        self._migrate(conn)
         conn.commit()
-
-    @staticmethod
-    def _migrate(conn: sqlite3.Connection) -> None:
-        """老库补列(SQLite 无 IF NOT EXISTS 列语法)。"""
-        cols = {r[1] for r in conn.execute("PRAGMA table_info(catalog_applications)")}
-        if "reply" not in cols:
-            conn.execute("ALTER TABLE catalog_applications ADD COLUMN reply TEXT DEFAULT ''")
 
     def _conn(self) -> sqlite3.Connection:
         if not self._db_path:

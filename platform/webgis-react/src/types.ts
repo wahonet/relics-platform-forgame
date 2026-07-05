@@ -91,6 +91,10 @@ export type BaseLayerType =
   | "gaode_anno"
   | "gaode_sat"
   | "gaode_vec"
+  | "tianditu_img"
+  | "tianditu_cia"
+  | "tianditu_vec"
+  | "tianditu_cva"
   | "none";
 
 export interface HomeView {
@@ -217,35 +221,6 @@ export interface PatrolReport {
   items: PatrolReportItem[];
   /** LLM 生成的报告正文(prose=true 时返回;未配置 Key 时为模板文本)。 */
   prose?: string;
-}
-
-// ── 数据资源目录 ─────────────────────────────────────────────
-
-export interface CatalogDataset {
-  id: string;
-  name: string;
-  desc: string;
-  category: string;
-  count: number;
-  unit: string;
-  format: string;
-  update_freq: string;
-  access: "open" | "apply" | "restricted";
-  /** 代表性 API 端点。 */
-  api?: string;
-}
-
-export interface CatalogApplication {
-  id: number;
-  dataset_id: string;
-  dataset_name?: string;
-  applicant: string;
-  org: string;
-  purpose: string;
-  contact?: string;
-  status: "pending" | "approved" | "rejected";
-  reply?: string;
-  created_at: number;
 }
 
 // ── 资源概览 ─────────────────────────────────────────────

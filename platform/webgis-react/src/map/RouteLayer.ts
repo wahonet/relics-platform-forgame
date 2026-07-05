@@ -75,10 +75,11 @@ export class RouteLayer {
     }
 
     stops.forEach((s, i) => {
+      // 完成巡查的点位显示绿色:已核验深绿,仅打卡浅绿,未巡蓝色
       const bg = s.verified
-        ? "#3fb950"
+        ? "#2ea043"
         : s.checked
-          ? "#d29922"
+          ? "#56d364"
           : "#1f6feb";
       this.routeEntities.push(
         this.viewer.entities.add({
@@ -129,7 +130,7 @@ export class RouteLayer {
     this.requestRender();
   }
 
-  /** 渲染 FeatureCollection(properties.kind = protection|control)。 */
+  /** 渲染 FeatureCollection(properties.kind = protection|control|body)。 */
   showBoundaries(fc: {
     features?: { properties?: { kind?: string }; geometry?: { type?: string; coordinates?: unknown } }[];
   }) {
@@ -138,7 +139,8 @@ export class RouteLayer {
     for (const f of feats) {
       const kind = f.properties?.kind || "protection";
       const isProtection = kind === "protection";
-      const color = isProtection ? "#f85149" : "#d29922";
+      // protection=保护范围(红) control=建控地带(黄) body=本体边界(绿,四普测点围合)
+      const color = kind === "body" ? "#3fb950" : isProtection ? "#f85149" : "#d29922";
       const geom = f.geometry;
       if (!geom?.type || !geom.coordinates) continue;
       const polys: number[][][][] =

@@ -29,6 +29,8 @@ function ringCenter(ring: number[][]) {
 
 export class BoundaryLayer {
   private viewer: Cesium.Viewer;
+  /** 市域外暗色遮罩 + 市界发光描边(仿驾驶舱大屏的区域聚焦效果)。 */
+  private cityMask: Cesium.Entity[] = [];
   private layers = {
     county: [] as BoundaryItem[],
     countyLabel: [] as Cesium.Entity[],
@@ -119,19 +121,92 @@ export class BoundaryLayer {
     });
   }
 
+  /** 市域外遮罩:大矩形挖去市界作为洞,外部压暗;市界用发光线描边。 */
+  private addCityMask(fc: {
+    features?: {
+      properties?: Record<string, string>;
+      geometry: { type: string; coordinates: unknown };
+    }[];
+  }) {
+    const rings: number[][][] = [];
+    fc.features?.forEach((f) => {
+      const g = f.geometry;
+      if (!g) return;
+      if (g.type === "Polygon") {
+        rings.push((g.coordinates as number[][][])[0]);
+      } else if (g.type === "MultiPolygon") {
+        (g.coordinates as number[][][][]).forEach((poly) => rings.push(poly[0]));
+      }
+    });
+    if (!rings.length) return;
+
+    // 覆盖全国范围的外框即可,不必全球(避免 2D 无限滚动下的接缝问题)
+    const outer = [
+      [60, 0], [150, 0], [150, 65], [60, 65],
+    ].map(([lng, lat]) => Cesium.Cartesian3.fromDegrees(lng, lat));
+    const holes = rings.map(
+      (r) =>
+        new Cesium.PolygonHierarchy(
+          r.map((p) => Cesium.Cartesian3.fromDegrees(p[0], p[1])),
+        ),
+    );
+    this.cityMask.push(
+      this.viewer.entities.add({
+        polygon: {
+          hierarchy: new Cesium.PolygonHierarchy(outer, holes),
+          material: Cesium.Color.fromCssColorString("#060c18").withAlpha(0.72),
+          height: 0,
+        },
+      }),
+    );
+    // 市界:内层实线 + 外层发光,双线叠出大屏效果
+    rings.forEach((r) => {
+      const positions = [...r, r[0]].map((p) =>
+        Cesium.Cartesian3.fromDegrees(p[0], p[1]),
+      );
+      this.cityMask.push(
+        this.viewer.entities.add({
+          polyline: {
+            positions,
+            width: 12,
+            material: new Cesium.PolylineGlowMaterialProperty({
+              glowPower: 0.18,
+              color: Cesium.Color.fromCssColorString("#ffe14d").withAlpha(0.9),
+            }),
+            clampToGround: true,
+          },
+        }),
+      );
+      this.cityMask.push(
+        this.viewer.entities.add({
+          polyline: {
+            positions,
+            width: 2.5,
+            material: Cesium.Color.fromCssColorString("#fff3a0"),
+            clampToGround: true,
+          },
+        }),
+      );
+    });
+  }
+
   async load() {
     try {
-      // 这三个文件在"纯壳子"状态下会 404,这是预期的。后端 access log 里仍会
+      // 这些文件在"纯壳子"状态下会 404,这是预期的。后端 access log 里仍会
       // 显示 404,但前端要静默处理。
       // 加上时间戳避免重载时命中浏览器缓存,看不到刚下载的新数据。
       const ts = Date.now();
       const swallow = (url: string) =>
         fetch(`${url}?_=${ts}`).catch(() => new Response(null, { status: 404 }));
-      const [countyRes, townRes, villageRes] = await Promise.all([
+      const [cityRes, countyRes, townRes, villageRes] = await Promise.all([
+        swallow("/boundaries/city.geojson"),
         swallow("/boundaries/county.geojson"),
         swallow("/boundaries/townships.geojson"),
         swallow("/boundaries/villages.geojson"),
       ]);
+      if (cityRes.ok) {
+        this.addCityMask(await cityRes.json());
+      }
       if (countyRes.ok) {
         const county = await countyRes.json();
         county.features?.forEach(
@@ -264,6 +339,7 @@ export class BoundaryLayer {
     this.layers.township.forEach(removeItem);
     this.layers.village.forEach(removeItem);
     [
+      ...this.cityMask,
       ...this.layers.countyLabel,
       ...this.layers.townLabel,
       ...this.layers.villageLabel,
@@ -274,6 +350,7 @@ export class BoundaryLayer {
         /* ignore */
       }
     });
+    this.cityMask = [];
     this.layers = {
       county: [],
       countyLabel: [],

@@ -25,7 +25,8 @@ export function applyRenderQuality(viewer: Cesium.Viewer, q: RenderQuality): voi
 
     case "hd":
       viewer.useBrowserRecommendedResolution = false;
-      viewer.resolutionScale = Math.min(dpr, 2.0);
+      // 跟满设备 DPR(4K/高缩放屏可达 2~3),按原生像素渲染,文字不发虚
+      viewer.resolutionScale = Math.min(dpr, 3.0);
       viewer.scene.postProcessStages.fxaa.enabled = true;
       viewer.scene.msaaSamples = 1;
       viewer.scene.globe.maximumScreenSpaceError = 1.5;
@@ -61,4 +62,31 @@ export function applyRenderQuality(viewer: Cesium.Viewer, q: RenderQuality): voi
       break;
   }
   viewer.scene.requestRender();
+}
+
+/**
+ * 监听 devicePixelRatio 变化(窗口在 1K/2K/4K 屏之间拖动、浏览器缩放),
+ * 变化时回调以重新应用渲染分辨率。返回取消监听函数。
+ */
+export function watchDevicePixelRatio(onChange: () => void): () => void {
+  let mql: MediaQueryList | null = null;
+  let disposed = false;
+
+  const handler = () => {
+    if (disposed) return;
+    onChange();
+    attach(); // DPR 已变,需针对新值重建监听
+  };
+
+  const attach = () => {
+    mql?.removeEventListener("change", handler);
+    mql = window.matchMedia(`(resolution: ${window.devicePixelRatio || 1}dppx)`);
+    mql.addEventListener("change", handler);
+  };
+
+  attach();
+  return () => {
+    disposed = true;
+    mql?.removeEventListener("change", handler);
+  };
 }

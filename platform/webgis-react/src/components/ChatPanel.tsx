@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useUIStore } from "../stores/uiStore";
 import { usePlatformStore } from "../stores/platformStore";
 import { useRelicsStore } from "../stores/relicsStore";
-import { fetchChatModels, streamChat, type ChatModel } from "../api/chat";
+import { streamChat } from "../api/chat";
 import { renderChatMarkdown, escapeStreamPreview } from "../utils/markdown";
 import type { ChatMessage } from "../types";
 import { flyTo } from "../map/viewerRegistry";
@@ -36,21 +36,8 @@ export function ChatPanel() {
   const [messages, setMessages] = useState<ChatBubble[]>([]);
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
-  const [models, setModels] = useState<ChatModel[]>([]);
-  const [model, setModel] = useState<string>("");
   const messagesRef = useRef<HTMLDivElement>(null);
   const greeted = useRef(false);
-
-  useEffect(() => {
-    fetchChatModels()
-      .then((d) => {
-        setModels(d.models || []);
-        if (d.default) setModel(d.default);
-      })
-      .catch(() => {
-        /* ignore */
-      });
-  }, []);
 
   useEffect(() => {
     if (open && !greeted.current) {
@@ -104,7 +91,7 @@ export function ChatPanel() {
       .filter((m) => !m.streaming)
       .map((m) => ({ role: m.role, content: m.content }));
     try {
-      await streamChat(msg, history.slice(0, -1), model || undefined, {
+      await streamChat(msg, history.slice(0, -1), {
         onChunk: (chunk) => {
           fullText += chunk;
           setMessages((curr) => {
@@ -153,15 +140,6 @@ export function ChatPanel() {
     <div className={"chat-panel" + (open ? " open" : "")}>
       <div className="chat-hdr">
         <h3>AI 知识库问答</h3>
-        {models.length > 0 && (
-          <select value={model} onChange={(e) => setModel(e.target.value)}>
-            {models.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.name}
-              </option>
-            ))}
-          </select>
-        )}
         <button onClick={clear}>清空</button>
         <button onClick={() => setUI({ chatPanelOpen: false })}>×</button>
       </div>

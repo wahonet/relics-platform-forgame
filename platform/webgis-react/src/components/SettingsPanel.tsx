@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useUIStore, type RenderQuality } from "../stores/uiStore";
+import { useUIStore, applyTheme, type RenderQuality, type ThemeId } from "../stores/uiStore";
 import { useHomeViewStore } from "../stores/homeViewStore";
 import { flyTo, getViewer } from "../map/viewerRegistry";
 import { applyRenderQuality } from "../map/renderQuality";
@@ -49,9 +49,17 @@ async function loadShandongAdmin(): Promise<ShandongAdmin | null> {
   }
 }
 
+const THEMES: { id: ThemeId; label: string; swatch: string }[] = [
+  { id: "dark", label: "深墨蓝", swatch: "#101724" },
+  { id: "light", label: "经典亮白", swatch: "#2d8cf0" },
+  { id: "navy", label: "藏青政务", swatch: "#12233f" },
+  { id: "green", label: "青碧", swatch: "#0e2420" },
+];
+
 export function SettingsPanel() {
   const open = useUIStore((s) => s.settingsPanelOpen);
   const setUI = useUIStore((s) => s.set);
+  const theme = useUIStore((s) => s.theme);
   const homeView = useHomeViewStore((s) => s.view);
   const setHomeView = useHomeViewStore((s) => s.setView);
   const clearHomeView = useHomeViewStore((s) => s.clear);
@@ -154,7 +162,7 @@ export function SettingsPanel() {
       <div className={"settings-panel" + (open ? " open" : "")}>
         <div
           className="modal-hdr"
-          style={{ position: "sticky", top: 0, background: "rgba(13,17,23,.98)", zIndex: 2 }}
+          style={{ position: "sticky", top: 0, background: "var(--panel-hd)", zIndex: 2 }}
         >
           <h3>偏好设置</h3>
           <button onClick={() => setUI({ settingsPanelOpen: false })}>×</button>
@@ -205,6 +213,31 @@ export function SettingsPanel() {
               当前主视角: {homeView.lng.toFixed(4)}, {homeView.lat.toFixed(4)} (h={Math.round(homeView.h)} m)
             </div>
           ) : null}
+        </div>
+
+        <div className="sp-section">
+          <h4>主题配色</h4>
+          <div className="sp-row" style={{ gap: 6, flexWrap: "wrap" }}>
+            {THEMES.map((t) => (
+              <button
+                key={t.id}
+                className={"sp-button" + (theme === t.id ? " primary" : "")}
+                onClick={() => {
+                  setUI({ theme: t.id });
+                  applyTheme(t.id);
+                }}
+              >
+                <span
+                  style={{
+                    display: "inline-block", width: 10, height: 10, borderRadius: 2,
+                    background: t.swatch, marginRight: 6, verticalAlign: -1,
+                    border: "1px solid rgba(128,128,128,.4)",
+                  }}
+                />
+                {t.label}
+              </button>
+            ))}
+          </div>
         </div>
 
         <div className="sp-section">

@@ -10,7 +10,6 @@ import re
 import sys
 from collections import Counter
 from pathlib import Path
-from typing import Optional
 
 from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
@@ -267,7 +266,6 @@ def init_chat() -> None:
 class ChatRequest(BaseModel):
     message: str
     history: list = []
-    model: Optional[str] = ""
 
 
 @router.post("/chat")
@@ -285,7 +283,9 @@ async def chat(req: ChatRequest):
     if detail:
         system_content += "\n\n## 与本次提问最相关的文物详情\n" + detail
 
-    use_model = req.model or _default_model
+    # 模型统一由系统管理页配置(config.siliconflow.default_model),
+    # ai_service 在配置保存时热更新,这里实时取值
+    use_model = ai_service.default_model() or _default_model
 
     messages = [{"role": "system", "content": system_content}]
     for h in (req.history or [])[-_history_turns:]:

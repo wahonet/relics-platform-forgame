@@ -46,6 +46,8 @@ export interface AdminTask {
   finished?: number | null;
   returncode?: number | null;
   log?: string[];
+  /** 完整日志落盘路径(data/output/logs/admin_tasks/)。 */
+  log_file?: string;
 }
 
 export interface ApiKeyEntry {
@@ -57,6 +59,7 @@ export interface ApiConfigStatus {
   siliconflow: ApiKeyEntry & { base_url: string; default_model: string };
   amap: ApiKeyEntry;
   cesium_ion: ApiKeyEntry;
+  tianditu?: ApiKeyEntry;
   config_path: string;
   runtime: { ai_ready: boolean; amap_ready: boolean };
 }
@@ -81,10 +84,25 @@ export async function fetchApiConfig(): Promise<ApiConfigStatus> {
   return data;
 }
 
+export interface AiModelsResp {
+  models: { id: string; name: string }[];
+  current: string;
+  source: "api" | "config";
+  error?: string;
+}
+
+/** 从 SiliconFlow 拉取账号可用的对话模型列表(失败时回退 config 内置列表)。 */
+export async function fetchAiModels(): Promise<AiModelsResp> {
+  const { data } = await apiClient.get<AiModelsResp>("/api/admin/models");
+  return data;
+}
+
 export async function saveApiConfig(body: {
   siliconflow_key?: string;
   amap_web_key?: string;
   cesium_ion_token?: string;
+  tianditu_key?: string;
+  default_model?: string;
 }) {
   const { data } = await apiClient.put("/api/admin/config", body);
   return data as {

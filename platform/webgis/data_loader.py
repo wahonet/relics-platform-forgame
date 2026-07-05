@@ -151,19 +151,42 @@ class DataStore:
             self.relics.append(d)
             self.relics_map[row["code"]] = d
 
-        # 照片 / 图纸索引
-        for row in self._db.execute("SELECT relic_code, path, thumb_path, taken_at FROM photos"):
+        # 照片 / 图纸索引(键名与前端契约对齐: relative_path / photo_no / description)
+        photo_cols = {r[1] for r in self._db.execute("PRAGMA table_info(photos)")}
+        has_photo_meta = "photo_no" in photo_cols
+        photo_sql = (
+            "SELECT relic_code, path, photo_no, description, thumb_path, taken_at FROM photos"
+            if has_photo_meta
+            else "SELECT relic_code, path, thumb_path, taken_at FROM photos"
+        )
+        for row in self._db.execute(photo_sql):
             p = {
                 "archive_code": row["relic_code"],
                 "path": row["path"],
+                "relative_path": row["path"],
+                "photo_no": (row["photo_no"] if has_photo_meta else "") or "",
+                "description": (row["description"] if has_photo_meta else "") or "",
                 "thumb_path": row["thumb_path"] or "",
                 "taken_at": row["taken_at"],
             }
             self.photo_index.append(p)
             self.photo_map.setdefault(row["relic_code"], []).append(p)
 
-        for row in self._db.execute("SELECT relic_code, path FROM drawings"):
-            dw = {"archive_code": row["relic_code"], "path": row["path"]}
+        drawing_cols = {r[1] for r in self._db.execute("PRAGMA table_info(drawings)")}
+        has_drawing_meta = "drawing_no" in drawing_cols
+        drawing_sql = (
+            "SELECT relic_code, path, drawing_no, drawing_name FROM drawings"
+            if has_drawing_meta
+            else "SELECT relic_code, path FROM drawings"
+        )
+        for row in self._db.execute(drawing_sql):
+            dw = {
+                "archive_code": row["relic_code"],
+                "path": row["path"],
+                "relative_path": row["path"],
+                "drawing_no": (row["drawing_no"] if has_drawing_meta else "") or "",
+                "drawing_name": (row["drawing_name"] if has_drawing_meta else "") or "",
+            }
             self.drawing_index.append(dw)
             self.drawing_map.setdefault(row["relic_code"], []).append(dw)
 
@@ -184,6 +207,8 @@ class DataStore:
             return
         self.photo_index = self._read_csv(path)
         for p in self.photo_index:
+            if not p.get("relative_path"):
+                p["relative_path"] = p.get("path", "")
             code = p.get("archive_code")
             if code:
                 self.photo_map.setdefault(code, []).append(p)
@@ -193,6 +218,8 @@ class DataStore:
             return
         self.drawing_index = self._read_csv(path)
         for d in self.drawing_index:
+            if not d.get("relative_path"):
+                d["relative_path"] = d.get("path", "")
             code = d.get("archive_code")
             if code:
                 self.drawing_map.setdefault(code, []).append(d)

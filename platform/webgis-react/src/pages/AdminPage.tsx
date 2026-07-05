@@ -3,18 +3,23 @@ import {
   fetchPipelineStatus,
   fetchTask,
   fetchApiConfig,
+  fetchAiModels,
   runPipeline,
   saveApiConfig,
   type AdminTask,
   type ApiConfigStatus,
+  type AiModelsResp,
   type PipelineStatus,
 } from "../api/admin";
 import {
   clearCache,
   estimateArea,
+  fetchCacheInfo,
   fetchHistory,
   fetchProgress,
+  openCacheFolder,
   startDownload,
+  type TileCacheInfo,
   type TileDownloadProgress,
   type TileHistoryItem,
 } from "../api/tiles";
@@ -31,10 +36,30 @@ import {
 import { CRS_LIST, type CrsId } from "../utils/crs";
 import { useUIStore } from "../stores/uiStore";
 
+const STEP_TITLE: Record<string, string> = {
+  "00": "档案提取",
+  "01": "数据导入",
+  "02": "边界处理",
+  "03": "数据库构建",
+};
+
 const STEP_DESC: Record<string, string> = {
-  "01": "读取 data/input/01_relics 的台账 Excel/CSV,挂接照片与图纸",
-  "02": "行政边界 Shapefile/GeoJSON 统一转为 WGS-84 GeoJSON",
-  "03": "生成 relics.db(R-Tree 空间索引 + FTS5 全文搜索)",
+  "00": "登记表 docx → Markdown 档案",
+  "01": "Markdown 档案 / Excel 台账 → 数据集",
+  "02": "行政边界 → WGS-84 GeoJSON",
+  "03": "数据集 → relics.db",
+};
+
+const PROVIDER_LABEL: Record<string, string> = {
+  arcgis_sat: "ArcGIS 影像",
+  osm: "OSM 矢量",
+  gaode_sat: "高德影像",
+  gaode_anno: "高德标注",
+  gaode_vec: "高德矢量",
+  tianditu_img: "天地图影像",
+  tianditu_cia: "天地图影像注记",
+  tianditu_vec: "天地图矢量",
+  tianditu_cva: "天地图矢量注记",
 };
 
 function fmtBytes(n: number | undefined): string {
@@ -231,6 +256,8 @@ function TileDownloadSection({ flash }: { flash: (t: string) => void }) {
             <option value="osm">OSM 矢量</option>
             <option value="arcgis_sat,osm">影像 + 矢量</option>
             <option value="gaode_sat,gaode_anno">高德影像 + 标注</option>
+            <option value="tianditu_img,tianditu_cia">天地图影像 + 注记 (需 Key)</option>
+            <option value="tianditu_vec,tianditu_cva">天地图矢量 + 注记 (需 Key)</option>
           </select>
         </div>
         <div className="tile-row">
@@ -287,12 +314,28 @@ function TileDownloadSection({ flash }: { flash: (t: string) => void }) {
       {history.length > 0 ? (
         <div className="adm-sub-list">
           <h4>最近下载</h4>
-          {history.slice(0, 5).map((h) => (
-            <div key={h.id} className="tile-hist-item">
-              {h.label || "(无标签)"} · {h.providers?.join(",")} · z={h.zooms?.join(",")} · 下载{" "}
-              {h.downloaded} / 失败 {h.failed} · {fmtBytes(h.bytes)}
-            </div>
-          ))}
+          <table className="adm-table">
+            <thead>
+              <tr>
+                <th>范围</th>
+                <th>影像源</th>
+                <th style={{ width: 120 }}>层级</th>
+                <th style={{ width: 120 }}>下载 / 失败</th>
+                <th style={{ width: 100 }}>大小</th>
+              </tr>
+            </thead>
+            <tbody>
+              {history.slice(0, 5).map((h) => (
+                <tr key={h.id}>
+                  <td>{h.label || "(无标签)"}</td>
+                  <td>{(h.providers || []).map((p) => PROVIDER_LABEL[p] || p).join("、")}</td>
+                  <td>z{h.zooms?.join(",")}</td>
+                  <td>{h.downloaded} / {h.failed}</td>
+                  <td>{fmtBytes(h.bytes)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       ) : null}
     </div>
@@ -512,7 +555,7 @@ function BoundarySection({ flash }: { flash: (t: string) => void }) {
           <select
             value={exportCrs}
             onChange={(e) => setExportCrs(e.target.value as CrsId)}
-            style={{ marginLeft: "auto", height: 22, fontSize: 11 }}
+            style={{ marginLeft: "auto", height: 24, fontSize: 12 }}
             title="导出坐标系"
           >
             {CRS_LIST.map((c) => (
@@ -520,21 +563,33 @@ function BoundarySection({ flash }: { flash: (t: string) => void }) {
             ))}
           </select>
         </h4>
-        {files.map((f) => {
-          const stem = f.name.replace(/\.geojson$/, "") as "county" | "townships" | "villages";
-          return (
-            <div key={f.name} className="tile-hist-item" style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <span style={{ flex: 1 }}>
-                {f.name} · {f.missing ? "未生成" : `${f.feature_count} 要素 · ${fmtBytes(f.size)}`}
-              </span>
-              {!f.missing && f.feature_count > 0 ? (
-                <button className="pp-btn sm" onClick={() => onExport(stem)}>
-                  导出
-                </button>
-              ) : null}
-            </div>
-          );
-        })}
+        <table className="adm-table">
+          <thead>
+            <tr>
+              <th>文件</th>
+              <th style={{ width: 120 }}>要素数</th>
+              <th style={{ width: 110 }}>大小</th>
+              <th style={{ width: 90 }}>操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            {files.map((f) => {
+              const stem = f.name.replace(/\.geojson$/, "") as "county" | "townships" | "villages";
+              return (
+                <tr key={f.name}>
+                  <td>{f.name}</td>
+                  <td>{f.missing ? "未生成" : f.feature_count}</td>
+                  <td>{f.missing ? "—" : fmtBytes(f.size)}</td>
+                  <td>
+                    {!f.missing && f.feature_count > 0 ? (
+                      <button className="pp-btn sm" onClick={() => onExport(stem)}>导出</button>
+                    ) : null}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
       </div>
 
       {logLines.length > 0 ? (
@@ -544,12 +599,103 @@ function BoundarySection({ flash }: { flash: (t: string) => void }) {
   );
 }
 
+/** ── 已下载内容总览(瓦片缓存分源统计) ─────────────────────── */
+function CacheOverviewSection({ flash }: { flash: (t: string) => void }) {
+  const [info, setInfo] = useState<TileCacheInfo | null>(null);
+
+  const refresh = useCallback(() => {
+    fetchCacheInfo().then(setInfo).catch(() => setInfo(null));
+  }, []);
+
+  useEffect(() => {
+    refresh();
+    const t = setInterval(refresh, 8000);
+    return () => clearInterval(t);
+  }, [refresh]);
+
+  const entries = Object.entries(info?.providers || {}).filter(([, v]) => v.count > 0);
+  const totalCount = entries.reduce((s, [, v]) => s + v.count, 0);
+  const totalBytes = entries.reduce((s, [, v]) => s + v.bytes, 0);
+
+  return (
+    <div className="adm-sec">
+      <div className="adm-sec-hdr">
+        <h2>已下载的离线瓦片</h2>
+        <span className="adm-hint">
+          共 {totalCount.toLocaleString()} 张 · {fmtBytes(totalBytes)}
+        </span>
+        <div className="adm-actions">
+          <button
+            className="pp-btn sm"
+            onClick={async () => {
+              const r = await openCacheFolder();
+              if (!r.ok) flash("打开缓存目录失败");
+            }}
+          >
+            打开缓存目录
+          </button>
+        </div>
+      </div>
+      {entries.length === 0 ? (
+        <div className="pp-empty">还没有离线瓦片。在上方选好范围与影像源后点「开始下载」。</div>
+      ) : (
+        <table className="adm-table">
+          <thead>
+            <tr>
+              <th>影像源</th>
+              <th style={{ width: 140 }}>瓦片数量</th>
+              <th style={{ width: 120 }}>占用空间</th>
+              <th style={{ width: 90 }}>操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            {entries.map(([prov, v]) => (
+              <tr key={prov}>
+                <td>{PROVIDER_LABEL[prov] || prov}</td>
+                <td>{v.count.toLocaleString()} 张</td>
+                <td>{fmtBytes(v.bytes)}</td>
+                <td>
+                  <button
+                    className="pp-btn sm danger"
+                    onClick={async () => {
+                      if (!confirm(`确定删除「${PROVIDER_LABEL[prov] || prov}」的全部离线瓦片?`)) return;
+                      await clearCache([prov]);
+                      refresh();
+                      useUIStore.getState().bumpOfflineCoverage();
+                      flash("已删除该影像源的缓存");
+                    }}
+                  >
+                    删除
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
+
+type AdminTabId = "pipeline" | "api" | "map";
+
+const ADMIN_TABS: { id: AdminTabId; label: string }[] = [
+  { id: "pipeline", label: "数据管线" },
+  { id: "api", label: "API 配置" },
+  { id: "map", label: "离线地图下载" },
+];
+
 export default function AdminPage() {
   const [pipeline, setPipeline] = useState<PipelineStatus | null>(null);
   const [task, setTask] = useState<AdminTask>({ status: "idle" });
   const [config, setConfig] = useState<ApiConfigStatus | null>(null);
-  const [form, setForm] = useState({ sf: "", amap: "", ion: "" });
+  const [form, setForm] = useState({ sf: "", amap: "", ion: "", tdt: "" });
   const [saving, setSaving] = useState(false);
+  const [aiModels, setAiModels] = useState<AiModelsResp | null>(null);
+  const [modelSel, setModelSel] = useState("");
+  const [modelSaving, setModelSaving] = useState(false);
+  const [modelsLoading, setModelsLoading] = useState(false);
+  const [activeTab, setActiveTab] = useState<AdminTabId>("pipeline");
   const [toast, setToast] = useState("");
   const logRef = useRef<HTMLPreElement>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -565,6 +711,15 @@ export default function AdminPage() {
 
   const refreshConfig = useCallback(() => {
     fetchApiConfig().then(setConfig).catch(() => undefined);
+  }, []);
+
+  const refreshModels = useCallback(() => {
+    fetchAiModels()
+      .then((d) => {
+        setAiModels(d);
+        setModelSel(d.current || "");
+      })
+      .catch(() => undefined);
   }, []);
 
   const stopPolling = useCallback(() => {
@@ -594,13 +749,14 @@ export default function AdminPage() {
     document.title = "系统管理 — 济宁市文物保护利用平台";
     refreshPipeline();
     refreshConfig();
+    refreshModels();
     // 页面打开时若已有任务在跑,续上轮询
     fetchTask().then((t) => {
       setTask(t);
       if (t.status === "running") startPolling();
     }).catch(() => undefined);
     return stopPolling;
-  }, [refreshPipeline, refreshConfig, startPolling, stopPolling]);
+  }, [refreshPipeline, refreshConfig, refreshModels, startPolling, stopPolling]);
 
   // 日志自动滚到底
   useEffect(() => {
@@ -624,7 +780,7 @@ export default function AdminPage() {
   };
 
   const save = async () => {
-    if (!form.sf.trim() && !form.amap.trim() && !form.ion.trim()) {
+    if (!form.sf.trim() && !form.amap.trim() && !form.ion.trim() && !form.tdt.trim()) {
       flash("请至少填写一项后再保存(留空表示不修改)");
       return;
     }
@@ -634,10 +790,12 @@ export default function AdminPage() {
         siliconflow_key: form.sf.trim() || undefined,
         amap_web_key: form.amap.trim() || undefined,
         cesium_ion_token: form.ion.trim() || undefined,
+        tianditu_key: form.tdt.trim() || undefined,
       });
       flash(res.message || "已保存");
-      setForm({ sf: "", amap: "", ion: "" });
+      setForm({ sf: "", amap: "", ion: "", tdt: "" });
       refreshConfig();
+      refreshModels(); // 新填了 Key 后模型列表可能变为可拉取
     } catch (e) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       flash((e as any)?.response?.data?.detail || "保存失败");
@@ -646,17 +804,61 @@ export default function AdminPage() {
     }
   };
 
+  const reloadModels = async () => {
+    setModelsLoading(true);
+    try {
+      const d = await fetchAiModels();
+      setAiModels(d);
+      if (!modelSel || !d.models.some((m) => m.id === modelSel)) {
+        setModelSel(d.current || "");
+      }
+      flash(d.source === "api"
+        ? `已刷新,可用模型 ${d.models.length} 个`
+        : `刷新失败,使用内置列表(${d.error || "API 不可用"})`);
+    } catch {
+      flash("模型列表刷新失败");
+    } finally {
+      setModelsLoading(false);
+    }
+  };
+
+  const applyModel = async () => {
+    if (!modelSel || modelSel === aiModels?.current) return;
+    setModelSaving(true);
+    try {
+      await saveApiConfig({ default_model: modelSel });
+      flash(`AI 模型已切换为 ${modelSel},即时生效`);
+      refreshModels();
+      refreshConfig();
+    } catch (e) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      flash((e as any)?.response?.data?.detail || "模型保存失败");
+    } finally {
+      setModelSaving(false);
+    }
+  };
+
   const manifestOf = (stepId: string) =>
     pipeline?.last_manifest?.steps?.find((s) => s.id === stepId);
 
   return (
     <div className="adm-page">
-      <div className="bs-hdr">
-        <h1>系统管理</h1>
-        <span className="bs-clock">数据管线 · API 配置 · 地图数据</span>
-      </div>
+      <div className="adm-body">
+        <nav className="adm-side">
+          {ADMIN_TABS.map((t) => (
+            <button
+              key={t.id}
+              className={"adm-side-item" + (activeTab === t.id ? " on" : "")}
+              onClick={() => setActiveTab(t.id)}
+            >
+              {t.label}
+            </button>
+          ))}
+        </nav>
 
+        <div className="adm-content">
       {/* ── 数据管线 ─────────────────────────────── */}
+      <div style={{ display: activeTab === "pipeline" ? "contents" : "none" }}>
       <div className="adm-sec">
         <div className="adm-sec-hdr">
           <h2>数据管线</h2>
@@ -689,7 +891,7 @@ export default function AdminPage() {
                 <div className="adm-step-top">
                   <span className={"adm-step-idx" + (outputsOk ? " ok" : "")}>{s.id}</span>
                   <div className="adm-step-name">
-                    {s.name}
+                    {STEP_TITLE[s.id] || s.name}
                     <em>{STEP_DESC[s.id] || s.script}{s.optional ? " · 可选" : ""}</em>
                   </div>
                   <button
@@ -737,6 +939,11 @@ export default function AdminPage() {
               {task.status !== "running" && task.returncode != null ? (
                 <span className="adm-task-rc">exit {task.returncode}</span>
               ) : null}
+              {task.log_file ? (
+                <span className="adm-hint" style={{ marginLeft: "auto" }} title={task.log_file}>
+                  完整日志: {task.log_file.split(/[\\/]/).slice(-2).join("/")}
+                </span>
+              ) : null}
             </div>
             <pre ref={logRef} className="adm-log">{(task.log || []).join("\n")}</pre>
           </div>
@@ -746,8 +953,10 @@ export default function AdminPage() {
           </div>
         )}
       </div>
+      </div>
 
       {/* ── API 配置 ─────────────────────────────── */}
+      <div style={{ display: activeTab === "api" ? "contents" : "none" }}>
       <div className="adm-sec">
         <div className="adm-sec-hdr">
           <h2>外部 API 配置</h2>
@@ -760,13 +969,13 @@ export default function AdminPage() {
           <div className="adm-key-row">
             <div className="adm-key-meta">
               <b>SiliconFlow Key</b>
-              <em>AI 问答 / 巡查意图解析 / 照片评估 / 报告生成</em>
+              <em>AI 问答与档案提取</em>
               <span className={"adm-key-st" + (config?.runtime.ai_ready ? " on" : "")}>
                 {config?.runtime.ai_ready
                   ? `已启用 ${config?.siliconflow.masked}`
                   : config?.siliconflow.configured
-                    ? `已配置 ${config?.siliconflow.masked}(客户端未就绪)`
-                    : "未配置 · AI 降级为规则模式"}
+                    ? `已配置(未就绪)`
+                    : "未配置"}
               </span>
             </div>
             <input
@@ -780,8 +989,50 @@ export default function AdminPage() {
 
           <div className="adm-key-row">
             <div className="adm-key-meta">
+              <b>AI 模型</b>
+              <em>问答 / 巡查规划 / 报告生成</em>
+              <span className={"adm-key-st" + (aiModels?.current ? " on" : "")}>
+                {aiModels?.current || "未设置"}
+                {aiModels?.source === "api" ? ` · 可选 ${aiModels.models.length} 个` : ""}
+              </span>
+            </div>
+            <div style={{ display: "flex", gap: 8, flex: 1, minWidth: 0 }}>
+              <select
+                className="pp-input"
+                style={{ flex: 1, minWidth: 0 }}
+                value={modelSel}
+                onChange={(e) => setModelSel(e.target.value)}
+                disabled={modelSaving || !aiModels?.models?.length}
+              >
+                {modelSel && !aiModels?.models?.some((m) => m.id === modelSel) ? (
+                  <option value={modelSel}>{modelSel}</option>
+                ) : null}
+                {(aiModels?.models || []).map((m) => (
+                  <option key={m.id} value={m.id}>{m.name}</option>
+                ))}
+              </select>
+              <button
+                className="pp-btn"
+                title="重新从 SiliconFlow 拉取可用模型列表"
+                disabled={modelsLoading}
+                onClick={reloadModels}
+              >
+                {modelsLoading ? "刷新中..." : "刷新"}
+              </button>
+              <button
+                className="pp-btn primary"
+                onClick={applyModel}
+                disabled={modelSaving || !modelSel || modelSel === aiModels?.current}
+              >
+                {modelSaving ? "应用中..." : "应用"}
+              </button>
+            </div>
+          </div>
+
+          <div className="adm-key-row">
+            <div className="adm-key-meta">
               <b>高德 Web 服务 Key</b>
-              <em>巡查驾车路线规划;未配置时路线用直线连接</em>
+              <em>巡查驾车路线规划</em>
               <span className={"adm-key-st" + (config?.runtime.amap_ready ? " on" : "")}>
                 {config?.runtime.amap_ready
                   ? `已启用 ${config?.amap.masked}`
@@ -800,7 +1051,7 @@ export default function AdminPage() {
           <div className="adm-key-row">
             <div className="adm-key-meta">
               <b>Cesium Ion Token</b>
-              <em>在线高精度地形(可选);保存后需刷新页面生效</em>
+              <em>在线高精度地形(可选)</em>
               <span className={"adm-key-st" + (config?.cesium_ion.configured ? " on" : "")}>
                 {config?.cesium_ion.configured ? `已配置 ${config?.cesium_ion.masked}` : "未配置"}
               </span>
@@ -813,6 +1064,23 @@ export default function AdminPage() {
               onChange={(e) => setForm({ ...form, ion: e.target.value })}
             />
           </div>
+
+          <div className="adm-key-row">
+            <div className="adm-key-meta">
+              <b>天地图 Key</b>
+              <em>官方在线底图(服务端类型)</em>
+              <span className={"adm-key-st" + (config?.tianditu?.configured ? " on" : "")}>
+                {config?.tianditu?.configured ? `已配置 ${config?.tianditu?.masked}` : "未配置"}
+              </span>
+            </div>
+            <input
+              className="pp-input"
+              type="password"
+              placeholder="天地图控制台申请的服务端 key (留空不修改)"
+              value={form.tdt}
+              onChange={(e) => setForm({ ...form, tdt: e.target.value })}
+            />
+          </div>
         </div>
 
         <div className="adm-save-row">
@@ -822,9 +1090,16 @@ export default function AdminPage() {
           </button>
         </div>
       </div>
+      </div>
 
-      <TileDownloadSection flash={flash} />
-      <BoundarySection flash={flash} />
+      {/* ── 离线地图下载(瓦片 + 行政边界 + 已下载内容) ── */}
+      <div style={{ display: activeTab === "map" ? "contents" : "none" }}>
+        <TileDownloadSection flash={flash} />
+        <CacheOverviewSection flash={flash} />
+        <BoundarySection flash={flash} />
+      </div>
+        </div>
+      </div>
 
       {toast ? <div className="toast">{toast}</div> : null}
     </div>

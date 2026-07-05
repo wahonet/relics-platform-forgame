@@ -8,12 +8,19 @@ const ONLINE_BASE_LAYOUT: Partial<
 > = {
   gaode_sat: { base: "gaode_sat", overlay: "gaode_anno" },
   gaode_vec: { base: "gaode_vec", overlay: null },
+  // 天地图:影像/矢量底图 + 对应中文注记层(借鉴旧版 Leaflet ChinaProvider 的组合方式)
+  tianditu_img: { base: "tianditu_img", overlay: "tianditu_cia" },
+  tianditu_vec: { base: "tianditu_vec", overlay: "tianditu_cva" },
 };
 
 function buildTileUrl(type: BaseLayerType, opts?: { bust?: boolean }) {
   const params: string[] = [];
-  if (OFFLINE_ONLY_BASES.has(type)) params.push("offline=1");
-  if (opts?.bust) params.push("t=" + Date.now());
+  if (OFFLINE_ONLY_BASES.has(type)) {
+    params.push("offline=1");
+    // 时间戳只对离线底图有意义(下载新瓦片后强制刷新);
+    // 在线底图加时间戳会毁掉浏览器 HTTP 缓存,每次开页都全量回源服务器
+    if (opts?.bust) params.push("t=" + Date.now());
+  }
   const suffix = params.length ? "?" + params.join("&") : "";
   return `/tiles/${type}/{z}/{x}/{y}` + suffix;
 }

@@ -111,6 +111,8 @@ CREATE TABLE photos (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     relic_code  TEXT NOT NULL,
     path        TEXT NOT NULL,
+    photo_no    TEXT,                            -- 照片号(Z001...)
+    description TEXT,                            -- 文字说明(四普清单)
     thumb_path  TEXT,
     taken_at    INTEGER,
     UNIQUE(relic_code, path)
@@ -118,9 +120,11 @@ CREATE TABLE photos (
 CREATE INDEX idx_photos_relic ON photos(relic_code);
 
 CREATE TABLE drawings (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    relic_code  TEXT NOT NULL,
-    path        TEXT NOT NULL,
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    relic_code   TEXT NOT NULL,
+    path         TEXT NOT NULL,
+    drawing_no   TEXT,                           -- 图号(T001...)
+    drawing_name TEXT,
     UNIQUE(relic_code, path)
 );
 CREATE INDEX idx_drawings_relic ON drawings(relic_code);
@@ -305,13 +309,15 @@ def _insert_assets(conn: sqlite3.Connection, photos: list[dict], drawings: list[
     photo_rows = 0
     for p in photos:
         code = (p.get("archive_code") or "").strip()
-        path = (p.get("path") or p.get("photo") or "").strip()
+        path = (p.get("path") or p.get("relative_path") or p.get("photo") or "").strip()
         if not code or not path:
             continue
         try:
             cur.execute(
-                "INSERT OR IGNORE INTO photos (relic_code, path, thumb_path) VALUES (?, ?, ?)",
-                (code, path, p.get("thumb_path") or None),
+                "INSERT OR IGNORE INTO photos (relic_code, path, photo_no, description, thumb_path)"
+                " VALUES (?, ?, ?, ?, ?)",
+                (code, path, p.get("photo_no") or None, p.get("description") or None,
+                 p.get("thumb_path") or None),
             )
             if cur.rowcount:
                 photo_rows += 1
@@ -321,13 +327,14 @@ def _insert_assets(conn: sqlite3.Connection, photos: list[dict], drawings: list[
     drawing_rows = 0
     for d in drawings:
         code = (d.get("archive_code") or "").strip()
-        path = (d.get("path") or d.get("drawing") or "").strip()
+        path = (d.get("path") or d.get("relative_path") or d.get("drawing") or "").strip()
         if not code or not path:
             continue
         try:
             cur.execute(
-                "INSERT OR IGNORE INTO drawings (relic_code, path) VALUES (?, ?)",
-                (code, path),
+                "INSERT OR IGNORE INTO drawings (relic_code, path, drawing_no, drawing_name)"
+                " VALUES (?, ?, ?, ?)",
+                (code, path, d.get("drawing_no") or None, d.get("drawing_name") or None),
             )
             if cur.rowcount:
                 drawing_rows += 1
@@ -351,7 +358,7 @@ def _load_polygons(geojson_path: Path) -> list[tuple[str, str, str]]:
         if not code or not geom:
             continue
         kind = props.get("kind") or "protection"
-        if kind not in ("protection", "control"):
+        if kind not in ("protection", "control", "body"):
             kind = "protection"
         out.append((code, kind, json.dumps(geom, ensure_ascii=False)))
     return out
@@ -371,12 +378,14 @@ def _refresh_has_photo(conn: sqlite3.Connection) -> None:
 
 def build_db(db_path: Path, dataset_dir: Path) -> None:
     db_path.parent.mkdir(parents=True, exist_ok=True)
-    if db_path.exists():
-        db_path.unlink()
 
-    log.info("[DB] 创建 %s", db_path)
-    conn = sqlite3.connect(str(db_path))
+    # 原地重建(SCHEMA_SQL 自带 DROP TABLE):不删除文件,
+    # 这样 WebGIS 服务运行期间也能重建(Windows 上被打开的文件无法 unlink)。
+    # WAL 模式下服务端读连接不阻塞本次写入,重建完成后新查询立即看到新数据。
+    log.info("[DB] %s %s", "重建" if db_path.exists() else "创建", db_path)
+    conn = sqlite3.connect(str(db_path), timeout=30)
     try:
+        conn.execute("PRAGMA busy_timeout=30000;")
         conn.executescript(SCHEMA_SQL)
 
         relics = _load_relics_json(dataset_dir / "relics_full.json")
