@@ -64,18 +64,22 @@ _CONDITIONS = ("好", "较好", "一般", "较差", "差")
 # A. Markdown 档案导入
 # ════════════════════════════════════════════════════════════
 
-def _find_docx_for(md_path: Path, code: str, docs_root: Path) -> Path | None:
-    """按分组同名/档案号前缀匹配源 docx(照片图纸内嵌其中)。"""
+def _find_docx_for(md_path: Path, md_root: Path, code: str, docs_root: Path) -> Path | None:
+    """按目录镜像/档案号前缀匹配源 docx(照片图纸内嵌其中)。
+
+    step00 输出的 markdown 与 00_docs 目录结构一一镜像,优先同路径同名;
+    兜底在同目录按档案号前缀模糊匹配。
+    """
     if not docs_root.exists():
         return None
-    group = md_path.parent.name
-    candidates = []
-    group_dir = docs_root / group
+    try:
+        rel_dir = md_path.parent.relative_to(md_root)
+    except ValueError:
+        rel_dir = Path(".")
+    group_dir = docs_root / rel_dir
+    candidates = [group_dir / f"{md_path.stem}.docx"]
     if group_dir.exists():
-        candidates.append(group_dir / f"{md_path.stem}.docx")
         candidates.extend(sorted(group_dir.glob(f"{code}*.docx")))
-    candidates.append(docs_root / f"{md_path.stem}.docx")
-    candidates.extend(sorted(docs_root.glob(f"{code}*.docx")))
     for c in candidates:
         if c.exists():
             return c
@@ -180,7 +184,7 @@ def import_from_markdown(paths, cfg: dict) -> tuple[list[dict], list[dict], list
             })
 
         # 媒体:优先从源 docx 抽取内嵌图片,否则回退 02_media 目录
-        docx = _find_docx_for(md_path, code, paths.input_docs)
+        docx = _find_docx_for(md_path, md_root, code, paths.input_docs)
         if docx and (drawings_meta or photos_meta):
             try:
                 d_rows, p_rows = extract_media_from_docx(

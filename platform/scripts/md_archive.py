@@ -182,11 +182,12 @@ def parse_archive_md(md_path: Path, group_name: str = "") -> dict:
     area_raw = get_field(content, fa, "总面积")
     area_num = re.search(r"(\d+\.?\d*)", area_raw)
 
-    # 乡镇优先取分组文件夹名(如 05仲山镇),兜底从地址里解析
-    township = group_name
+    # 乡镇:分组文件夹名形如"05仲山镇/卧龙山街道"时采用;
+    # 文件夹是县区名或"未定级文物"这类分类名时,改从详细地址解析
+    township = group_name if re.search(r"[镇乡]$|街道$", group_name) else ""
     if not township:
         address = get_field(content, "位置信息", "详细地址")
-        m = re.search(r"[县区市]([^县区市]{1,8}?[镇乡]|[^县区市]{1,8}?街道)", address)
+        m = re.search(r"[县区市]([^省市县区]{1,10}?(?:[镇乡]|街道))", address)
         township = m.group(1) if m else ""
 
     return {

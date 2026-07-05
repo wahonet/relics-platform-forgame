@@ -267,27 +267,22 @@ def docx_to_text(docx_path: Path) -> str:
 
 
 def collect_tasks(input_root: Path, output_root: Path) -> list[dict]:
-    """扫描 00_docs 下的 docx(支持分组文件夹或平铺)。"""
+    """递归扫描 00_docs 下的 docx,任意层级(县区/、县区/乡镇/、平铺均可)。
+
+    输出的 markdown 镜像 docx 的目录结构,便于 step01 反查源 docx。
+    """
     tasks: list[dict] = []
-
-    def _add(docx: Path, group: str) -> None:
-        if docx.name.startswith("~$"):
-            return
-        out_dir = output_root / group if group else output_root
-        tasks.append({
-            "group": group,
-            "docx": docx,
-            "out": out_dir / f"{docx.stem}.md",
-        })
-
     if not input_root.exists():
         return tasks
-    for entry in sorted(input_root.iterdir()):
-        if entry.is_dir():
-            for docx in sorted(entry.glob("*.docx")):
-                _add(docx, entry.name)
-        elif entry.suffix.lower() == ".docx":
-            _add(entry, "")
+    for docx in sorted(input_root.rglob("*.docx")):
+        if docx.name.startswith("~$"):
+            continue
+        rel_dir = docx.parent.relative_to(input_root)
+        tasks.append({
+            "group": str(rel_dir) if str(rel_dir) != "." else "",
+            "docx": docx,
+            "out": output_root / rel_dir / f"{docx.stem}.md",
+        })
     return tasks
 
 
