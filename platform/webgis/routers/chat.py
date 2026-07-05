@@ -29,7 +29,7 @@ router = APIRouter()
 # 运行时状态,init_chat() 中赋值。
 _full_context: str = ""
 _project_name: str = "本市"
-_project_full_name: str = "文物保护利用数据要素平台"
+_project_full_name: str = "文物保护利用平台"
 _default_model: str = ""
 _available_models: list[dict] = []
 _top_k_relics: int = 8
@@ -57,7 +57,7 @@ def _build_system_prompt() -> str:
 
 数据分两层:
 - 基础层(全市):国、省、市、县四级文物保护单位,含简介、坐标、两线范围、照片、图纸
-- 全量层(嘉祥县):全县不可移动文物,在基础要素之上还有三普/四普档案与三维模型
+- 全量层(嘉祥县):全县不可移动文物,在基础层数据之上还有三普/四普档案与三维模型
 
 回答规则：
 1. **严格基于数据回答** —— 下方提供了完整的文物清单与统计，请据此回答，不要编造
@@ -248,7 +248,7 @@ def init_chat() -> None:
     cfg = load_config()
     proj = cfg.get("project", {})
     _project_name = proj.get("name") or "本市"
-    _project_full_name = proj.get("full_name") or f"{_project_name}文物保护利用数据要素平台"
+    _project_full_name = proj.get("full_name") or f"{_project_name}文物保护利用平台"
 
     sf = (cfg.get("api") or {}).get("siliconflow") or {}
     _default_model = sf.get("default_model", "")

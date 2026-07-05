@@ -246,7 +246,7 @@ export interface CatalogApplication {
   created_at: number;
 }
 
-// ── 数据要素门面 ─────────────────────────────────────────────
+// ── 资源概览 ─────────────────────────────────────────────
 
 export interface NameValue {
   name: string;
@@ -270,7 +270,7 @@ export interface DashboardStats {
     archive_fpu: number;
     boundaries: number;
   };
-  /** 各要素完整度百分比: coords / intro / photo / boundary_of_designated / condition */
+  /** 各字段完整度百分比: coords / intro / photo / boundary_of_designated / condition */
   completeness: Record<string, number>;
   quality_score: number;
 }

@@ -1,4 +1,4 @@
-"""统计 API:基础统计 + 数据要素门面大屏聚合。"""
+"""统计 API:基础统计 + 资源概览大屏聚合。"""
 from __future__ import annotations
 
 import sys
@@ -52,7 +52,7 @@ async def stats():
 
 @router.get("/stats/dashboard")
 async def stats_dashboard():
-    """数据要素门面大屏一次性聚合。"""
+    """资源概览大屏一次性聚合。"""
     relics = store.relics
     total = len(relics)
 

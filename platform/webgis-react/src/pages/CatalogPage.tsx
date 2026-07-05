@@ -34,7 +34,7 @@ export default function CatalogPage() {
   };
 
   useEffect(() => {
-    document.title = "数据资源目录 — 济宁市文物保护利用数据要素平台";
+    document.title = "数据资源目录 — 济宁市文物保护利用平台";
     load();
   }, []);
 

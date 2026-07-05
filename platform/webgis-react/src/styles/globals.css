@@ -764,7 +764,7 @@ textarea.pp-input { height: auto; padding: 8px 10px; resize: vertical; }
 .pr-miss { color: var(--t2); }
 .pr-photo { width: 72px; height: 54px; object-fit: cover; border-radius: 4px; border: 1px solid var(--bd); }
 
-/* ── 数据要素门面大屏 ─────────────────────────────────────── */
+/* ── 资源概览大屏 ─────────────────────────────────────── */
 .bs-page {
   width: 100%; height: 100%; overflow-y: auto; background:
     radial-gradient(1100px 500px at 80% -10%, rgba(31,111,235,.16), transparent),

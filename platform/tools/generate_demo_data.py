@@ -336,7 +336,7 @@ def _gen_units() -> tuple[list[dict], list[dict]]:
     for _ in range(max(0, 568 - jx_now)):
         add("嘉祥县", "未定级", "full")
 
-    # 4) 嘉祥全量层数据要素:三维模型约 400 个、三普/四普档案标记
+    # 4) 嘉祥全量层扩展数据:三维模型约 400 个、三普/四普档案标记
     jx = [r for r in relics if r["county"] == "嘉祥县"]
     random.shuffle(jx)
     for i, r in enumerate(jx):

@@ -12,12 +12,12 @@ export function Header() {
 
   return (
     <div className="header">
-      <h1>{config?.project?.full_name || "文物保护利用数据要素平台"}</h1>
+      <h1>{config?.project?.full_name || "文物保护利用平台"}</h1>
 
       <nav className="hdr-nav">
         <span className="hdr-nav-item on">地图总览</span>
         <Link className="hdr-nav-item" to="/dashboard">
-          数据要素门面
+          资源概览
         </Link>
         <Link className="hdr-nav-item" to="/catalog">
           数据资源目录

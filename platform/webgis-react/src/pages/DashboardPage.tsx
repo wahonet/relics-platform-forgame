@@ -43,7 +43,7 @@ export default function DashboardPage() {
   const [now, setNow] = useState(new Date());
 
   useEffect(() => {
-    document.title = "数据要素门面 — 济宁市文物保护利用数据要素平台";
+    document.title = "资源概览 — 济宁市文物保护利用平台";
     fetchDashboardStats().then(setStats).catch(() => undefined);
     fetchPatrolStats().then(setPatrol).catch(() => undefined);
     fetchCatalog().then((d) => setDatasetCount(d.length)).catch(() => undefined);
@@ -209,7 +209,7 @@ export default function DashboardPage() {
     <div className="bs-page">
       <div className="bs-hdr">
         <Link to="/" className="bs-back">← 返回地图</Link>
-        <h1>济宁市文物保护利用数据要素平台 · 数据要素门面</h1>
+        <h1>济宁市文物保护利用平台 · 资源概览</h1>
         <div className="bs-clock">
           {now.toLocaleDateString("zh-CN")} {now.toLocaleTimeString("zh-CN", { hour12: false })}
         </div>
@@ -299,7 +299,7 @@ export default function DashboardPage() {
 
       <div className="bs-foot">
         <div className="bs-flow">
-          <h3>要素流通</h3>
+          <h3>开放共享</h3>
           <div className="bs-flow-items">
             <div>
               <Num v={datasetCount} />
