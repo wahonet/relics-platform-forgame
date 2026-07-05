@@ -27,7 +27,7 @@ try:
     import yaml
 except ImportError:
     sys.stderr.write(
-        "[错误] 未安装 pyyaml。请先运行 start-backend.bat 或手动执行:\n"
+        "[错误] 未安装 pyyaml。请先运行 start.bat 或手动执行:\n"
         "       python -m pip install pyyaml\n"
     )
     sys.exit(1)

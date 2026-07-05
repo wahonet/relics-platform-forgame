@@ -48,7 +48,7 @@ cd platform/webgis-react && npm install && npm run build && cd ../..
 # 打开 http://127.0.0.1:8000/app/
 ```
 
-Windows 下可直接使用 `start-backend.bat` / `start-frontend.bat`。
+Windows 下直接双击 `start.bat` 一键启动（自动安装依赖、构建前端、拉起后端并打开浏览器）。改过前端代码后用 `start.bat build` 重新构建；前端开发热更新用 `start.bat dev`。
 
 ### 接入真实数据
 

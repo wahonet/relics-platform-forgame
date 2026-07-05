@@ -19,7 +19,7 @@ jobs:
           python -m pip install -r platform/webgis/requirements.txt -r requirements-dev.txt
       - name: Compile Python modules
         run: |
-          python -m py_compile platform/webgis/main.py platform/webgis/tile_routes.py platform/webgis/terrain_routes.py platform/webgis/routers/admin.py platform/webgis/routers/admin_task_service.py platform/scripts/run_pipeline.py
+          python -m py_compile platform/webgis/main.py platform/webgis/tile_routes.py platform/webgis/routers/admin.py platform/scripts/run_pipeline.py
       - name: Run Python tests
         run: pytest
 
@@ -39,22 +39,4 @@ jobs:
         run: npm run type-check
       - name: Build React
         working-directory: platform/webgis-react
-        run: npm run build
-
-  admin-vue:
-    name: Vue Admin
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-      - name: Install Vue dependencies
-        working-directory: platform/admin-vue
-        run: npm ci
-      - name: Type-check Vue
-        working-directory: platform/admin-vue
-        run: npm run typecheck
-      - name: Build Vue
-        working-directory: platform/admin-vue
         run: npm run build

@@ -1,6 +1,6 @@
 """WebGIS 启动入口。
 
-由 `start-backend.bat` 调用:读取 config.yaml 拿 host/port,然后起 uvicorn,
+由 `start.bat` 调用:读取 config.yaml 拿 host/port,然后起 uvicorn,
 避免在 .bat 脚本里解析 YAML。
 """
 from __future__ import annotations
