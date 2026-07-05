@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
 import {
   fetchCatalog,
   applyDataset,
@@ -79,7 +78,6 @@ export default function CatalogPage() {
   return (
     <div className="cat-page">
       <div className="cat-hdr">
-        <Link to="/" className="bs-back">← 返回地图</Link>
         <h1>数据资源目录与开放共享</h1>
         <span className="cat-sub">
           {datasets.length} 个数据集 · 分级分类管理 · 依申请共享

@@ -2,7 +2,6 @@ import { useEffect, useRef } from "react";
 import * as Cesium from "cesium";
 import { useCesiumViewer } from "./useCesiumViewer";
 import { applyBaseLayer, setBaseLayerAlpha } from "./baseLayer";
-import { setTerrainEnabled } from "./terrain";
 import { PointRenderer } from "./PointRenderer";
 import { ViewportManager } from "./ViewportManager";
 import { BoundaryLayer } from "./BoundaryLayer";
@@ -33,7 +32,6 @@ export function MapView({ onCompassRotate, onScaleUpdate }: MapViewProps) {
 
   const baseLayer = useUIStore((s) => s.baseLayer);
   const baseLayerAlpha = useUIStore((s) => s.baseLayerAlpha);
-  const terrainEnabled = useUIStore((s) => s.terrainEnabled);
   const bndCounty = useUIStore((s) => s.bndCounty);
   const bndCountyName = useUIStore((s) => s.bndCountyName);
   const bndTownship = useUIStore((s) => s.bndTownship);
@@ -257,12 +255,6 @@ export function MapView({ onCompassRotate, onScaleUpdate }: MapViewProps) {
     if (!viewer) return;
     setBaseLayerAlpha(viewer, baseLayerAlpha);
   }, [viewerRef, baseLayerAlpha]);
-
-  useEffect(() => {
-    const viewer = viewerRef.current;
-    if (!viewer) return;
-    setTerrainEnabled(viewer, terrainEnabled);
-  }, [viewerRef, terrainEnabled]);
 
   useEffect(() => {
     const b = boundaryRef.current;

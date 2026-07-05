@@ -190,7 +190,6 @@ class FeatureStatus:
     has_relics_source: bool
     has_archive_docs: bool
     has_boundaries: bool
-    has_dem: bool
     has_3d_models: bool
 
     @property
@@ -199,7 +198,6 @@ class FeatureStatus:
             "relics_source": self.has_relics_source,
             "archive_docs": self.has_archive_docs,
             "boundaries": self.has_boundaries,
-            "dem": self.has_dem,
             "models_3d": self.has_3d_models,
         }
 
@@ -220,7 +218,6 @@ def detect_features() -> FeatureStatus:
         has_boundaries=_non_empty(
             p.input_boundaries, ("*.shp", "*.geojson", "*.json")
         ),
-        has_dem=_non_empty(p.input_dem, ("*.tif", "*.tiff")),
         has_3d_models=_non_empty(p.input_models_3d, ("tileset.json",)),
     )
 
@@ -250,7 +247,6 @@ def print_status() -> None:
         "relics_source": "文物台账 Excel/CSV",
         "archive_docs": "普查档案 PDF",
         "boundaries": "行政边界",
-        "dem": "DEM 栅格",
         "models_3d": "3D 模型",
     }
     for key, label in label_map.items():

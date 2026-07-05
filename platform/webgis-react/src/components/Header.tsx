@@ -1,53 +1,63 @@
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { usePlatformStore } from "../stores/platformStore";
 import { useUIStore } from "../stores/uiStore";
+import type { AppTab } from "../App";
 
-export function Header() {
+const NAV_TABS: { tab: AppTab; label: string; to: string }[] = [
+  { tab: "map", label: "地图总览", to: "/" },
+  { tab: "dashboard", label: "资源概览", to: "/dashboard" },
+  { tab: "catalog", label: "数据资源目录", to: "/catalog" },
+  { tab: "admin", label: "系统管理", to: "/admin" },
+];
+
+export function Header({ activeTab }: { activeTab: AppTab }) {
   const config = usePlatformStore((s) => s.config);
   const setUI = useUIStore((s) => s.set);
   const patrolOpen = useUIStore((s) => s.patrolPanelOpen);
+  const navigate = useNavigate();
   const total = config?.stats?.relics_total ?? 0;
-  const fullTotal = config?.stats?.full_tier_total ?? 0;
   const aiEnabled = config?.features?.ai_chat ?? false;
+  const onMap = activeTab === "map";
+
+  const openPatrol = () => {
+    // 不在地图标签时先切回地图,再展开巡查面板
+    if (!onMap) navigate("/");
+    setUI({ patrolPanelOpen: !patrolOpen || !onMap, filterPanelOpen: false });
+  };
 
   return (
     <div className="header">
       <h1>{config?.project?.full_name || "文物保护利用平台"}</h1>
 
       <nav className="hdr-nav">
-        <span className="hdr-nav-item on">地图总览</span>
-        <Link className="hdr-nav-item" to="/dashboard">
-          资源概览
-        </Link>
-        <Link className="hdr-nav-item" to="/catalog">
-          数据资源目录
-        </Link>
+        {NAV_TABS.map((n) => (
+          <Link
+            key={n.tab}
+            className={"hdr-nav-item" + (activeTab === n.tab ? " on" : "")}
+            to={n.to}
+          >
+            {n.label}
+          </Link>
+        ))}
         <button
-          className={"hdr-nav-item as-btn" + (patrolOpen ? " on" : "")}
-          onClick={() => setUI({ patrolPanelOpen: !patrolOpen, filterPanelOpen: false })}
+          className={"hdr-nav-item as-btn" + (onMap && patrolOpen ? " on" : "")}
+          onClick={openPatrol}
         >
           文物巡查
         </button>
-        <Link className="hdr-nav-item" to="/admin">
-          系统管理
-        </Link>
       </nav>
 
       <div className="hdr-right">
         <span className="badge">
           文物总量: <b>{total}</b>
-          {fullTotal ? (
-            <>
-              {" "}· 嘉祥全量层: <b style={{ color: "var(--gold2)" }}>{fullTotal}</b>
-            </>
-          ) : null}
         </span>
         {aiEnabled ? (
           <button
             className="tb"
-            onClick={() =>
-              setUI({ chatPanelOpen: !useUIStore.getState().chatPanelOpen })
-            }
+            onClick={() => {
+              if (!onMap) navigate("/");
+              setUI({ chatPanelOpen: !useUIStore.getState().chatPanelOpen });
+            }}
           >
             <svg viewBox="0 0 24 24">
               <path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-2 12H6v-2h12v2zm0-3H6V9h12v2zm0-3H6V6h12v2z" />
@@ -57,7 +67,10 @@ export function Header() {
         ) : null}
         <button
           className="tb"
-          onClick={() => setUI({ settingsPanelOpen: true })}
+          onClick={() => {
+            if (!onMap) navigate("/");
+            setUI({ settingsPanelOpen: true });
+          }}
           title="设置"
         >
           <svg viewBox="0 0 24 24">

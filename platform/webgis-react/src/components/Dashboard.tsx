@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import ReactECharts from "echarts-for-react";
 import { useRelicsStore } from "../stores/relicsStore";
 import { useFilterStore } from "../stores/filterStore";
@@ -154,22 +154,30 @@ function ChartCard({ title, dimId, type, relics, colorMap, onClickItem }: ChartC
 
 interface SummaryCardsProps {
   totalRecords: number;
-  has3d: number;
+  designated: number;
 }
 
-function SummaryCards({ totalRecords, has3d }: SummaryCardsProps) {
+function SummaryCards({ totalRecords, designated }: SummaryCardsProps) {
   return (
     <div className="dash-cards">
       <div className="dc">
         <div className="n">{totalRecords}</div>
-        <div className="l">当前文物总数</div>
+        <div className="l">文物总数</div>
       </div>
       <div className="dc y">
-        <div className="n">{has3d}</div>
-        <div className="l">三维模型</div>
+        <div className="n">{designated}</div>
+        <div className="l">文物保护单位</div>
       </div>
     </div>
   );
+}
+
+/** 统计口径:designated = 各级文物保护单位(排除"未核定"),all = 全部文物。 */
+type StatScope = "designated" | "all";
+
+function isDesignated(r: RelicSummary, lvDim?: DimDef): boolean {
+  if (!lvDim) return !!r.heritage_level;
+  return dimValue(r as Record<string, unknown>, lvDim) !== "未核定";
 }
 
 export function Dashboard() {
@@ -183,6 +191,7 @@ export function Dashboard() {
   const statFilters = useFilterStore((s) => s.statFilters);
   const setStatFilters = useFilterStore((s) => s.setStatFilters);
   const dashModules = useUIStore((s) => s.dashModules);
+  const [scope, setScope] = useState<StatScope>("designated");
 
   const toggleStat = (dimId: string, value: string) => {
     const next = { ...statFilters };
@@ -191,8 +200,9 @@ export function Dashboard() {
     setStatFilters(next);
   };
 
-  const relicsForChart = useMemo(() => {
-    const lvDim = DIMS.find((d) => d.id === "heritage_level");
+  const lvDim = DIMS.find((d) => d.id === "heritage_level");
+
+  const relicsFiltered = useMemo(() => {
     const twDim = DIMS.find((d) => d.id === "township");
     return allRelics.filter((r) => {
       if (activeCats.size && r.category_main && !activeCats.has(r.category_main))
@@ -221,10 +231,16 @@ export function Dashboard() {
       }
       return true;
     });
-  }, [allRelics, activeCats, search, township, level, cond, threeD, statFilters]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [allRelics, activeCats, search, township, level, cond, threeD, statFilters, lvDim]);
 
-  const totalRecords = relicsForChart.length;
-  const has3d = relicsForChart.filter((r) => r.has_3d).length;
+  // 图表数据按当前标签口径过滤;摘要卡片两个总数与标签无关。
+  const relicsForChart = useMemo(
+    () => (scope === "designated" ? relicsFiltered.filter((r) => isDesignated(r, lvDim)) : relicsFiltered),
+    [relicsFiltered, scope, lvDim],
+  );
+  const totalRecords = relicsFiltered.length;
+  const designated = relicsFiltered.filter((r) => isDesignated(r, lvDim)).length;
 
   const colorMaps = useMemo(() => {
     const out: Record<string, Record<string, string>> = {};
@@ -237,7 +253,7 @@ export function Dashboard() {
   const renderModule = (moduleId: string, cfg: DashModuleCfg) => {
     if (moduleId === "summary") {
       return (
-        <SummaryCards key="summary" totalRecords={totalRecords} has3d={has3d} />
+        <SummaryCards key="summary" totalRecords={totalRecords} designated={designated} />
       );
     }
     const meta = DASH_MODULES.find((m) => m.id === moduleId);
@@ -266,17 +282,34 @@ export function Dashboard() {
     else if (cfg.dock === "right") rightIds.push(m.id);
   });
 
+  const scopeTabs = (
+    <div className="dash-scope">
+      <button
+        className={scope === "designated" ? "on" : ""}
+        onClick={() => setScope("designated")}
+      >
+        文物保护单位
+      </button>
+      <button
+        className={scope === "all" ? "on" : ""}
+        onClick={() => setScope("all")}
+      >
+        文物总量
+      </button>
+    </div>
+  );
+
   return (
     <>
       {leftIds.length > 0 && (
         <div className="dash dock-l">
-          <div className="dash-hdr">综合统计</div>
+          <div className="dash-hdr">综合统计{scopeTabs}</div>
           {leftIds.map((id) => renderModule(id, dashModules[id]))}
         </div>
       )}
       {rightIds.length > 0 && (
         <div className="dash dock-r">
-          <div className="dash-hdr">综合统计</div>
+          <div className="dash-hdr">综合统计{scopeTabs}</div>
           {rightIds.map((id) => renderModule(id, dashModules[id]))}
         </div>
       )}

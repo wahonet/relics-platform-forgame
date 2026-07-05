@@ -27,8 +27,6 @@ import crs as _crs_lib  # noqa: E402
 from data_loader import store  # noqa: E402
 from routers import admin as _admin, boundaries as _boundaries, catalog, chat, crs as _crs, patrol, relics, stats  # noqa: E402
 from services import ai_service  # noqa: E402
-from terrain_provider import load_dem  # noqa: E402
-from terrain_routes import register_terrain_routes  # noqa: E402
 from tile_routes import TILE_CACHE_DIR, register_tile_routes  # noqa: E402
 
 _CONFIG: dict = {}
@@ -91,13 +89,6 @@ async def lifespan(app: FastAPI):
     cached = sum(1 for _ in TILE_CACHE_DIR.rglob("*.tile"))
     print(f"[startup] tile cache: {cached} -> {TILE_CACHE_DIR}")
 
-    dem_dir = _PATHS.input_dem
-    enable_dem = _feature_enabled("enable_dem", _FEATURES.get("dem", False))
-    if enable_dem and dem_dir.exists():
-        load_dem(str(dem_dir))
-    else:
-        print(f"[DEM] skipped (enable_dem={enable_dem}, exists={dem_dir.exists()})")
-
     ai_service.init(_CONFIG)
     patrol.init_patrol(_CONFIG, _PATHS)
 
@@ -123,7 +114,6 @@ _PUBLIC_PREFIXES = (
     "/api/login",
     "/static/",
     "/tiles/",
-    "/api/terrain/",
     "/api/platform/config",
     "/app/",
     "/m/",          # 移动端巡查 H5(凭路线 token 访问)
@@ -172,7 +162,6 @@ app.include_router(_boundaries.router, prefix="/api")
 app.include_router(_crs.router, prefix="/api")
 app.include_router(_admin.router, prefix="/api")
 
-register_terrain_routes(app)
 register_tile_routes(app, get_config=lambda: _CONFIG)
 
 
@@ -196,7 +185,6 @@ async def platform_config() -> JSONResponse:
     features_resolved = {
         "ai_chat": _feature_enabled("enable_ai_chat", bool(_resolved(sf.get("key", "")))),
         "models_3d": _feature_enabled("enable_3d_model", _FEATURES.get("models_3d", False)),
-        "dem": _feature_enabled("enable_dem", _FEATURES.get("dem", False)),
         "patrol": True,
         "catalog": True,
         "amap_route": bool(_resolved(amap.get("web_key", ""))),

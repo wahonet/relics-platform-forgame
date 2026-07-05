@@ -1,7 +1,7 @@
 /**
  * 综合统计面板的模块字典与默认布局。
  *
- * - `summary` 是数字摘要卡片(总数 + 三维模型),不支持选图表类型。
+ * - `summary` 是数字摘要卡片(文物总数 + 文物保护单位总数),不支持选图表类型。
  * - 其他模块对应 utils/dict.ts 里的 DimDef.id,可在饼/横条/竖条里切。
  *
  * 用户可以在「设置 → 统计面板」里调整每个模块的位置和图表类型,
@@ -47,7 +47,6 @@ export const DASH_MODULES: DashModuleMeta[] = [
   { id: "heritage_level",  title: "文物级别", supportsType: true, defaultType: "bar",  defaultDock: "left" },
   { id: "era",             title: "年代分布", supportsType: true, defaultType: "vbar", defaultDock: "left" },
   { id: "county",          title: "县区分布", supportsType: true, defaultType: "bar",  defaultDock: "right" },
-  { id: "tier",            title: "数据层级", supportsType: true, defaultType: "pie",  defaultDock: "right" },
   { id: "condition_level", title: "保存状况", supportsType: true, defaultType: "pie",  defaultDock: "right" },
 ];
 

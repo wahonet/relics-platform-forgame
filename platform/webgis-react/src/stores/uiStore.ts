@@ -15,14 +15,11 @@ interface UIState {
   chatPanelOpen: boolean;
   settingsPanelOpen: boolean;
   helpPanelOpen: boolean;
-  tileDownloadOpen: boolean;
-  boundaryDownloadOpen: boolean;
   /** 巡查规划面板。开启后地图点击进入"选点组线"模式。 */
   patrolPanelOpen: boolean;
 
   baseLayer: BaseLayerType;
   baseLayerAlpha: number;
-  terrainEnabled: boolean;
 
   bndCounty: boolean;
   bndCountyName: boolean;
@@ -81,13 +78,10 @@ export const useUIStore = create<UIState>((set, get) => ({
   chatPanelOpen: false,
   settingsPanelOpen: false,
   helpPanelOpen: false,
-  tileDownloadOpen: false,
-  boundaryDownloadOpen: false,
   patrolPanelOpen: false,
 
   baseLayer: "arcgis_sat",
   baseLayerAlpha: 90,
-  terrainEnabled: false,
 
   bndCounty: true,
   bndCountyName: true,

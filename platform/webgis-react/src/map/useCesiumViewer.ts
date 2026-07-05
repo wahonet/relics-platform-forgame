@@ -30,6 +30,9 @@ export function useCesiumViewer(containerRef: React.RefObject<HTMLDivElement>) {
       infoBox: false,
       baseLayer: false as unknown as Cesium.ImageryLayer,
       terrainProvider: new Cesium.EllipsoidTerrainProvider(),
+      // 平台按二维地图使用,固定 2D 场景(北朝上,不可旋转/倾斜)
+      sceneMode: Cesium.SceneMode.SCENE2D,
+      mapMode2D: Cesium.MapMode2D.INFINITE_SCROLL,
     });
 
     viewer.scene.globe.baseColor = Cesium.Color.fromCssColorString("#0d1117");
@@ -50,11 +53,11 @@ export function useCesiumViewer(containerRef: React.RefObject<HTMLDivElement>) {
     }
 
     const scc = viewer.scene.screenSpaceCameraController;
-    scc.minimumZoomDistance = 10;
+    // 2D 模式下滚轮缩放由 Cesium 默认处理(调整正交视锥),仅做范围钳制
+    scc.minimumZoomDistance = 80;
     scc.maximumZoomDistance = 500_000;
     scc.enableTilt = false;
     scc.enableLook = false;
-    scc.zoomEventTypes = [];
 
     const center = cfg?.geo?.center;
     const startLng = center?.lng ?? 116.34;
@@ -62,26 +65,14 @@ export function useCesiumViewer(containerRef: React.RefObject<HTMLDivElement>) {
     const startAlt = center?.alt ?? 75_000;
     viewer.camera.flyTo({
       destination: Cesium.Cartesian3.fromDegrees(startLng, startLat, startAlt),
-      orientation: { heading: 0, pitch: Cesium.Math.toRadians(-90), roll: 0 },
       duration: 0,
     });
-
-    const onWheel = (e: WheelEvent) => {
-      e.preventDefault();
-      const cam = viewer.camera;
-      const h = cam.positionCartographic.height;
-      const factor = e.deltaY > 0 ? 1.08 : 0.93;
-      const newH = Math.max(80, Math.min(500_000, h * factor));
-      cam.moveForward(h - newH);
-    };
-    viewer.scene.canvas.addEventListener("wheel", onWheel, { passive: false });
 
     viewerRef.current = viewer;
     setViewer(viewer);
 
     return () => {
       try {
-        viewer.scene.canvas.removeEventListener("wheel", onWheel);
         setViewer(null);
         viewer.destroy();
       } catch {

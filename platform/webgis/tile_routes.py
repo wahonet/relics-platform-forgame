@@ -36,7 +36,8 @@ TILE_URLS = {
     "arcgis_sat": "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
     "osm": "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
     "gaode_anno": "https://wprd0{s}.is.autonavi.com/appmaptile?x={x}&y={y}&z={z}&lang=zh_cn&size=1&scl=1&style=8",
-    "gaode_sat": "https://webst0{s}.is.autonavi.com/appmaptile?style=6&x={x}&y={y}&z={z}",
+    # 卫星影像走 wprd 域名:webst0X 在部分网络环境不可达,会导致只显示路网标注
+    "gaode_sat": "https://wprd0{s}.is.autonavi.com/appmaptile?x={x}&y={y}&z={z}&lang=zh_cn&size=1&scl=1&style=6",
     "gaode_vec": "https://wprd0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=7&x={x}&y={y}&z={z}",
 }
 

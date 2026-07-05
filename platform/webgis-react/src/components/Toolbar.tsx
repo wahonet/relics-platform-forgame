@@ -19,10 +19,8 @@ const BASE_OPTIONS: { value: BaseLayerType; label: string }[] = [
 export function Toolbar() {
   // 单独订阅以避免对整个 ui store 的全量订阅触发不必要的重渲染。
   const filterPanelOpen = useUIStore((s) => s.filterPanelOpen);
-  const tileDownloadOpen = useUIStore((s) => s.tileDownloadOpen);
   const baseLayer = useUIStore((s) => s.baseLayer);
   const baseLayerAlpha = useUIStore((s) => s.baseLayerAlpha);
-  const terrainEnabled = useUIStore((s) => s.terrainEnabled);
   const bndCounty = useUIStore((s) => s.bndCounty);
   const bndCountyName = useUIStore((s) => s.bndCountyName);
   const bndTownship = useUIStore((s) => s.bndTownship);
@@ -159,15 +157,6 @@ export function Toolbar() {
             </div>
           )}
         </div>
-        <button
-          className={"tb" + (tileDownloadOpen ? " on" : "")}
-          onClick={() => setUI({ tileDownloadOpen: !tileDownloadOpen })}
-        >
-          <svg viewBox="0 0 24 24">
-            <path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z" />
-          </svg>
-          下载地图
-        </button>
       </div>
 
       <div className="tb-group boxed">
@@ -234,38 +223,9 @@ export function Toolbar() {
                 />{" "}
                 村名
               </label>
-              <div className="dropdown-divider" />
-              <div
-                className="dropdown-item"
-                onClick={() => {
-                  setUI({ boundaryDownloadOpen: true });
-                  setBoundaryMenuOpen(false);
-                }}
-                style={{ color: "var(--accent)", fontWeight: 500 }}
-              >
-                <svg
-                  viewBox="0 0 24 24"
-                  width="14"
-                  height="14"
-                  style={{ verticalAlign: "middle", marginRight: 6, fill: "currentColor" }}
-                >
-                  <path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z" />
-                </svg>
-                下载边界…
-              </div>
             </div>
           )}
         </div>
-
-        <button
-          className={"tb" + (terrainEnabled ? " on" : "")}
-          onClick={() => setUI({ terrainEnabled: !terrainEnabled })}
-        >
-          <svg viewBox="0 0 24 24">
-            <path d="M14 6l-3.75 5L8 8.5 3 15h18z" />
-          </svg>
-          {terrainEnabled ? "地形 ✓" : "地形"}
-        </button>
       </div>
 
       <div className="status-summary">

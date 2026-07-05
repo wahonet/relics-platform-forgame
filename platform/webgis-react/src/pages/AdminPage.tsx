@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Link } from "react-router-dom";
 import {
   fetchPipelineStatus,
   fetchTask,
@@ -10,12 +9,540 @@ import {
   type ApiConfigStatus,
   type PipelineStatus,
 } from "../api/admin";
+import {
+  clearCache,
+  estimateArea,
+  fetchHistory,
+  fetchProgress,
+  startDownload,
+  type TileDownloadProgress,
+  type TileHistoryItem,
+} from "../api/tiles";
+import {
+  clearBoundaries,
+  downloadBoundaries,
+  exportBoundaryUrl,
+  fetchAdminTree,
+  listBoundaries,
+  type AdminTreeItem,
+  type BoundaryFileInfo,
+  type TownshipSource,
+} from "../api/boundaries";
+import { CRS_LIST, type CrsId } from "../utils/crs";
+import { useUIStore } from "../stores/uiStore";
 
 const STEP_DESC: Record<string, string> = {
   "01": "读取 data/input/01_relics 的台账 Excel/CSV,挂接照片与图纸",
   "02": "行政边界 Shapefile/GeoJSON 统一转为 WGS-84 GeoJSON",
   "03": "生成 relics.db(R-Tree 空间索引 + FTS5 全文搜索)",
 };
+
+function fmtBytes(n: number | undefined): string {
+  if (!n) return "0";
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  if (n < 1024 * 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`;
+  return `${(n / 1024 / 1024 / 1024).toFixed(2)} GB`;
+}
+
+type Bbox4 = [number, number, number, number];
+type CountyEntry = Bbox4 | { bbox?: Bbox4; center?: [number, number] };
+interface ShandongAdmin {
+  cities: Record<string, { bbox?: Bbox4; counties?: Record<string, CountyEntry> }>;
+}
+
+function normalizeCountyBbox(co: CountyEntry | undefined): Bbox4 | undefined {
+  if (!co) return undefined;
+  if (Array.isArray(co)) return co.length === 4 ? (co as Bbox4) : undefined;
+  return co.bbox;
+}
+
+/** ── 离线地图下载 ─────────────────────────────────────────── */
+function TileDownloadSection({ flash }: { flash: (t: string) => void }) {
+  const [scope, setScope] = useState<"config" | "county" | "manual">("config");
+  const [admin, setAdmin] = useState<ShandongAdmin | null>(null);
+  const [city, setCity] = useState("");
+  const [county, setCounty] = useState("");
+  const [manual, setManual] = useState({ west: "", south: "", east: "", north: "" });
+  const [providers, setProviders] = useState("arcgis_sat");
+  const [zooms, setZooms] = useState("12,13,14,15");
+  const [estimate, setEstimate] = useState<{ total: number; cached: number; need: number } | null>(null);
+  const [progress, setProgress] = useState<TileDownloadProgress | null>(null);
+  const [history, setHistory] = useState<TileHistoryItem[]>([]);
+
+  useEffect(() => {
+    fetch("/static/data/shandong_admin.json")
+      .then((r) => (r.ok ? r.json() : null))
+      .then(setAdmin)
+      .catch(() => setAdmin(null));
+    fetchHistory(10).then((d) => setHistory(d.items || [])).catch(() => undefined);
+  }, []);
+
+  const cfgBounds = window.__PLATFORM_CONFIG?.geo?.bounds;
+  const cityObj = city ? admin?.cities?.[city] : undefined;
+
+  const bbox: Bbox4 | null = (() => {
+    if (scope === "config") {
+      return cfgBounds ? [cfgBounds.west, cfgBounds.south, cfgBounds.east, cfgBounds.north] : null;
+    }
+    if (scope === "county") {
+      if (county && cityObj?.counties) {
+        const cb = normalizeCountyBbox(cityObj.counties[county]);
+        if (cb) return cb;
+      }
+      return cityObj?.bbox || null;
+    }
+    const nums = [manual.west, manual.south, manual.east, manual.north].map(Number);
+    if (nums.every((n) => Number.isFinite(n)) && nums[0] < nums[2] && nums[1] < nums[3]) {
+      return nums as unknown as Bbox4;
+    }
+    return null;
+  })();
+
+  const requestZooms = Array.from(
+    new Set(
+      zooms.split(/[^0-9]+/).map((s) => parseInt(s, 10)).filter((z) => z >= 1 && z <= 17),
+    ),
+  ).sort((a, b) => a - b).join(",");
+
+  const label =
+    scope === "config"
+      ? "全市范围"
+      : scope === "county"
+        ? `${city}${county ? "·" + county : ""}`
+        : bbox ? `bbox (${bbox.map((x) => x.toFixed(3)).join(", ")})` : "";
+
+  useEffect(() => {
+    if (!bbox || !requestZooms) {
+      setEstimate(null);
+      return;
+    }
+    estimateArea(bbox[0], bbox[1], bbox[2], bbox[3], providers, requestZooms)
+      .then((d) =>
+        setEstimate("error" in d && d.error ? null : { total: d.total, cached: d.cached, need: d.need }),
+      )
+      .catch(() => setEstimate(null));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [JSON.stringify(bbox), providers, requestZooms]);
+
+  const running = progress?.status === "running";
+
+  const start = async () => {
+    if (!bbox) {
+      flash("请先确定下载范围");
+      return;
+    }
+    if (!requestZooms) {
+      flash("请输入 1-17 之间的瓦片层级");
+      return;
+    }
+    try {
+      const job = await startDownload(bbox[0], bbox[1], bbox[2], bbox[3], providers, requestZooms, label);
+      setProgress({
+        id: job.job_id, status: "running", total: job.total, skipped: job.skipped,
+        need: job.need, downloaded: 0, failed: 0, bytes: 0,
+      } as TileDownloadProgress);
+      const poll = async () => {
+        try {
+          const p = await fetchProgress(job.job_id);
+          setProgress(p);
+          if (p.status === "running") {
+            setTimeout(poll, 1500);
+          } else {
+            useUIStore.getState().bumpOfflineCoverage();
+            const h = await fetchHistory(10);
+            setHistory(h.items || []);
+            flash(`地图下载完成: ${p.downloaded} 张, 失败 ${p.failed}`);
+          }
+        } catch {
+          /* ignore */
+        }
+      };
+      setTimeout(poll, 800);
+    } catch (e) {
+      flash("下载启动失败: " + String(e));
+    }
+  };
+
+  const pct =
+    progress && progress.need > 0
+      ? Math.min(100, Math.round(((progress.downloaded + progress.failed) / progress.need) * 100))
+      : 0;
+
+  return (
+    <div className="adm-sec">
+      <div className="adm-sec-hdr">
+        <h2>离线地图下载</h2>
+        <span className="adm-hint">
+          下载后地图页选择「离线影像 / 离线矢量」即可脱网浏览
+        </span>
+      </div>
+
+      <div className="adm-form-grid">
+        <div className="tile-row">
+          <label>范围</label>
+          <select value={scope} onChange={(e) => setScope(e.target.value as typeof scope)}>
+            <option value="config">全市范围 (config.yaml bounds)</option>
+            <option value="county">按县域选择</option>
+            <option value="manual">手动输入经纬度</option>
+          </select>
+        </div>
+        {scope === "county" ? (
+          <>
+            <div className="tile-row">
+              <label>地市</label>
+              <select value={city} onChange={(e) => { setCity(e.target.value); setCounty(""); }}>
+                <option value="">请选择...</option>
+                {Object.keys(admin?.cities || {}).map((n) => (
+                  <option key={n} value={n}>{n}</option>
+                ))}
+              </select>
+            </div>
+            <div className="tile-row">
+              <label>区县</label>
+              <select value={county} disabled={!city} onChange={(e) => setCounty(e.target.value)}>
+                <option value="">{city ? "整个地市" : "请先选地市"}</option>
+                {Object.keys(cityObj?.counties || {}).map((n) => (
+                  <option key={n} value={n}>{n}</option>
+                ))}
+              </select>
+            </div>
+          </>
+        ) : null}
+        {scope === "manual" ? (
+          <div className="tile-row">
+            <label>bbox</label>
+            {(["west", "south", "east", "north"] as const).map((k) => (
+              <input
+                key={k}
+                type="text"
+                placeholder={k}
+                value={manual[k]}
+                onChange={(e) => setManual({ ...manual, [k]: e.target.value })}
+                style={{ width: 0 }}
+              />
+            ))}
+          </div>
+        ) : null}
+        <div className="tile-row">
+          <label>影像源</label>
+          <select value={providers} onChange={(e) => setProviders(e.target.value)}>
+            <option value="arcgis_sat">ArcGIS 影像</option>
+            <option value="osm">OSM 矢量</option>
+            <option value="arcgis_sat,osm">影像 + 矢量</option>
+            <option value="gaode_sat,gaode_anno">高德影像 + 标注</option>
+          </select>
+        </div>
+        <div className="tile-row">
+          <label>层级</label>
+          <input
+            type="text"
+            value={zooms}
+            onChange={(e) => setZooms(e.target.value)}
+            placeholder="12,13,14,15"
+          />
+        </div>
+      </div>
+
+      {estimate ? (
+        <div className="adm-hint" style={{ padding: "8px 0" }}>
+          预估: 总 <b style={{ color: "var(--accent2)" }}>{estimate.total}</b> 张 · 已缓存{" "}
+          <b style={{ color: "var(--green)" }}>{estimate.cached}</b> · 待下载{" "}
+          <b style={{ color: "var(--yellow)" }}>{estimate.need}</b>
+        </div>
+      ) : null}
+
+      {progress ? (
+        <div style={{ margin: "6px 0 10px" }}>
+          <div className="tile-progress">
+            <div className="tile-progress-bar" style={{ width: `${pct}%` }} />
+          </div>
+          <div className="adm-hint" style={{ marginTop: 4 }}>
+            {running ? "下载中" : "已完成"}: 下载 {progress.downloaded} / {progress.need} · 失败{" "}
+            {progress.failed} · 缓存命中 {progress.skipped} · {fmtBytes(progress.bytes)}
+          </div>
+        </div>
+      ) : null}
+
+      <div className="adm-actions" style={{ marginLeft: 0, marginTop: 6 }}>
+        <button className="pp-btn primary" onClick={start} disabled={!bbox || running}>
+          {running ? "下载中..." : "开始下载"}
+        </button>
+        <button
+          className="pp-btn"
+          disabled={running}
+          onClick={async () => {
+            if (!confirm("确定清空所有离线瓦片缓存和下载历史?")) return;
+            await clearCache();
+            setHistory([]);
+            setEstimate(null);
+            useUIStore.getState().bumpOfflineCoverage();
+            flash("离线瓦片缓存已清空");
+          }}
+        >
+          清空缓存
+        </button>
+      </div>
+
+      {history.length > 0 ? (
+        <div className="adm-sub-list">
+          <h4>最近下载</h4>
+          {history.slice(0, 5).map((h) => (
+            <div key={h.id} className="tile-hist-item">
+              {h.label || "(无标签)"} · {h.providers?.join(",")} · z={h.zooms?.join(",")} · 下载{" "}
+              {h.downloaded} / 失败 {h.failed} · {fmtBytes(h.bytes)}
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/** ── 行政边界下载 ─────────────────────────────────────────── */
+function BoundarySection({ flash }: { flash: (t: string) => void }) {
+  const [provinces, setProvinces] = useState<AdminTreeItem[]>([]);
+  const [provinceAdcode, setProvinceAdcode] = useState(370000);
+  const [cities, setCities] = useState<AdminTreeItem[]>([]);
+  const [cityAdcode, setCityAdcode] = useState<number | "">("");
+  const [counties, setCounties] = useState<AdminTreeItem[]>([]);
+  const [countyAdcode, setCountyAdcode] = useState<number | "">("");
+  const [includeTownships, setIncludeTownships] = useState(true);
+  const [townshipSource, setTownshipSource] = useState<TownshipSource>("auto");
+  const [submitting, setSubmitting] = useState(false);
+  const [files, setFiles] = useState<BoundaryFileInfo[]>([]);
+  const [logLines, setLogLines] = useState<string[]>([]);
+  const [exportCrs, setExportCrs] = useState<CrsId>("cgcs2000_gk_3");
+  const gkCm = useUIStore((s) => s.gkCentralMeridian);
+  const gkZw = useUIStore((s) => s.gkZoneWidth);
+
+  const log = (line: string) =>
+    setLogLines((prev) => [...prev, `[${new Date().toLocaleTimeString()}] ${line}`]);
+
+  const refreshFiles = useCallback(() => {
+    listBoundaries().then((r) => setFiles(r.files || [])).catch(() => undefined);
+  }, []);
+
+  useEffect(() => {
+    refreshFiles();
+    fetchAdminTree(100000)
+      .then((r) => setProvinces(r.items.filter((it) => it.level === "province")))
+      .catch(() => setProvinces([]));
+  }, [refreshFiles]);
+
+  useEffect(() => {
+    if (!provinceAdcode) return;
+    setCities([]);
+    setCityAdcode("");
+    setCounties([]);
+    setCountyAdcode("");
+    fetchAdminTree(provinceAdcode).then((r) => setCities(r.items)).catch(() => setCities([]));
+  }, [provinceAdcode]);
+
+  useEffect(() => {
+    if (!cityAdcode) return;
+    setCounties([]);
+    setCountyAdcode("");
+    fetchAdminTree(Number(cityAdcode)).then((r) => setCounties(r.items)).catch(() => setCounties([]));
+  }, [cityAdcode]);
+
+  const canSubmit = !!cityAdcode || !!countyAdcode;
+  const includeTownshipsEffective = !!countyAdcode && includeTownships;
+
+  const onDownload = async () => {
+    if (!canSubmit) {
+      flash("请先选择地市或区县");
+      return;
+    }
+    setSubmitting(true);
+    log("开始下载…");
+    try {
+      const r = await downloadBoundaries({
+        city_adcode: cityAdcode ? Number(cityAdcode) : null,
+        county_adcode: countyAdcode ? Number(countyAdcode) : null,
+        include_city_counties: !countyAdcode && !!cityAdcode,
+        include_county_outline: !!countyAdcode,
+        include_townships: includeTownshipsEffective,
+        township_source: townshipSource,
+      });
+      r.files.forEach((f) =>
+        log(`✓ ${f.name}: ${f.feature_count} 个要素${f.source ? ` (来源: ${f.source})` : ""}`),
+      );
+      r.warnings.forEach((w) => log(`⚠ ${w}`));
+      if (r.ok) {
+        flash("边界已下载,地图页将自动刷新");
+        useUIStore.getState().bumpBoundary();
+      } else {
+        flash("下载失败,详见日志");
+      }
+      refreshFiles();
+    } catch (e) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const msg = (e as any)?.response?.data?.detail || String(e);
+      log(`✗ ${msg}`);
+      flash("下载失败: " + msg);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const onExport = (file: "county" | "townships" | "villages") => {
+    const url = exportBoundaryUrl(file, exportCrs, {
+      centralMeridian: gkCm === "auto" ? undefined : gkCm,
+      zoneWidth: gkZw,
+      zonePrefix: true,
+    });
+    const a = document.createElement("a");
+    a.href = url;
+    a.target = "_blank";
+    a.rel = "noopener";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    flash(`正在导出 ${file}.${exportCrs}.geojson`);
+  };
+
+  return (
+    <div className="adm-sec">
+      <div className="adm-sec-hdr">
+        <h2>行政边界下载</h2>
+        <span className="adm-hint">
+          县/市界来自阿里云 DataV;镇街来自 OSM Overpass;统一转 WGS-84
+        </span>
+      </div>
+
+      <div className="adm-form-grid">
+        <div className="tile-row">
+          <label>省份</label>
+          <select
+            value={provinceAdcode}
+            onChange={(e) => setProvinceAdcode(Number(e.target.value))}
+            disabled={submitting}
+          >
+            {provinces.length === 0 ? (
+              <option value={370000}>山东省 (默认)</option>
+            ) : (
+              provinces.map((p) => (
+                <option key={p.adcode} value={p.adcode}>{p.name}</option>
+              ))
+            )}
+          </select>
+        </div>
+        <div className="tile-row">
+          <label>地市</label>
+          <select
+            value={cityAdcode}
+            onChange={(e) => setCityAdcode(e.target.value ? Number(e.target.value) : "")}
+            disabled={submitting || cities.length === 0}
+          >
+            <option value="">{cities.length ? "请选择..." : "加载中..."}</option>
+            {cities.map((c) => (
+              <option key={c.adcode} value={c.adcode}>{c.name}</option>
+            ))}
+          </select>
+        </div>
+        <div className="tile-row">
+          <label>区县</label>
+          <select
+            value={countyAdcode}
+            onChange={(e) => setCountyAdcode(e.target.value ? Number(e.target.value) : "")}
+            disabled={submitting || counties.length === 0}
+          >
+            <option value="">
+              {counties.length ? "整个地市 (下属所有区县)" : cityAdcode ? "加载中..." : "请先选地市"}
+            </option>
+            {counties.map((c) => (
+              <option key={c.adcode} value={c.adcode}>{c.name}</option>
+            ))}
+          </select>
+        </div>
+        {countyAdcode ? (
+          <div className="tile-row">
+            <label>乡镇</label>
+            <label style={{ display: "flex", alignItems: "center", gap: 6, width: "auto", color: "var(--t3)" }}>
+              <input
+                type="checkbox"
+                checked={includeTownships}
+                onChange={(e) => setIncludeTownships(e.target.checked)}
+              />
+              同时下载该县下属乡镇
+            </label>
+            {includeTownshipsEffective ? (
+              <select
+                value={townshipSource}
+                onChange={(e) => setTownshipSource(e.target.value as TownshipSource)}
+                disabled={submitting}
+              >
+                <option value="auto">自动 (OSM 优先)</option>
+                <option value="osm">仅 OSM Overpass</option>
+                <option value="datav">仅 DataV</option>
+              </select>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
+
+      <div className="adm-actions" style={{ marginLeft: 0, marginTop: 6 }}>
+        <button className="pp-btn primary" onClick={onDownload} disabled={submitting || !canSubmit}>
+          {submitting ? "下载中..." : "开始下载"}
+        </button>
+        <button
+          className="pp-btn"
+          disabled={submitting}
+          onClick={async () => {
+            if (!confirm("确定删除已下载的县界与镇界 GeoJSON?")) return;
+            try {
+              const r = await clearBoundaries(["county", "townships"]);
+              log(`已删除: ${r.removed.join(", ") || "(无文件可删)"}`);
+              useUIStore.getState().bumpBoundary();
+              flash("已清除并刷新地图");
+              refreshFiles();
+            } catch {
+              flash("清除失败");
+            }
+          }}
+        >
+          清除已下载
+        </button>
+      </div>
+
+      <div className="adm-sub-list">
+        <h4>
+          当前边界文件
+          <select
+            value={exportCrs}
+            onChange={(e) => setExportCrs(e.target.value as CrsId)}
+            style={{ marginLeft: "auto", height: 22, fontSize: 11 }}
+            title="导出坐标系"
+          >
+            {CRS_LIST.map((c) => (
+              <option key={c.id} value={c.id}>{c.name}</option>
+            ))}
+          </select>
+        </h4>
+        {files.map((f) => {
+          const stem = f.name.replace(/\.geojson$/, "") as "county" | "townships" | "villages";
+          return (
+            <div key={f.name} className="tile-hist-item" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ flex: 1 }}>
+                {f.name} · {f.missing ? "未生成" : `${f.feature_count} 要素 · ${fmtBytes(f.size)}`}
+              </span>
+              {!f.missing && f.feature_count > 0 ? (
+                <button className="pp-btn sm" onClick={() => onExport(stem)}>
+                  导出
+                </button>
+              ) : null}
+            </div>
+          );
+        })}
+      </div>
+
+      {logLines.length > 0 ? (
+        <pre className="adm-log" style={{ marginTop: 10, maxHeight: 140 }}>{logLines.join("\n")}</pre>
+      ) : null}
+    </div>
+  );
+}
 
 export default function AdminPage() {
   const [pipeline, setPipeline] = useState<PipelineStatus | null>(null);
@@ -125,9 +652,8 @@ export default function AdminPage() {
   return (
     <div className="adm-page">
       <div className="bs-hdr">
-        <Link to="/" className="bs-back">← 返回地图</Link>
         <h1>系统管理</h1>
-        <span className="bs-clock">数据管线 · API 配置</span>
+        <span className="bs-clock">数据管线 · API 配置 · 地图数据</span>
       </div>
 
       {/* ── 数据管线 ─────────────────────────────── */}
@@ -296,6 +822,9 @@ export default function AdminPage() {
           </button>
         </div>
       </div>
+
+      <TileDownloadSection flash={flash} />
+      <BoundarySection flash={flash} />
 
       {toast ? <div className="toast">{toast}</div> : null}
     </div>

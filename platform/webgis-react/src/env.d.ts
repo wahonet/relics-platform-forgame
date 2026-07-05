@@ -21,7 +21,6 @@ interface PlatformConfig {
   features: {
     ai_chat: boolean;
     models_3d: boolean;
-    dem: boolean;
     patrol: boolean;
     catalog: boolean;
     amap_route?: boolean;

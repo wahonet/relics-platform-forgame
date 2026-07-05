@@ -5,19 +5,17 @@ import App from "./App";
 import LoginPage from "./pages/LoginPage";
 import ModelViewerPage from "./pages/ModelViewerPage";
 import PdfViewerPage from "./pages/PdfViewerPage";
-import DashboardPage from "./pages/DashboardPage";
-import CatalogPage from "./pages/CatalogPage";
-import AdminPage from "./pages/AdminPage";
 import "./styles/globals.css";
 
+// 资源概览/数据目录/系统管理均由 App 内部按标签渲染(共享 Header,地图常驻)。
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <HashRouter>
       <Routes>
         <Route path="/" element={<App />} />
-        <Route path="/dashboard" element={<DashboardPage />} />
-        <Route path="/catalog" element={<CatalogPage />} />
-        <Route path="/admin" element={<AdminPage />} />
+        <Route path="/dashboard" element={<App />} />
+        <Route path="/catalog" element={<App />} />
+        <Route path="/admin" element={<App />} />
         <Route path="/login" element={<LoginPage />} />
         <Route path="/model-viewer" element={<ModelViewerPage />} />
         <Route path="/pdf-viewer" element={<PdfViewerPage />} />

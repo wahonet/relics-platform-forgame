@@ -174,12 +174,14 @@ export const DIMS: DimDef[] = [
     field: "heritage_level",
     transform: (v) =>
       v === "尚未核定公布为文物保护单位的不可移动文物" || v === "未认定" ? "未核定" : v,
-  },
-  {
-    id: "tier",
-    label: "数据层级",
-    field: "tier",
-    remap: (v) => TIER_MAP[v] || v || "未知",
+    // 按保护级别从高到低排列(国保 → 未核定)
+    order: [
+      "全国重点文物保护单位",
+      "省级文物保护单位",
+      "市级文物保护单位",
+      "县级文物保护单位",
+      "未核定",
+    ],
   },
   {
     id: "condition_level",

@@ -3,7 +3,7 @@ import { useUIStore } from "../stores/uiStore";
 import { fetchPhotos, fetchDrawings, fetchRelicDetail } from "../api/relics";
 import { fetchRelicArchives } from "../api/stats";
 import type { Drawing, Photo, RelicSummary, RelicArchives } from "../types";
-import { COND_CLS, TIER_MAP } from "../utils/dict";
+import { COND_CLS } from "../utils/dict";
 import { Lightbox } from "./Lightbox";
 
 type TabKey = "info" | "photo" | "draw" | "intro";
@@ -57,7 +57,6 @@ export function InfoPanel() {
 
   const r: RelicSummary = selected;
   const ccls = r.condition_level ? COND_CLS[r.condition_level] || "" : "";
-  const isFull = r.tier === "full";
 
   const open3D = () => {
     if (!r.has_3d) return;
@@ -112,9 +111,6 @@ export function InfoPanel() {
               {r.heritage_level && r.heritage_level.length < 20 ? (
                 <span className="tag tag-lv">{r.heritage_level}</span>
               ) : null}
-              <span className={"tag " + (isFull ? "tag-full" : "tag-city")}>
-                {TIER_MAP[r.tier || "city"] || "市级基础层"}
-              </span>
               {r.has_3d ? <span className="tag tag-3d">三维模型</span> : null}
               {r.has_boundary ? <span className="tag tag-bnd">两线范围</span> : null}
             </div>

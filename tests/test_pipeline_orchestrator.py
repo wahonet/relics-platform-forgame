@@ -45,7 +45,6 @@ def test_dry_run_does_not_require_config(monkeypatch):
                 "relics_source": False,
                 "archive_docs": False,
                 "boundaries": False,
-                "dem": False,
             }
         ),
     )

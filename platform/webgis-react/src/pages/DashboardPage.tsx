@@ -208,8 +208,7 @@ export default function DashboardPage() {
   return (
     <div className="bs-page">
       <div className="bs-hdr">
-        <Link to="/" className="bs-back">← 返回地图</Link>
-        <h1>济宁市文物保护利用平台 · 资源概览</h1>
+        <h1>资源概览</h1>
         <div className="bs-clock">
           {now.toLocaleDateString("zh-CN")} {now.toLocaleTimeString("zh-CN", { hour12: false })}
         </div>
@@ -219,7 +218,7 @@ export default function DashboardPage() {
         <div className="bs-kpi hl">
           <Num v={s?.total ?? "—"} />
           <span>不可移动文物总量</span>
-          <em>市级基础层 {s?.tier.city ?? 0} + 嘉祥全量层 {s?.tier.full ?? 0}</em>
+          <em>全市在册不可移动文物</em>
         </div>
         <div className="bs-kpi">
           <Num v={s?.designated_total ?? "—"} />
@@ -234,12 +233,12 @@ export default function DashboardPage() {
         <div className="bs-kpi">
           <Num v={s?.assets.models_3d ?? "—"} />
           <span>三维模型 (处)</span>
-          <em>嘉祥全量层实景建模</em>
+          <em>实景三维建模</em>
         </div>
         <div className="bs-kpi">
           <Num v={(s?.assets.archive_spu ?? 0) + (s?.assets.archive_fpu ?? 0)} />
           <span>普查档案 (卷)</span>
-          <em>覆盖嘉祥 {s?.tier.full ?? 0} 处文物</em>
+          <em>三普 / 四普档案</em>
         </div>
         <div className="bs-kpi">
           <Num v={s?.assets.boundaries ?? "—"} />

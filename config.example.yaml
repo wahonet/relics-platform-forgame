@@ -73,7 +73,6 @@ administrative:
 # false = 强制关闭
 features:
   enable_3d_model: auto       # 三维模型查看器
-  enable_dem: auto            # 本地 DEM 地形
   enable_ai_chat: true        # AI 知识库问答（需 API Key）
 
 # ── 巡查策略 ─────────────────────────────────────────────────

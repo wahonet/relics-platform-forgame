@@ -61,7 +61,6 @@ export function FilterPanel() {
 
   const lvDim = DIMS.find((d) => d.id === "heritage_level");
   const catDim = DIMS.find((d) => d.id === "category_main")!;
-  const fullTierCounty = config?.administrative?.full_tier_county || "嘉祥县";
 
   const counties = useMemo(() => {
     const fromCfg = config?.administrative?.counties || [];
@@ -85,7 +84,13 @@ export function FilterPanel() {
       if (r.heritage_level)
         set.add(lvDim ? dimValue(r as Record<string, unknown>, lvDim) : r.heritage_level);
     });
-    return [...set].sort();
+    // 按保护级别从高到低排列(与 DIMS.heritage_level.order 一致)
+    const order = lvDim?.order || [];
+    return [...set].sort((a, b) => {
+      const ia = order.indexOf(a);
+      const ib = order.indexOf(b);
+      return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib);
+    });
   }, [allRelics, lvDim]);
 
   const conds = useMemo(() => {
@@ -145,26 +150,6 @@ export function FilterPanel() {
           value={search}
           onChange={(e) => setPartial({ search: e.target.value })}
         />
-      </div>
-      <div className="fp-section">
-        <div className="fp-label">数据层级</div>
-        <div className="fp-tier">
-          {(
-            [
-              ["", "全部"],
-              ["city", "市级基础层"],
-              ["full", `${fullTierCounty}全量层`],
-            ] as const
-          ).map(([v, label]) => (
-            <button
-              key={v}
-              className={"fp-tier-btn" + (tier === v ? " on" : "")}
-              onClick={() => setPartial({ tier: v })}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
       </div>
       <div className="fp-section">
         <div className="fp-label">文物类别</div>
