@@ -28,6 +28,9 @@ export function Header() {
         >
           文物巡查
         </button>
+        <Link className="hdr-nav-item" to="/admin">
+          系统管理
+        </Link>
       </nav>
 
       <div className="hdr-right">

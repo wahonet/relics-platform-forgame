@@ -1178,3 +1178,84 @@ textarea.pp-input { height: auto; padding: 8px 10px; resize: vertical; }
 }
 .cat-modal h3 { font-size: 14px; color: var(--t1); margin-bottom: 4px; font-weight: 600; }
 .cat-modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 6px; }
+
+/* ── 系统管理页 ───────────────────────────────────────────── */
+.adm-page {
+  width: 100%; height: 100%; overflow-y: auto;
+  background:
+    radial-gradient(900px 400px at 85% -8%, rgba(61, 128, 216, 0.08), transparent 60%),
+    var(--bg);
+  padding: 0 26px 30px; display: flex; flex-direction: column; gap: 16px;
+}
+.adm-sec {
+  background: rgba(16, 23, 36, 0.72); border: 1px solid var(--bd); border-radius: var(--r-lg);
+  padding: 16px 18px;
+}
+.adm-sec-hdr { display: flex; align-items: center; gap: 14px; margin-bottom: 14px; flex-wrap: wrap; }
+.adm-sec-hdr h2 {
+  font-size: 15px; color: var(--t1); font-weight: 600; letter-spacing: 1px;
+  display: flex; align-items: center; gap: 8px;
+}
+.adm-sec-hdr h2::before {
+  content: ""; width: 3px; height: 14px; border-radius: 2px;
+  background: linear-gradient(180deg, var(--gold), var(--accent));
+}
+.adm-actions { margin-left: auto; display: flex; gap: 8px; }
+.adm-hint { font-size: 11px; color: var(--t2); }
+.adm-steps { display: flex; flex-direction: column; gap: 8px; margin-bottom: 14px; }
+.adm-step {
+  background: rgba(255, 255, 255, 0.02); border: 1px solid var(--bd); border-radius: var(--r-md);
+  padding: 11px 13px; display: flex; flex-direction: column; gap: 8px;
+}
+.adm-step-top { display: flex; align-items: center; gap: 12px; }
+.adm-step-idx {
+  width: 28px; height: 28px; flex-shrink: 0; border-radius: 50%;
+  background: var(--bg3); border: 1px solid var(--bd-strong); color: var(--t2);
+  font-size: 12px; font-weight: 700; display: flex; align-items: center; justify-content: center;
+}
+.adm-step-idx.ok { background: rgba(76, 195, 138, 0.14); border-color: rgba(76, 195, 138, 0.4); color: var(--green); }
+.adm-step-name { flex: 1; font-size: 13px; color: var(--t1); font-weight: 600; }
+.adm-step-name em { display: block; font-style: normal; font-size: 11px; color: var(--t2); font-weight: 400; margin-top: 2px; }
+.adm-step-io { display: flex; flex-wrap: wrap; gap: 6px; }
+.adm-io {
+  font-size: 10px; padding: 2px 9px; border-radius: 999px;
+  background: rgba(255, 255, 255, 0.04); border: 1px solid var(--bd); color: var(--t2);
+}
+.adm-io.ok { background: rgba(76, 195, 138, 0.1); border-color: rgba(76, 195, 138, 0.3); color: var(--green); }
+.adm-io.miss { background: rgba(241, 106, 94, 0.08); border-color: rgba(241, 106, 94, 0.3); color: var(--red); }
+.adm-io.last-done { color: var(--green); }
+.adm-io.last-error { color: var(--red); }
+.adm-step-warn { font-size: 11px; color: var(--yellow); }
+.adm-log-box { border: 1px solid var(--bd); border-radius: var(--r-md); overflow: hidden; }
+.adm-log-hdr {
+  display: flex; align-items: center; gap: 10px; padding: 8px 12px;
+  background: rgba(255, 255, 255, 0.03); border-bottom: 1px solid var(--bd); font-size: 12px;
+}
+.adm-task-st { font-weight: 600; }
+.adm-task-st.st-running { color: var(--accent2); }
+.adm-task-st.st-done { color: var(--green); }
+.adm-task-st.st-error { color: var(--red); }
+.adm-task-label { color: var(--t3); }
+.adm-task-rc { margin-left: auto; color: var(--t2); font-size: 11px; font-family: ui-monospace, monospace; }
+.adm-log {
+  margin: 0; padding: 12px 14px; max-height: 320px; overflow-y: auto;
+  background: rgba(3, 6, 12, 0.55); color: var(--t3);
+  font-family: ui-monospace, "Cascadia Code", "Consolas", monospace;
+  font-size: 11px; line-height: 1.7; white-space: pre-wrap; word-break: break-all;
+}
+.adm-keys { display: flex; flex-direction: column; gap: 12px; }
+.adm-key-row {
+  display: grid; grid-template-columns: minmax(260px, 1fr) minmax(280px, 1.2fr);
+  gap: 16px; align-items: center;
+  padding: 12px 14px; background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--bd); border-radius: var(--r-md);
+}
+.adm-key-meta { display: flex; flex-direction: column; gap: 3px; }
+.adm-key-meta b { font-size: 13px; color: var(--t1); }
+.adm-key-meta em { font-style: normal; font-size: 11px; color: var(--t2); }
+.adm-key-st { font-size: 11px; color: var(--t2); }
+.adm-key-st.on { color: var(--green); }
+.adm-save-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 14px; }
+@media (max-width: 900px) {
+  .adm-key-row { grid-template-columns: 1fr; }
+}

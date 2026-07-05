@@ -25,7 +25,7 @@ from starlette.middleware.base import BaseHTTPMiddleware  # noqa: E402
 from _common import PROJECT_ROOT, detect_features, get_paths, load_config  # noqa: E402
 import crs as _crs_lib  # noqa: E402
 from data_loader import store  # noqa: E402
-from routers import boundaries as _boundaries, catalog, chat, crs as _crs, patrol, relics, stats  # noqa: E402
+from routers import admin as _admin, boundaries as _boundaries, catalog, chat, crs as _crs, patrol, relics, stats  # noqa: E402
 from services import ai_service  # noqa: E402
 from terrain_provider import load_dem  # noqa: E402
 from terrain_routes import register_terrain_routes  # noqa: E402
@@ -101,6 +101,13 @@ async def lifespan(app: FastAPI):
     ai_service.init(_CONFIG)
     patrol.init_patrol(_CONFIG, _PATHS)
 
+    def _on_config_saved(new_cfg: dict) -> None:
+        """管理页保存 API key 后刷新全局配置(AI/高德已由 admin 路由热更新)。"""
+        global _CONFIG
+        _CONFIG = new_cfg
+
+    _admin.init_admin(on_config_saved=_on_config_saved)
+
     try:
         chat.init_chat()
     except Exception as e:
@@ -163,6 +170,7 @@ app.include_router(patrol.router, prefix="/api")
 app.include_router(patrol.mobile_router)          # /m/r/{token} 与 /api/m/*
 app.include_router(_boundaries.router, prefix="/api")
 app.include_router(_crs.router, prefix="/api")
+app.include_router(_admin.router, prefix="/api")
 
 register_terrain_routes(app)
 register_tile_routes(app, get_config=lambda: _CONFIG)
