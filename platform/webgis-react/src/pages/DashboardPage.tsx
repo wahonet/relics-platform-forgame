@@ -6,14 +6,14 @@ import { fetchPatrolStats } from "../api/patrol";
 import { fetchCatalog, listApplications } from "../api/catalog";
 import type { DashboardStats, PatrolStats, NameValue } from "../types";
 
-const AXIS = { color: "#8b949e", fontSize: 11 };
-const SPLIT = { lineStyle: { color: "rgba(88,166,255,.08)" } };
+const AXIS = { color: "#8b99ad", fontSize: 11 };
+const SPLIT = { lineStyle: { color: "rgba(148,166,197,.1)" } };
 const TT = {
-  backgroundColor: "rgba(6,12,23,.95)",
-  borderColor: "rgba(88,166,255,.35)",
-  textStyle: { color: "#e6edf3", fontSize: 12 },
+  backgroundColor: "rgba(10,15,24,.95)",
+  borderColor: "rgba(94,163,247,.35)",
+  textStyle: { color: "#eaf0f9", fontSize: 12 },
 };
-const PALETTE = ["#58a6ff", "#3fb950", "#d29922", "#f85149", "#bc8cff", "#56d4dd", "#ffa657", "#f778ba"];
+const PALETTE = ["#5ea3f7", "#4cc38a", "#e3b95e", "#f16a5e", "#b79bf5", "#56d4dd", "#f0975c", "#f778ba"];
 
 const RANK_SHORT: Record<string, string> = {
   全国重点文物保护单位: "国保",
@@ -64,7 +64,7 @@ export default function DashboardPage() {
       yAxis: {
         type: "category",
         data: data.map((d) => d.name).reverse(),
-        axisLabel: { ...AXIS, color: "#c9d1d9" },
+        axisLabel: { ...AXIS, color: "#c6d0de" },
         axisTick: { show: false },
       },
       series: [
@@ -78,7 +78,7 @@ export default function DashboardPage() {
             .reverse(),
           barWidth: 14,
           itemStyle: { borderRadius: [0, 4, 4, 0] },
-          label: { show: true, position: "right", color: "#8b949e", fontSize: 11 },
+          label: { show: true, position: "right", color: "#8b99ad", fontSize: 11 },
         },
       ],
     };
@@ -106,12 +106,12 @@ export default function DashboardPage() {
             color: {
               type: "linear", x: 0, y: 0, x2: 0, y2: 1,
               colorStops: [
-                { offset: 0, color: "#58a6ff" },
-                { offset: 1, color: "rgba(88,166,255,.25)" },
+                { offset: 0, color: "#5ea3f7" },
+                { offset: 1, color: "rgba(94,163,247,.22)" },
               ],
             },
           },
-          label: { show: true, position: "top", color: "#8b949e", fontSize: 10 },
+          label: { show: true, position: "top", color: "#8b99ad", fontSize: 10 },
         },
       ],
     };
@@ -121,7 +121,7 @@ export default function DashboardPage() {
     tooltip: { trigger: "item", formatter: "{b}: {c} ({d}%)", ...TT },
     legend: {
       bottom: 0,
-      textStyle: { color: "#8b949e", fontSize: 10 },
+      textStyle: { color: "#8b99ad", fontSize: 10 },
       itemWidth: 10,
       itemHeight: 10,
     },
@@ -135,7 +135,7 @@ export default function DashboardPage() {
           ...d,
           itemStyle: { color: PALETTE[i % PALETTE.length] },
         })),
-        label: { color: "#c9d1d9", fontSize: 10, formatter: "{b} {c}" },
+        label: { color: "#c6d0de", fontSize: 10, formatter: "{b} {c}" },
         labelLine: { lineStyle: { color: "rgba(255,255,255,.2)" } },
       },
     ],
@@ -159,10 +159,10 @@ export default function DashboardPage() {
           data: data.map((d) => d.value),
           smooth: true,
           symbolSize: 7,
-          lineStyle: { color: "#d29922", width: 2.5 },
-          itemStyle: { color: "#d29922" },
-          areaStyle: { color: "rgba(210,153,34,.14)" },
-          label: { show: true, position: "top", color: "#8b949e", fontSize: 10 },
+          lineStyle: { color: "#e3b95e", width: 2.5 },
+          itemStyle: { color: "#e3b95e" },
+          areaStyle: { color: "rgba(227,185,94,.13)" },
+          label: { show: true, position: "top", color: "#8b99ad", fontSize: 10 },
         },
       ],
     };
@@ -182,9 +182,9 @@ export default function DashboardPage() {
           progress: {
             show: true,
             width: 12,
-            itemStyle: { color: "#3fb950" },
+            itemStyle: { color: "#4cc38a" },
           },
-          axisLine: { lineStyle: { width: 12, color: [[1, "rgba(88,166,255,.12)"]] } },
+          axisLine: { lineStyle: { width: 12, color: [[1, "rgba(94,163,247,.12)"]] } },
           axisTick: { show: false },
           splitLine: { show: false },
           axisLabel: { show: false },
@@ -192,11 +192,11 @@ export default function DashboardPage() {
           detail: {
             valueAnimation: true,
             formatter: "{value}",
-            color: "#3fb950",
+            color: "#4cc38a",
             fontSize: 34,
             offsetCenter: [0, 0],
           },
-          title: { color: "#8b949e", fontSize: 12, offsetCenter: [0, "46%"] },
+          title: { color: "#8b99ad", fontSize: 12, offsetCenter: [0, "46%"] },
           data: [{ value: stats?.quality_score ?? 0, name: "数据质量综合分" }],
         },
       ],

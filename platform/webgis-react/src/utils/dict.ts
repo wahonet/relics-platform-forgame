@@ -20,16 +20,16 @@ export interface RankEntry {
 }
 
 export const CATEGORY_MAP: Record<string, CategoryEntry> = {
-  "0100": { label: "古遗址", color: "#f85149", icon: "/static/古文化遗址.png" },
-  "0200": { label: "古墓葬", color: "#d29922", icon: "/static/古墓葬.png" },
-  "0300": { label: "古建筑", color: "#3fb950", icon: "/static/古建筑.png" },
-  "0400": { label: "石窟寺及石刻", color: "#58a6ff", icon: "/static/石窟寺及石刻.png" },
+  "0100": { label: "古遗址", color: "#f16a5e", icon: "/static/古文化遗址.png" },
+  "0200": { label: "古墓葬", color: "#e3b95e", icon: "/static/古墓葬.png" },
+  "0300": { label: "古建筑", color: "#4cc38a", icon: "/static/古建筑.png" },
+  "0400": { label: "石窟寺及石刻", color: "#5ea3f7", icon: "/static/石窟寺及石刻.png" },
   "0500": {
     label: "近现代重要史迹及代表性建筑",
-    color: "#bc8cff",
+    color: "#b79bf5",
     icon: "/static/近现代重要史迹及代表性建筑.png",
   },
-  "0600": { label: "其他", color: "#8b949e", icon: null },
+  "0600": { label: "其他", color: "#8b99ad", icon: null },
 };
 
 export const RANK_MAP: Record<string, RankEntry> = {
@@ -103,11 +103,11 @@ const RANK_LABEL_DISTANCE: Record<string, number> = {
 };
 export const rankLabelMaxDistance = (code: string) => RANK_LABEL_DISTANCE[code] || 4000;
 
-export const DEF_COLOR = "#8b949e";
+export const DEF_COLOR = "#8b99ad";
 export const PALETTE = [
-  "#f85149", "#d29922", "#3fb950", "#58a6ff", "#bc8cff",
-  "#ff7b72", "#ffa657", "#7ee787", "#79c0ff", "#a5d6ff",
-  "#d2a8ff", "#ffd700", "#56d4dd", "#f778ba", "#c9d1d9",
+  "#f16a5e", "#e3b95e", "#4cc38a", "#5ea3f7", "#b79bf5",
+  "#ff8f85", "#f0975c", "#7ee0a3", "#8cc2ff", "#a5d6ff",
+  "#d2a8ff", "#f2d491", "#56d4dd", "#f778ba", "#c6d0de",
 ];
 
 export const ERA_MAP: Record<string, string> = {
@@ -223,7 +223,7 @@ export function buildColorMap(
     if (dim.id === "category_main") {
       map[k] = CATEGORY_MAP[categoryCode(k)]?.color || PALETTE[i % PALETTE.length];
     } else if (dim.id === "heritage_level") {
-      map[k] = ["#f85149", "#d29922", "#bc8cff", "#58a6ff", "#8b949e"][Math.min(i, 4)];
+      map[k] = ["#f16a5e", "#e3b95e", "#b79bf5", "#5ea3f7", "#8b99ad"][Math.min(i, 4)];
     } else {
       map[k] = PALETTE[i % PALETTE.length];
     }

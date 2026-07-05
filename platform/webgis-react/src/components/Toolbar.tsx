@@ -1,9 +1,11 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useUIStore } from "../stores/uiStore";
 import { useFilterStore } from "../stores/filterStore";
 import { useRelicsStore } from "../stores/relicsStore";
 import { flyHomeFn } from "../map/MapView";
 import { getViewer } from "../map/viewerRegistry";
+import { passFilter } from "./FilterPanel";
+import { DIMS } from "../utils/dict";
 import type { BaseLayerType } from "../types";
 
 const BASE_OPTIONS: { value: BaseLayerType; label: string }[] = [
@@ -31,8 +33,31 @@ export function Toolbar() {
   const setUI = useUIStore((s) => s.set);
   const showToast = useUIStore((s) => s.showToast);
 
-  const filteredCount = useFilterStore((s) => s.activeCats.size);
-  const allCount = useRelicsStore((s) => s.all.length);
+  const search = useFilterStore((s) => s.search);
+  const county = useFilterStore((s) => s.county);
+  const township = useFilterStore((s) => s.township);
+  const level = useFilterStore((s) => s.level);
+  const cond = useFilterStore((s) => s.cond);
+  const tier = useFilterStore((s) => s.tier);
+  const threeD = useFilterStore((s) => s.threeD);
+  const activeCats = useFilterStore((s) => s.activeCats);
+  const allRelics = useRelicsStore((s) => s.all);
+  const allCount = allRelics.length;
+
+  const lvDim = DIMS.find((d) => d.id === "heritage_level");
+  // 真实通过筛选的文物数,用于"筛选"按钮徽章。
+  const filteredCount = useMemo(() => {
+    const catNames = new Set(
+      allRelics.map((r) => r.category_main).filter(Boolean) as string[],
+    );
+    const catFilterOn = activeCats.size > 0 && activeCats.size < catNames.size;
+    const anyFilter =
+      catFilterOn || !!search.trim() || !!county || !!township || !!level ||
+      !!cond || !!tier || !!threeD;
+    if (!anyFilter) return allCount;
+    const f = { search, county, township, level, cond, tier, threeD, activeCats };
+    return allRelics.filter((r) => passFilter(r, f, lvDim)).length;
+  }, [allRelics, allCount, activeCats, search, county, township, level, cond, tier, threeD, lvDim]);
 
   const [baseMenuOpen, setBaseMenuOpen] = useState(false);
   const [boundaryMenuOpen, setBoundaryMenuOpen] = useState(false);
@@ -244,7 +269,10 @@ export function Toolbar() {
       </div>
 
       <div className="status-summary">
-        当前位置: {toastObj?.text || `全部文物 ${allCount} 处`}
+        {toastObj?.text ||
+          (filteredCount < allCount
+            ? `筛选结果 ${filteredCount} / ${allCount} 处文物`
+            : `全市在册文物 ${allCount} 处`)}
       </div>
 
       <div className="tb-group" style={{ marginLeft: "auto" }}>

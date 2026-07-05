@@ -7,8 +7,8 @@ import { DIMS, dimValue, buildColorMap } from "../utils/dict";
 import { fetchRelicDetail } from "../api/relics";
 import type { RelicSummary } from "../types";
 
-/** 判断一条文物是否通过当前筛选(供计数和结果列表复用)。 */
-function passFilter(
+/** 判断一条文物是否通过当前筛选(供计数和结果列表复用,Toolbar 徽章也使用)。 */
+export function passFilter(
   r: RelicSummary,
   f: {
     search: string;
@@ -180,7 +180,7 @@ export function FilterPanel() {
               >
                 <div
                   className="dot"
-                  style={{ background: colorMap[displayName] || "#8b949e" }}
+                  style={{ background: colorMap[displayName] || "#8b99ad" }}
                 />
                 {displayName}
               </div>
@@ -263,11 +263,12 @@ export function FilterPanel() {
         </select>
       </div>
       <div className="fp-actions">
+        {/* 筛选条件即改即生效,此按钮仅收起面板。 */}
         <button
           className="fp-btn primary"
           onClick={() => setUI({ filterPanelOpen: false })}
         >
-          应用
+          完成
         </button>
         <button
           className="fp-btn secondary"

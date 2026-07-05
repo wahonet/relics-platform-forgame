@@ -35,6 +35,8 @@ async def relics_by_bbox(
     township: str | None = Query(None),
     tier: str | None = Query(None, description="数据层级 city/full"),
     condition: str | None = Query(None, description="保存状况 好/较好/一般/较差/差"),
+    has_3d: bool | None = Query(None, description="true=仅有三维模型 false=仅无"),
+    q: str | None = Query(None, description="名称/编号/地址关键字(LIKE)"),
     limit: int = Query(2000, ge=1, le=5000),
 ):
     """视口 + 筛选查询,每条极简字段。
@@ -63,6 +65,8 @@ async def relics_by_bbox(
         township=township or None,
         tier=tier or None,
         condition=condition or None,
+        has_3d=has_3d,
+        keyword=(q or "").strip() or None,
         limit=limit,
     )
     truncated = len(data) >= limit

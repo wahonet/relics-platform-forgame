@@ -50,6 +50,8 @@ export function MapView({ onCompassRotate, onScaleUpdate }: MapViewProps) {
   const filterLevel = useFilterStore((s) => s.level);
   const filterTier = useFilterStore((s) => s.tier);
   const filterCond = useFilterStore((s) => s.cond);
+  const filterThreeD = useFilterStore((s) => s.threeD);
+  const filterSearch = useFilterStore((s) => s.search);
   const filterStatFilters = useFilterStore((s) => s.statFilters);
 
   const selectedRelic = useUIStore((s) => s.selectedRelic);
@@ -304,14 +306,18 @@ export function MapView({ onCompassRotate, onScaleUpdate }: MapViewProps) {
   useEffect(() => {
     const vm = viewportRef.current;
     if (!vm) return;
-    const allCatNames = new Set(
-      useRelicsStore
-        .getState()
-        .all.map((r) => r.category_main)
-        .filter(Boolean) as string[],
-    );
-    const backend = useFilterStore.getState().toBackend(allCatNames);
-    vm.setFilters(backend);
+    // 关键字输入防抖 250ms,避免每个按键都打一次 by-bbox 请求。
+    const t = setTimeout(() => {
+      const allCatNames = new Set(
+        useRelicsStore
+          .getState()
+          .all.map((r) => r.category_main)
+          .filter(Boolean) as string[],
+      );
+      const backend = useFilterStore.getState().toBackend(allCatNames);
+      vm.setFilters(backend);
+    }, 250);
+    return () => clearTimeout(t);
   }, [
     filterActiveCats,
     filterCounty,
@@ -319,6 +325,8 @@ export function MapView({ onCompassRotate, onScaleUpdate }: MapViewProps) {
     filterLevel,
     filterTier,
     filterCond,
+    filterThreeD,
+    filterSearch,
     filterStatFilters,
     allRelicsLen,
   ]);

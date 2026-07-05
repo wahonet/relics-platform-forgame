@@ -1,7 +1,15 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { login } from "../api/platform";
+import { usePlatformStore } from "../stores/platformStore";
 
 export default function LoginPage() {
+  const config = usePlatformStore((s) => s.config);
+  const loadPlatform = usePlatformStore((s) => s.load);
+  useEffect(() => {
+    loadPlatform();
+  }, [loadPlatform]);
+  const title = config?.project?.full_name || "济宁市文物保护利用平台";
+
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -40,7 +48,12 @@ export default function LoginPage() {
   return (
     <div className="login-page">
       <form className="login-card" onSubmit={onSubmit}>
-        <h2>不可移动文物数字档案平台</h2>
+        <div className="login-emblem" aria-hidden>
+          <svg viewBox="0 0 24 24">
+            <path d="M12 2 3 7v2h18V7l-9-5zm-7 9v7H3v2h18v-2h-2v-7h-2v7h-3v-7h-2v7H9v-7H5z" />
+          </svg>
+        </div>
+        <h2>{title}</h2>
         <p>请使用管理员账号登录</p>
         {error ? <div className="login-error">{error}</div> : null}
         <input

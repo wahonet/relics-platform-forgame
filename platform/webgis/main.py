@@ -145,9 +145,11 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
 
 app.add_middleware(AuthMiddleware)
+# 生产环境前端由本服务同源托管(/app/),CORS 只需放行本地开发端口。
+# 注意: allow_origins=["*"] 与 allow_credentials=True 组合违反 CORS 规范。
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origin_regex=r"https?://(localhost|127\.0\.0\.1)(:\d+)?",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -267,7 +269,7 @@ _NO_BUILD_HTML = """<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8
 <pre style="background:#f4f4f4;padding:12px;border-radius:8px">cd platform/webgis-react
 npm install
 npm run build</pre>
-<p>开发模式: <code>npm run dev</code> 后访问 <a href="http://localhost:5173">http://localhost:5173</a></p>
+<p>开发模式: <code>npm run dev</code> 后访问 <a href="http://localhost:5174">http://localhost:5174</a></p>
 <p>API 文档: <a href="/docs">/docs</a></p>
 </body></html>"""
 

@@ -59,6 +59,10 @@ export const useFilterStore = create<FilterState>((set, get) => ({
     else if (f.statFilters.tier) out.tier = tierFromLabel(f.statFilters.tier);
     if (f.cond) out.condition = f.cond;
     else if (f.statFilters.condition_level) out.condition = f.statFilters.condition_level;
+    if (f.threeD === "1") out.has_3d = true;
+    else if (f.threeD === "0") out.has_3d = false;
+    const kw = f.search.trim();
+    if (kw) out.q = kw;
     return out;
   },
   reset(cats) {

@@ -1,9 +1,9 @@
 {
   "name": "relics-webgis-react",
   "private": true,
-  "version": "1.1.0",
+  "version": "2.0.0",
   "type": "module",
-  "description": "Relics Platform WebGIS — React + three.js refactor",
+  "description": "济宁市文物保护利用平台 WebGIS — React + Cesium",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build && node scripts/fix-cesium-path.mjs",
@@ -14,7 +14,6 @@
     "3d-tiles-renderer": "^0.4.24",
     "axios": "^1.7.9",
     "cesium": "^1.125.0",
-    "clsx": "^2.1.1",
     "dompurify": "^3.2.3",
     "echarts": "^5.5.1",
     "echarts-for-react": "^3.0.2",

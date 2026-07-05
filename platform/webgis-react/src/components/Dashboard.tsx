@@ -13,9 +13,9 @@ import {
 } from "./dashboardModules";
 
 const TT = {
-  backgroundColor: "rgba(13,17,23,.95)",
-  borderColor: "rgba(88,166,255,.3)",
-  textStyle: { color: "#e6edf3", fontSize: 11 },
+  backgroundColor: "rgba(10,15,24,.95)",
+  borderColor: "rgba(94,163,247,.3)",
+  textStyle: { color: "#eaf0f9", fontSize: 11 },
 };
 
 function countDim(relics: RelicSummary[], dim: DimDef) {
@@ -59,7 +59,7 @@ function ChartCard({ title, dimId, type, relics, colorMap, onClickItem }: ChartC
           radius: ["28%", "58%"],
           center: ["50%", "52%"],
           data,
-          label: { color: "#c9d1d9", fontSize: 10, formatter: "{b}\n{c}" },
+          label: { color: "#c6d0de", fontSize: 10, formatter: "{b}\n{c}" },
           labelLine: { lineStyle: { color: "rgba(255,255,255,.2)" } },
         },
       ],
@@ -72,12 +72,12 @@ function ChartCard({ title, dimId, type, relics, colorMap, onClickItem }: ChartC
       xAxis: {
         type: "value",
         splitLine: { lineStyle: { color: "rgba(255,255,255,.06)" } },
-        axisLabel: { color: "#8b949e", fontSize: 9 },
+        axisLabel: { color: "#8b99ad", fontSize: 9 },
       },
       yAxis: {
         type: "category",
         data: rev,
-        axisLabel: { color: "#c9d1d9", fontSize: 10, width: 90, overflow: "truncate" },
+        axisLabel: { color: "#c6d0de", fontSize: 10, width: 90, overflow: "truncate" },
         axisTick: { show: false },
         axisLine: { lineStyle: { color: "rgba(255,255,255,.08)" } },
       },
@@ -93,7 +93,7 @@ function ChartCard({ title, dimId, type, relics, colorMap, onClickItem }: ChartC
           label: {
             show: true,
             position: "right",
-            color: "#8b949e",
+            color: "#8b99ad",
             fontSize: 9,
             formatter: "{c}",
           },
@@ -107,14 +107,14 @@ function ChartCard({ title, dimId, type, relics, colorMap, onClickItem }: ChartC
       xAxis: {
         type: "category",
         data: keys,
-        axisLabel: { color: "#8b949e", fontSize: 9, rotate: 25, interval: 0 },
+        axisLabel: { color: "#8b99ad", fontSize: 9, rotate: 25, interval: 0 },
         axisTick: { show: false },
         axisLine: { lineStyle: { color: "rgba(255,255,255,.08)" } },
       },
       yAxis: {
         type: "value",
         splitLine: { lineStyle: { color: "rgba(255,255,255,.06)" } },
-        axisLabel: { color: "#8b949e", fontSize: 9 },
+        axisLabel: { color: "#8b99ad", fontSize: 9 },
       },
       series: [
         {

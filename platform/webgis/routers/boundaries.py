@@ -557,7 +557,7 @@ async def download_boundaries(req: BoundaryDownloadRequest):
 # ── /api/boundaries/export ────────────────────────────────────
 @router.get("/boundaries/export")
 async def export_boundary(
-    file: str = Query(..., regex="^(county|townships|villages)$"),
+    file: str = Query(..., pattern="^(county|townships|villages)$"),
     crs: str = Query("wgs84"),
     central_meridian: Optional[float] = None,
     zone_width: int = Query(3, ge=3, le=6),

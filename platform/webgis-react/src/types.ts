@@ -76,6 +76,8 @@ export interface BackendFilters {
   township?: string;
   tier?: string;
   condition?: string;
+  has_3d?: boolean;
+  q?: string;
 }
 
 export interface ChatMessage {

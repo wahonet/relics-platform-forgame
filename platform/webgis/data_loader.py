@@ -309,18 +309,22 @@ class DataStore:
         township: Optional[str] = None,
         tier: Optional[str] = None,
         condition: Optional[str] = None,
+        has_3d: Optional[bool] = None,
+        keyword: Optional[str] = None,
         limit: int = 2000,
     ) -> list[dict]:
         """视口 + 多条件筛选。返回极简字段(含保存状况,供巡查地图着色)。
 
         bbox 的 buffer 扩展由调用方处理(见 routers/relics.py);
         categories/ranks 支持多选,None 或空值表示不筛选。
+        keyword 按名称/编号/地址做 LIKE 匹配。
         """
         if not self._use_db:
             return self._query_bbox_memory(min_lng, min_lat, max_lng, max_lat,
                                             categories=categories, ranks=ranks,
                                             county=county, township=township,
                                             tier=tier, condition=condition,
+                                            has_3d=has_3d, keyword=keyword,
                                             limit=limit)
 
         sql = [
@@ -357,6 +361,13 @@ class DataStore:
         if condition:
             sql.append("  AND r.condition = ?")
             params.append(str(condition))
+        if has_3d is not None:
+            sql.append("  AND r.has_3d = ?")
+            params.append(1 if has_3d else 0)
+        if keyword:
+            like = f"%{keyword}%"
+            sql.append("  AND (r.name LIKE ? OR r.code LIKE ? OR r.address LIKE ?)")
+            params.extend([like, like, like])
 
         sql.append("LIMIT ?")
         params.append(int(limit))
@@ -382,7 +393,8 @@ class DataStore:
 
     def _query_bbox_memory(
         self, min_lng, min_lat, max_lng, max_lat,
-        *, categories, ranks, county, township, tier, condition, limit,
+        *, categories, ranks, county, township, tier, condition,
+        has_3d=None, keyword=None, limit=2000,
     ) -> list[dict]:
         """JSON 模式下的视口查询 fallback。全量遍历,性能仅足以支撑千条级。"""
         from codes import normalize_category, normalize_rank
@@ -415,6 +427,15 @@ class DataStore:
                 continue
             if condition and r.get("condition_level") != condition:
                 continue
+            if has_3d is not None and bool(r.get("has_3d")) != has_3d:
+                continue
+            if keyword:
+                kw = keyword.lower()
+                hay = " ".join(
+                    str(r.get(f) or "") for f in ("name", "archive_code", "address")
+                ).lower()
+                if kw not in hay:
+                    continue
             out.append({
                 "id": r.get("archive_code"),
                 "code": r.get("archive_code"),

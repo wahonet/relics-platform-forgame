@@ -43,8 +43,8 @@ cp config.example.yaml config.yaml
 cd platform/webgis-react && npm install && npm run build && cd ../..
 
 # 5) 启动
-.venv/bin/python -m uvicorn main:app --app-dir platform/webgis --host 0.0.0.0 --port 8010
-# 打开 http://127.0.0.1:8010/app/
+.venv/bin/python -m uvicorn main:app --app-dir platform/webgis --host 0.0.0.0 --port 8000
+# 打开 http://127.0.0.1:8000/app/
 ```
 
 Windows 下可直接使用 `start-backend.bat` / `start-frontend.bat`。

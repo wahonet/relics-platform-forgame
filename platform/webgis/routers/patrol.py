@@ -392,8 +392,8 @@ async def create_route(body: RouteCreate, request: Request):
 
 
 @router.get("/patrol/routes")
-async def list_routes(status: str | None = Query(None), limit: int = Query(100, ge=1, le=500),
-                      request: Request = None):
+async def list_routes(request: Request, status: str | None = Query(None),
+                      limit: int = Query(100, ge=1, le=500)):
     routes = patrol_db.list_routes(limit=limit, status=status)
     return {"data": [_route_payload(r, request=request) for r in routes]}
 

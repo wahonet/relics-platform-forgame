@@ -35,7 +35,7 @@ export function Header() {
           文物总量: <b>{total}</b>
           {fullTotal ? (
             <>
-              {" "}· 嘉祥全量层: <b style={{ color: "#ffd700" }}>{fullTotal}</b>
+              {" "}· 嘉祥全量层: <b style={{ color: "var(--gold2)" }}>{fullTotal}</b>
             </>
           ) : null}
         </span>
