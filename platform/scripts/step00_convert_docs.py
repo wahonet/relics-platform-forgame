@@ -12,6 +12,11 @@
 - 进度账本 data/output/logs/step00_progress.json 实时记录 完成/失败 清单
 - 中断后直接重跑本步即可续传,只处理缺失或损坏的文件
 
+停止(供系统管理页控制):
+- 存在 data/output/logs/step00.stop 时,完成当前在途请求后不再领取新任务,
+  以退出码 4 结束(编排器随之停止,重跑即续传)
+- 模型/渠道每次启动时从 config 读取:停止后在管理页换模型,重跑即用新模型
+
 其他:
 - API Key / base_url / 模型取自 config.yaml api.siliconflow(可在系统管理页配置)
 - 并发数可用 config.api.siliconflow.extract_concurrency 调整(默认 2)
@@ -42,6 +47,10 @@ TEMPERATURE = 0.05
 MIN_VALID_SIZE = 500  # 小于此字节数的 md 视为无效,重新提取
 # 有效 md 必须包含的章节标记(防止半截输出被当成完成)
 REQUIRED_SECTIONS = ("## 基本信息", "## 坐标数据")
+
+_LOGS_DIR = get_paths().output_logs
+STOP_FLAG = _LOGS_DIR / "step00.stop"
+EXIT_STOPPED = 4  # 用户主动停止(非错误),编排器据此中止后续步骤
 
 _W_NS = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
 
@@ -345,10 +354,13 @@ class ProgressLedger:
 
 
 def convert_one(client, model: str, task: dict) -> tuple[bool, str]:
-    """单文件提取,带重试。返回 (成功, 说明)。"""
+    """单文件提取,带重试。返回 (成功, 说明)。说明为 'stopped' 表示用户停止。"""
     out: Path = task["out"]
     if _md_is_valid(out):
         return True, "skip"
+
+    if STOP_FLAG.exists():
+        return False, "stopped"
 
     try:
         doc_text = docx_to_text(task["docx"])
@@ -383,6 +395,8 @@ def convert_one(client, model: str, task: dict) -> tuple[bool, str]:
         except Exception as e:  # noqa: BLE001
             last_err = f"{type(e).__name__}: {e}"
             log.warning("[%s] 第 %d 次失败: %s", task["docx"].name, attempt, last_err)
+            if STOP_FLAG.exists():
+                return False, "stopped"
             if attempt < MAX_RETRIES:
                 time.sleep(RETRY_DELAY_S)
     return False, last_err
@@ -421,16 +435,29 @@ def main() -> int:
         concurrency = DEFAULT_CONCURRENCY
 
     try:
+        import httpx
         from openai import OpenAI
     except ImportError:
         log.error("未安装 openai 库,请先 pip install openai")
         return 2
-    client = OpenAI(api_key=api_key, base_url=base_url, timeout=300)
+    # 国内 API 强制直连,忽略系统/环境代理(代理开关不影响提取)
+    client = OpenAI(
+        api_key=api_key,
+        base_url=base_url,
+        http_client=httpx.Client(trust_env=False, timeout=300),
+    )
+
+    # 新一轮运行:清掉上次遗留的停止哨兵
+    try:
+        STOP_FLAG.unlink(missing_ok=True)
+    except OSError:
+        pass
 
     ledger = ProgressLedger(paths.output_logs / "step00_progress.json")
-    log.info("模型: %s / 并发: %d / 进度账本: %s", model, concurrency, ledger.path)
+    log.info("模型: %s / 渠道: %s / 并发: %d / 进度账本: %s",
+             model, base_url, concurrency, ledger.path)
 
-    ok = fail = 0
+    ok = fail = stopped = 0
     failures: list[str] = []
     t_start = time.time()
     with ThreadPoolExecutor(max_workers=concurrency) as pool:
@@ -438,6 +465,9 @@ def main() -> int:
         for fut in as_completed(futures):
             t = futures[fut]
             success, msg = fut.result()
+            if not success and msg == "stopped":
+                stopped += 1
+                continue  # 用户停止,不计失败、不写账本
             ledger.mark(t["docx"].name, success, "" if success else msg)
             if success:
                 ok += 1
@@ -454,6 +484,14 @@ def main() -> int:
                 log.info("── 进度 %d/%d (%.0f%%),预计还需 %.0f 分钟",
                          done, len(pending), done / len(pending) * 100, eta_min)
 
+    try:
+        STOP_FLAG.unlink(missing_ok=True)
+    except OSError:
+        pass
+
+    if stopped:
+        log.info("已停止: 本轮完成 %d / 失败 %d / 未处理 %d(重跑即续传)", ok, fail, stopped)
+        return EXIT_STOPPED
     log.info("提取完成: 成功 %d / 失败 %d / 总耗时 %.1f 分钟",
              ok, fail, (time.time() - t_start) / 60)
     if failures:

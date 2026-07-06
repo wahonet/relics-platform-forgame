@@ -224,6 +224,8 @@ def _run_step(step: dict, log) -> int:
     dt = time.time() - t0
     if proc.returncode == 0:
         log.info("OK step%s completed in %.1fs", step["id"], dt)
+    elif proc.returncode == 4:
+        log.info("STOP step%s 被用户停止,耗时 %.1fs", step["id"], dt)
     else:
         log.error("FAIL step%s exited with %s in %.1fs", step["id"], proc.returncode, dt)
     return proc.returncode
@@ -295,6 +297,13 @@ def main() -> int:
         started = time.time()
         rc = _run_step(step, log)
         finished = time.time()
+        if rc == 4:
+            # step00 的用户主动停止(非错误):中止后续步骤,重跑即可续传
+            log.info("用户停止了 step%s,管线中止(重跑即从断点续传)", step["id"])
+            manifest_records.append(_manifest_record(step, "stopped", started, finished, features))
+            manifest = _write_manifest(manifest_records, "stopped", selected)
+            log.info("Pipeline manifest written: %s", manifest)
+            return 4
         if rc != 0:
             log.error("Pipeline stopped at step%s", step["id"])
             manifest_records.append(_manifest_record(step, "error", started, finished, features,

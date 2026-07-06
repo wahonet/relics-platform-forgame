@@ -1381,6 +1381,55 @@ textarea.pp-input { height: auto; padding: 8px 10px; resize: vertical; }
 .adm-io.last-done { color: var(--green); }
 .adm-io.last-error { color: var(--red); }
 .adm-step-warn { font-size: 11px; color: var(--yellow); }
+.adm-conc {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 12px; color: var(--t2); margin-right: 4px; white-space: nowrap;
+}
+.adm-conc select {
+  height: 24px; padding: 0 6px; border-radius: 2px;
+  background: var(--bg3); border: 1px solid var(--bd); color: var(--t1); font-size: 12px;
+}
+
+/* 档案提取进度面板 */
+.adm-progress {
+  border: 1px solid var(--bd); border-radius: 2px;
+  padding: 12px 14px; margin-bottom: 12px;
+  background: rgba(255, 255, 255, 0.02);
+}
+.adm-progress-top { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; flex-wrap: wrap; }
+.adm-progress-top > b { font-size: 13px; color: var(--t1); font-weight: 600; }
+.adm-model-badge {
+  font-size: 11px; color: var(--accent2);
+  border: 1px solid var(--accent-bd); background: var(--accent-dim);
+  padding: 2px 10px; border-radius: 2px;
+  font-variant-numeric: tabular-nums;
+}
+.c-yellow-text { color: var(--yellow) !important; }
+.adm-progress-bar {
+  height: 10px; background: var(--bg3); border: 1px solid var(--bd);
+  border-radius: 2px; overflow: hidden; margin-bottom: 10px;
+}
+.adm-progress-bar i {
+  display: block; height: 100%; background: var(--accent);
+  transition: width 0.6s ease;
+}
+.adm-progress-stats { display: flex; gap: 10px; flex-wrap: wrap; }
+.adm-progress-stats > div {
+  flex: 1; min-width: 96px; text-align: center;
+  border: 1px solid var(--bd); border-radius: 2px; padding: 8px 6px;
+  background: rgba(255, 255, 255, 0.02);
+}
+.adm-progress-stats em {
+  display: block; font-style: normal; font-size: 11px; color: var(--t2); margin-bottom: 4px;
+}
+.adm-progress-stats b {
+  font-size: 18px; font-weight: 700; color: var(--t1);
+  font-variant-numeric: tabular-nums;
+}
+.adm-progress-stats b.c-green { color: var(--green); }
+.adm-progress-stats b.c-red { color: var(--red); }
+.adm-progress-stats b.c-yellow { color: var(--yellow); }
+.adm-task-st.st-stopped { color: var(--yellow); }
 
 .adm-log-box { border: 1px solid var(--bd); border-radius: 2px; overflow: hidden; }
 .adm-log-hdr {

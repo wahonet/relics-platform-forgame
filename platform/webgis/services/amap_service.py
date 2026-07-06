@@ -15,6 +15,9 @@ from _common import gcj02_to_wgs84, wgs84_to_gcj02
 
 log = logging.getLogger("uvicorn.error")
 
+# 高德为国内服务,固定直连,不受系统代理开关影响
+_DIRECT_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
 _KEY: str = ""
 
 
@@ -68,7 +71,7 @@ def plan_driving_route(points_wgs84: list[tuple[float, float]]) -> Optional[dict
             params["waypoints"] = waypoints
         url = "https://restapi.amap.com/v3/direction/driving?" + urllib.parse.urlencode(params)
         try:
-            with urllib.request.urlopen(url, timeout=8) as resp:
+            with _DIRECT_OPENER.open(url, timeout=8) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
         except Exception as e:
             log.warning("[高德] 路径规划请求失败: %s", e)

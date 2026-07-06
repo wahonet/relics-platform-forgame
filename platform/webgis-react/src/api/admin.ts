@@ -39,12 +39,15 @@ export interface PipelineStatus {
 }
 
 export interface AdminTask {
-  status: "idle" | "running" | "done" | "error";
+  status: "idle" | "running" | "done" | "error" | "stopped";
   id?: number;
   label?: string;
   started?: number;
   finished?: number | null;
   returncode?: number | null;
+  /** 本次运行启动时快照的模型与渠道(运行中换模型不影响本次)。 */
+  model?: string;
+  base_url?: string;
   log?: string[];
   /** 完整日志落盘路径(data/output/logs/admin_tasks/)。 */
   log_file?: string;
@@ -56,7 +59,12 @@ export interface ApiKeyEntry {
 }
 
 export interface ApiConfigStatus {
-  siliconflow: ApiKeyEntry & { base_url: string; default_model: string };
+  siliconflow: ApiKeyEntry & {
+    base_url: string;
+    default_model: string;
+    /** step00 档案提取并发数(1-8)。 */
+    extract_concurrency?: number;
+  };
   amap: ApiKeyEntry;
   cesium_ion: ApiKeyEntry;
   tianditu?: ApiKeyEntry;
@@ -97,12 +105,35 @@ export async function fetchAiModels(): Promise<AiModelsResp> {
   return data;
 }
 
+/** 档案提取总体进度(跨运行累计,按文件系统实况统计)。 */
+export interface ExtractProgress {
+  total: number;
+  done: number;
+  failed: number;
+  remaining: number;
+  stopping: boolean;
+  /** 当前配置的并发数(=停止时最多还需完成的在途请求条数)。 */
+  concurrency: number;
+}
+
+export async function fetchExtractProgress(): Promise<ExtractProgress> {
+  const { data } = await apiClient.get<ExtractProgress>("/api/admin/pipeline/extract-progress");
+  return data;
+}
+
+export async function stopPipeline() {
+  const { data } = await apiClient.post("/api/admin/pipeline/stop");
+  return data as { stopping: boolean; inflight_max: number };
+}
+
 export async function saveApiConfig(body: {
   siliconflow_key?: string;
+  siliconflow_base_url?: string;
   amap_web_key?: string;
   cesium_ion_token?: string;
   tianditu_key?: string;
   default_model?: string;
+  extract_concurrency?: number;
 }) {
   const { data } = await apiClient.put("/api/admin/config", body);
   return data as {

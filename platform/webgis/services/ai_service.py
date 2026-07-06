@@ -37,9 +37,16 @@ def init(cfg: dict) -> None:
         _client = None
         return
     try:
+        import httpx
         from openai import OpenAI
-        _client = OpenAI(api_key=api_key, base_url=base_url)
-        log.info("[AI] 文本模型 %s / 视觉模型 %s 就绪", _default_model, _vision_model)
+        # 国内 API 强制直连:trust_env=False 忽略系统/环境代理,
+        # 避免代理软件开关导致连接指向已失效的本地代理
+        _client = OpenAI(
+            api_key=api_key,
+            base_url=base_url,
+            http_client=httpx.Client(trust_env=False, timeout=120),
+        )
+        log.info("[AI] 文本模型 %s / 视觉模型 %s 就绪(直连)", _default_model, _vision_model)
     except ImportError:
         log.warning("[AI] 未安装 openai 库,AI 能力降级为规则模式")
         _client = None

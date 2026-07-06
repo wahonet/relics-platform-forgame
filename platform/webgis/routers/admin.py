@@ -23,7 +23,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
 
-from _common import CONFIG_PATH, PROJECT_ROOT, detect_features, load_config
+from _common import CONFIG_PATH, PROJECT_ROOT, detect_features, get_paths, load_config
 import run_pipeline as _pipeline
 from services import ai_service, amap_service
 
@@ -134,7 +134,10 @@ def _run_subprocess(task: dict, cmd: list[str]) -> None:
                     pass
         proc.wait()
         task["returncode"] = proc.returncode
-        task["status"] = "done" if proc.returncode == 0 else "error"
+        # 4 = step00 用户主动停止(非错误)
+        task["status"] = ("done" if proc.returncode == 0
+                          else "stopped" if proc.returncode == 4
+                          else "error")
         if proc.returncode == 0:
             if _reload_store():
                 task["log"].append("[admin] 数据集已热重载,前端刷新即可看到新数据")
@@ -184,6 +187,12 @@ async def pipeline_run(body: RunBody):
                 cmd += ["--only", body.only]
                 label = f"运行 step{body.only}"
 
+        # 启动即清掉遗留停止哨兵,并快照本次运行的模型与渠道(运行中换模型不影响本次)
+        _STOP_FLAG.unlink(missing_ok=True)
+        try:
+            sf = ((load_config().get("api") or {}).get("siliconflow") or {})
+        except Exception:  # noqa: BLE001
+            sf = {}
         _task = {
             "id": int(time.time() * 1000),
             "label": label,
@@ -191,6 +200,8 @@ async def pipeline_run(body: RunBody):
             "started": time.time(),
             "finished": None,
             "returncode": None,
+            "model": sf.get("default_model", ""),
+            "base_url": sf.get("base_url", "") or "https://api.siliconflow.cn/v1",
             "log": [f"$ {' '.join(Path(c).name if '/' in c else c for c in cmd)}"],
         }
         threading.Thread(target=_run_subprocess, args=(_task, cmd), daemon=True).start()
@@ -208,8 +219,67 @@ async def pipeline_task(tail: int = 200):
         "started": _task["started"],
         "finished": _task["finished"],
         "returncode": _task["returncode"],
+        "model": _task.get("model", ""),
+        "base_url": _task.get("base_url", ""),
         "log": _task["log"][-tail:],
         "log_file": _task.get("log_file", ""),
+    }
+
+
+# ── 档案提取的停止/进度 ─────────────────────────────────────
+_STOP_FLAG = PROJECT_ROOT / "data" / "output" / "logs" / "step00.stop"
+
+# docx 总数扫描较慢,缓存 30 秒
+_docx_count_cache: dict = {"n": 0, "ts": 0.0}
+
+
+def _count_docx() -> int:
+    now = time.time()
+    if now - _docx_count_cache["ts"] < 30:
+        return _docx_count_cache["n"]
+    paths = get_paths()
+    n = 0
+    if paths.input_docs.exists():
+        n = sum(1 for p in paths.input_docs.rglob("*.docx") if not p.name.startswith("~$"))
+    _docx_count_cache.update(n=n, ts=now)
+    return n
+
+
+@router.post("/pipeline/stop")
+async def pipeline_stop():
+    """停止档案提取:完成当前在途请求(至多并发数条)后优雅退出。
+    进度已实时落盘,重跑即从断点续传;停止后可换模型,新运行采用新模型。"""
+    _STOP_FLAG.parent.mkdir(parents=True, exist_ok=True)
+    _STOP_FLAG.touch()
+    cfg = load_config()
+    sf = (cfg.get("api") or {}).get("siliconflow") or {}
+    return {"stopping": True, "inflight_max": _safe_concurrency(sf.get("extract_concurrency"))}
+
+
+@router.get("/pipeline/extract-progress")
+async def extract_progress():
+    """档案提取总体进度:总数/已完成/失败/剩余(跨运行累计,按文件系统实况)。"""
+    paths = get_paths()
+    total = _count_docx()
+    done = 0
+    if paths.input_markdown.exists():
+        done = sum(1 for _ in paths.input_markdown.rglob("*.md"))
+    failed = 0
+    ledger = paths.output_logs / "step00_progress.json"
+    if ledger.exists():
+        try:
+            failed = len((json.loads(ledger.read_text(encoding="utf-8")) or {}).get("failed") or {})
+        except Exception:  # noqa: BLE001
+            failed = 0
+    cfg = load_config()
+    sf = (cfg.get("api") or {}).get("siliconflow") or {}
+    return {
+        "total": total,
+        "done": min(done, total) if total else done,
+        "failed": failed,
+        "remaining": max(0, total - done),
+        "stopping": _STOP_FLAG.exists(),
+        "concurrency": _safe_concurrency(sf.get("extract_concurrency")),
     }
 
 
@@ -228,6 +298,14 @@ def _configured(value: str) -> bool:
     return bool(v) and not (v.startswith("${") and v.endswith("}"))
 
 
+def _safe_concurrency(value, default: int = 2) -> int:
+    """档案提取并发数,钳制到 1-8。"""
+    try:
+        return max(1, min(int(value), 8))
+    except (TypeError, ValueError):
+        return default
+
+
 @router.get("/config")
 async def get_api_config():
     cfg = load_config()
@@ -242,6 +320,7 @@ async def get_api_config():
             "masked": _mask(sf.get("key", "")),
             "base_url": sf.get("base_url", ""),
             "default_model": sf.get("default_model", ""),
+            "extract_concurrency": _safe_concurrency(sf.get("extract_concurrency")),
         },
         "amap": {
             "configured": _configured(amap.get("web_key", "")),
@@ -304,10 +383,12 @@ async def list_ai_models():
 
 class ConfigBody(BaseModel):
     siliconflow_key: Optional[str] = None
+    siliconflow_base_url: Optional[str] = None  # OpenAI 兼容 API 地址
     amap_web_key: Optional[str] = None
     cesium_ion_token: Optional[str] = None
     tianditu_key: Optional[str] = None
     default_model: Optional[str] = None
+    extract_concurrency: Optional[int] = None  # step00 档案提取并发数 1-8
 
 
 def _replace_yaml_scalar(text: str, section: str, key: str, value: str) -> str:
@@ -360,6 +441,20 @@ def _append_api_subsection(text: str, section: str, key: str, value: str) -> str
     raise ValueError("config.yaml 中找不到 api: 段")
 
 
+def _insert_key_into_section(text: str, section: str, key: str, value: str) -> str:
+    """section 存在但缺少 key 时,在 section 行下一行插入该 key。"""
+    lines = text.split("\n")
+    sec_re = re.compile(rf"^(\s*){re.escape(section)}:\s*(#.*)?$")
+    for i, line in enumerate(lines):
+        m = sec_re.match(line)
+        if m:
+            indent = " " * (len(m.group(1)) + 2)
+            escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+            lines[i + 1:i + 1] = [f'{indent}{key}: "{escaped}"']
+            return "\n".join(lines)
+    raise ValueError(f"config.yaml 中找不到 {section}: 段")
+
+
 @router.put("/config")
 async def save_api_config(body: ConfigBody):
     if not CONFIG_PATH.exists():
@@ -368,7 +463,10 @@ async def save_api_config(body: ConfigBody):
     text = CONFIG_PATH.read_text(encoding="utf-8")
     updates = [
         ("siliconflow", "key", body.siliconflow_key),
+        ("siliconflow", "base_url", body.siliconflow_base_url),
         ("siliconflow", "default_model", body.default_model),
+        ("siliconflow", "extract_concurrency",
+         str(_safe_concurrency(body.extract_concurrency)) if body.extract_concurrency is not None else None),
         ("amap", "web_key", body.amap_web_key),
         ("cesium_ion", "token", body.cesium_ion_token),
         ("tianditu", "key", body.tianditu_key),
@@ -381,14 +479,17 @@ async def save_api_config(body: ConfigBody):
             text = _replace_yaml_scalar(text, section, key, value.strip())
             changed = True
         except ValueError as e:
-            if f"找不到 {section}:" in str(e):
-                try:
+            err = str(e)
+            try:
+                if f"中找不到 {section}:" in err:
                     text = _append_api_subsection(text, section, key, value.strip())
-                    changed = True
-                    continue
-                except ValueError as e2:
-                    raise HTTPException(400, str(e2)) from e2
-            raise HTTPException(400, str(e)) from e
+                elif f"段内找不到 {key}:" in err:
+                    text = _insert_key_into_section(text, section, key, value.strip())
+                else:
+                    raise HTTPException(400, err) from e
+                changed = True
+            except ValueError as e2:
+                raise HTTPException(400, str(e2)) from e2
 
     if not changed:
         return {"ok": True, "changed": False, "message": "没有需要保存的修改"}

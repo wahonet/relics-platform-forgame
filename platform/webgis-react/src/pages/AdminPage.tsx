@@ -4,11 +4,14 @@ import {
   fetchTask,
   fetchApiConfig,
   fetchAiModels,
+  fetchExtractProgress,
   runPipeline,
   saveApiConfig,
+  stopPipeline,
   type AdminTask,
   type ApiConfigStatus,
   type AiModelsResp,
+  type ExtractProgress,
   type PipelineStatus,
 } from "../api/admin";
 import {
@@ -61,6 +64,15 @@ const PROVIDER_LABEL: Record<string, string> = {
   tianditu_vec: "天地图矢量",
   tianditu_cva: "天地图矢量注记",
 };
+
+function hostOf(url: string | undefined): string {
+  if (!url) return "api.siliconflow.cn";
+  try {
+    return new URL(url).host;
+  } catch {
+    return url;
+  }
+}
 
 function fmtBytes(n: number | undefined): string {
   if (!n) return "0";
@@ -689,13 +701,17 @@ export default function AdminPage() {
   const [pipeline, setPipeline] = useState<PipelineStatus | null>(null);
   const [task, setTask] = useState<AdminTask>({ status: "idle" });
   const [config, setConfig] = useState<ApiConfigStatus | null>(null);
-  const [form, setForm] = useState({ sf: "", amap: "", ion: "", tdt: "" });
+  const [form, setForm] = useState({ sf: "", sfUrl: "", amap: "", ion: "", tdt: "" });
   const [saving, setSaving] = useState(false);
   const [aiModels, setAiModels] = useState<AiModelsResp | null>(null);
   const [modelSel, setModelSel] = useState("");
   const [modelSaving, setModelSaving] = useState(false);
   const [modelsLoading, setModelsLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<AdminTabId>("pipeline");
+  const [concurrency, setConcurrency] = useState(2);
+  const [concSaving, setConcSaving] = useState(false);
+  const [extract, setExtract] = useState<ExtractProgress | null>(null);
+  const [stopping, setStopping] = useState(false);
   const [toast, setToast] = useState("");
   const logRef = useRef<HTMLPreElement>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -710,8 +726,51 @@ export default function AdminPage() {
   }, []);
 
   const refreshConfig = useCallback(() => {
-    fetchApiConfig().then(setConfig).catch(() => undefined);
+    fetchApiConfig()
+      .then((c) => {
+        setConfig(c);
+        if (c.siliconflow.extract_concurrency) {
+          setConcurrency(c.siliconflow.extract_concurrency);
+        }
+      })
+      .catch(() => undefined);
   }, []);
+
+  const refreshExtract = useCallback(() => {
+    fetchExtractProgress().then(setExtract).catch(() => undefined);
+  }, []);
+
+  const doStop = async () => {
+    if (!confirm(
+      "停止档案提取?\n\n将在跑完当前在途请求后优雅停止,已完成的进度全部保留。\n"
+      + "停止后可以更换模型,重新运行时自动从断点续传并采用新模型。",
+    )) return;
+    setStopping(true);
+    try {
+      const r = await stopPipeline();
+      flash(`停止指令已发出,预计跑完当前 ${r.inflight_max} 条在途请求后停止`);
+      refreshExtract();
+    } catch {
+      flash("操作失败");
+    } finally {
+      setStopping(false);
+    }
+  };
+
+  const applyConcurrency = async (n: number) => {
+    const prev = concurrency;
+    setConcurrency(n);
+    setConcSaving(true);
+    try {
+      await saveApiConfig({ extract_concurrency: n });
+      flash(`档案提取并发已设为 ${n},下次运行生效`);
+    } catch {
+      setConcurrency(prev);
+      flash("并发设置保存失败");
+    } finally {
+      setConcSaving(false);
+    }
+  };
 
   const refreshModels = useCallback(() => {
     fetchAiModels()
@@ -758,6 +817,16 @@ export default function AdminPage() {
     return stopPolling;
   }, [refreshPipeline, refreshConfig, refreshModels, startPolling, stopPolling]);
 
+  // 提取进度:打开页面拉一次;任务运行中每 3 秒刷新
+  useEffect(() => {
+    refreshExtract();
+  }, [refreshExtract]);
+  useEffect(() => {
+    if (task.status !== "running") return;
+    const t = setInterval(refreshExtract, 3000);
+    return () => clearInterval(t);
+  }, [task.status, refreshExtract]);
+
   // 日志自动滚到底
   useEffect(() => {
     const el = logRef.current;
@@ -780,7 +849,7 @@ export default function AdminPage() {
   };
 
   const save = async () => {
-    if (!form.sf.trim() && !form.amap.trim() && !form.ion.trim() && !form.tdt.trim()) {
+    if (!form.sf.trim() && !form.sfUrl.trim() && !form.amap.trim() && !form.ion.trim() && !form.tdt.trim()) {
       flash("请至少填写一项后再保存(留空表示不修改)");
       return;
     }
@@ -788,12 +857,13 @@ export default function AdminPage() {
     try {
       const res = await saveApiConfig({
         siliconflow_key: form.sf.trim() || undefined,
+        siliconflow_base_url: form.sfUrl.trim() || undefined,
         amap_web_key: form.amap.trim() || undefined,
         cesium_ion_token: form.ion.trim() || undefined,
         tianditu_key: form.tdt.trim() || undefined,
       });
       flash(res.message || "已保存");
-      setForm({ sf: "", amap: "", ion: "", tdt: "" });
+      setForm({ sf: "", sfUrl: "", amap: "", ion: "", tdt: "" });
       refreshConfig();
       refreshModels(); // 新填了 Key 后模型列表可能变为可拉取
     } catch (e) {
@@ -894,6 +964,20 @@ export default function AdminPage() {
                     {STEP_TITLE[s.id] || s.name}
                     <em>{STEP_DESC[s.id] || s.script}{s.optional ? " · 可选" : ""}</em>
                   </div>
+                  {s.id === "00" ? (
+                    <label className="adm-conc" title="同时向大模型发起的提取请求数;账号限流严可调低">
+                      并发进程
+                      <select
+                        value={concurrency}
+                        disabled={running || concSaving}
+                        onChange={(e) => applyConcurrency(Number(e.target.value))}
+                      >
+                        {[1, 2, 3, 4, 5, 6, 7, 8].map((n) => (
+                          <option key={n} value={n}>{n}</option>
+                        ))}
+                      </select>
+                    </label>
+                  ) : null}
                   <button
                     className="pp-btn sm"
                     disabled={running}
@@ -929,11 +1013,49 @@ export default function AdminPage() {
           })}
         </div>
 
+        {extract && extract.total > 0 ? (
+          <div className="adm-progress">
+            <div className="adm-progress-top">
+              <b>档案提取进度</b>
+              <span className="adm-model-badge" title="运行中显示本次任务启动时的模型;空闲时显示当前配置,换模型即时更新">
+                {running
+                  ? `运行模型: ${task.model || "未知"} · 渠道: ${hostOf(task.base_url)}`
+                  : `当前模型: ${aiModels?.current || config?.siliconflow.default_model || "未设置"} · 渠道: ${hostOf(config?.siliconflow.base_url)}`}
+              </span>
+              <span className="adm-hint c-yellow-text">
+                {running && extract.stopping
+                  ? `正在停止 · 预计跑完当前 ${extract.concurrency} 条在途请求后停止`
+                  : ""}
+              </span>
+              {running ? (
+                <div className="adm-actions">
+                  <button className="pp-btn sm danger" onClick={doStop} disabled={stopping || extract.stopping}>
+                    {extract.stopping ? "停止中…" : "⏹ 停止"}
+                  </button>
+                </div>
+              ) : null}
+            </div>
+            <div className="adm-progress-bar">
+              <i style={{ width: `${extract.total ? Math.round((extract.done / extract.total) * 100) : 0}%` }} />
+            </div>
+            <div className="adm-progress-stats">
+              <div><em>总数</em><b>{extract.total.toLocaleString()}</b></div>
+              <div><em>已处理</em><b className="c-green">{extract.done.toLocaleString()}</b></div>
+              <div><em>失败</em><b className={extract.failed ? "c-red" : ""}>{extract.failed.toLocaleString()}</b></div>
+              <div><em>剩余</em><b className="c-yellow">{extract.remaining.toLocaleString()}</b></div>
+              <div><em>完成率</em><b>{extract.total ? ((extract.done / extract.total) * 100).toFixed(1) : 0}%</b></div>
+            </div>
+          </div>
+        ) : null}
+
         {task.status !== "idle" ? (
           <div className="adm-log-box">
             <div className="adm-log-hdr">
               <span className={"adm-task-st st-" + task.status}>
-                {task.status === "running" ? "● 运行中" : task.status === "done" ? "✓ 完成" : "✗ 失败"}
+                {task.status === "running" ? "● 运行中"
+                  : task.status === "done" ? "✓ 完成"
+                    : task.status === "stopped" ? "⏹ 已停止(重跑即续传)"
+                      : "✗ 失败"}
               </span>
               <span className="adm-task-label">{task.label}</span>
               {task.status !== "running" && task.returncode != null ? (
@@ -984,6 +1106,23 @@ export default function AdminPage() {
               placeholder="sk-... (留空不修改)"
               value={form.sf}
               onChange={(e) => setForm({ ...form, sf: e.target.value })}
+            />
+          </div>
+
+          <div className="adm-key-row">
+            <div className="adm-key-meta">
+              <b>API 地址</b>
+              <em>OpenAI 兼容接口地址(base_url)</em>
+              <span className={"adm-key-st" + (config?.siliconflow.base_url ? " on" : "")}>
+                当前 {config?.siliconflow.base_url || "https://api.siliconflow.cn/v1"}
+              </span>
+            </div>
+            <input
+              className="pp-input"
+              type="text"
+              placeholder="https://api.siliconflow.cn/v1 (留空不修改)"
+              value={form.sfUrl}
+              onChange={(e) => setForm({ ...form, sfUrl: e.target.value })}
             />
           </div>
 

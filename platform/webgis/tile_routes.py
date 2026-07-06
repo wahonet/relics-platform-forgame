@@ -21,6 +21,9 @@ from _common import PROJECT_ROOT
 
 ConfigGetter = Callable[[], dict]
 
+# 瓦片源均为国内可直连服务;固定直连,不受系统代理开关影响
+_DIRECT_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
 TILE_CACHE_DIR = PROJECT_ROOT / "data" / "output" / "tile_cache"
 TILE_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -153,7 +156,7 @@ def _fetch_tile(provider: str, z: int, x: int, y: int) -> bytes | None:
     if provider.startswith("gaode"):
         headers["Referer"] = "https://www.amap.com/"
     req = urllib.request.Request(url, headers=headers)
-    return urllib.request.urlopen(req, timeout=20).read()
+    return _DIRECT_OPENER.open(req, timeout=20).read()
 
 
 async def _fetch_and_cache_tile(
