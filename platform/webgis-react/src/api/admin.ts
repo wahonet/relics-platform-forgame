@@ -126,6 +126,20 @@ export async function stopPipeline() {
   return data as { stopping: boolean; inflight_max: number };
 }
 
+/** 清除全部已生成数据。confirm 必须为「清除全部数据」。 */
+export async function clearAllData(confirm: string, includeInput: boolean) {
+  const { data } = await apiClient.post("/api/admin/data/clear", {
+    confirm,
+    include_input: includeInput,
+  });
+  return data as {
+    ok: boolean;
+    removed: string[];
+    failed: { label: string; path: string; error: string }[];
+    message: string;
+  };
+}
+
 export async function saveApiConfig(body: {
   siliconflow_key?: string;
   siliconflow_base_url?: string;

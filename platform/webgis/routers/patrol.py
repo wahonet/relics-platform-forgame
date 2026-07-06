@@ -198,9 +198,13 @@ async def patrol_due(
 
 
 # ── AI / 规则规划 ───────────────────────────────────────────
+# 单日巡查最多 30 处:即使用户要求 100 处,也按 30 截断。
+MAX_STOPS_HARD_LIMIT = 30
+
+
 class PlanRequest(BaseModel):
     text: str
-    max_stops: int = 12
+    max_stops: int = MAX_STOPS_HARD_LIMIT
 
 
 def _find_relic_by_name(name: str) -> Optional[dict]:
@@ -266,7 +270,15 @@ async def patrol_plan(req: PlanRequest):
 
     intent = ai_service.parse_patrol_intent(text)
     itype = intent.get("type") or "condition"
-    count = max(1, min(int(intent.get("count") or 5), req.max_stops))
+    # 用户明确说了数量才按数量截断;只给筛选条件(县区/级别/状况)时,
+    # 把符合条件的都排进去。上限一律 30 处(单日体力上限)。
+    hard_cap = max(1, min(req.max_stops, MAX_STOPS_HARD_LIMIT))
+    raw_count = intent.get("count")
+    has_filter = bool(intent.get("county") or intent.get("level") or intent.get("condition"))
+    if raw_count:
+        count = max(1, min(int(raw_count), hard_cap))
+    else:
+        count = hard_cap if has_filter else 5
     explanation = ""
     suggestions: list[dict] = []
 
@@ -315,26 +327,47 @@ async def patrol_plan(req: PlanRequest):
         suggestions.append({"name": "自定义点名巡查", "codes": [s["code"] for s in ordered]})
         explanation = "已按最近邻排序点名文物。" + (f"未找到: {'、'.join(missing)}" if missing else "")
     else:  # condition / county
+        from codes import normalize_rank
+
         relics = store.relics
         county = intent.get("county")
         township = intent.get("township")
         cond = intent.get("condition")
+        level = (intent.get("level") or "").strip()
+        rank_code = normalize_rank(level) if level else ""
         if county:
-            relics = [r for r in relics if (r.get("county") or "") == county]
+            matched = [r for r in relics if (r.get("county") or "") == county]
+            # 县区名容错:全等匹配不到时按"去掉县/区/市后缀"模糊匹配
+            if not matched:
+                stem = county.rstrip("县区市")
+                matched = [r for r in relics if stem and stem in (r.get("county") or "")]
+            relics = matched
         if township:
             relics = [r for r in relics if township in (r.get("township") or "")]
         if cond:
             relics = [r for r in relics if (r.get("condition_level") or "") == cond]
+        if level:
+            relics = [r for r in relics
+                      if normalize_rank(r.get("heritage_level")) == rank_code]
         if not relics:
-            raise HTTPException(404, "按条件未筛到文物")
+            cond_desc = "".join(filter(None, [county, township, level, cond and f"保存{cond}"]))
+            raise HTTPException(404, f"按条件({cond_desc})未筛到文物")
         due = patrol_db.compute_due(relics)[:count]
         ordered = order_nearest_neighbor(
             [{"code": d["archive_code"], "lng": d["lng"], "lat": d["lat"], **d} for d in due
              if d["lng"] is not None]
         )
-        label = f"{county or ''}{('保存' + cond) if cond else ''}文物巡查".strip() or "重点文物巡查"
+        stamp = date.today().strftime("%Y%m%d")
+        label = f"{stamp}{county or ''}{level or ''}{('保存' + cond) if cond else ''}巡查"
         suggestions.append({"name": label, "codes": [s["code"] for s in ordered]})
-        explanation = f"按巡查紧迫度(逾期优先)选取 {len(ordered)} 处,已按最近邻排序。"
+        filter_desc = "、".join(filter(None, [
+            county, township, level and f"{level}单位", cond and f"保存状况{cond}",
+        ]))
+        explanation = (f"按{filter_desc or '巡查紧迫度'}筛选出 {len(relics)} 处,"
+                       f"取紧迫度(逾期优先)前 {len(ordered)} 处,已按最近邻排序。")
+
+    if raw_count and int(raw_count) > hard_cap:
+        explanation += f"(要求 {raw_count} 处超出单日上限,已按 {hard_cap} 处安排)"
 
     out_routes = []
     for s in suggestions:
@@ -369,6 +402,13 @@ class RoutePatch(BaseModel):
     codes: Optional[list[str]] = None
 
 
+def _default_route_name(stops: list[dict]) -> str:
+    """按途经点自动命名:日期 + 主要县区,如 20260706嘉祥县巡查。"""
+    counties = [s.get("county") or "" for s in stops if s.get("county")]
+    main = max(set(counties), key=counties.count) if counties else ""
+    return f"{date.today().strftime('%Y%m%d')}{main}巡查"
+
+
 @router.post("/patrol/routes")
 async def create_route(body: RouteCreate, request: Request):
     stops = _resolve_stops(body.codes)
@@ -378,7 +418,7 @@ async def create_route(body: RouteCreate, request: Request):
         stops = order_nearest_neighbor(stops)
     geom = _plan_geometry(stops)
     route = patrol_db.create_route(
-        name=body.name.strip() or f"巡查路线 {date.today().isoformat()}",
+        name=body.name.strip() or _default_route_name(stops),
         relic_codes=[s["code"] for s in stops],
         plan_date=body.plan_date,
         mode=body.mode,

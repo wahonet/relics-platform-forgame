@@ -129,13 +129,17 @@ CREATE TABLE drawings (
 );
 CREATE INDEX idx_drawings_relic ON drawings(relic_code);
 
--- 两线范围: 一条文物最多两类面 (保护范围 protection / 建设控制地带 control)。
+-- 两线范围面 (保护范围 protection / 建设控制地带 control / 本体 body)。
+-- 同一文物同一 kind 可能有多个不相邻的面(飞地),所以不能用
+-- (relic_code, kind) 做主键;用自增 id + 全字段 UNIQUE 去重。
 CREATE TABLE polygons (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
     relic_code   TEXT NOT NULL,
     kind         TEXT NOT NULL DEFAULT 'protection',
     geom_geojson TEXT NOT NULL,
-    PRIMARY KEY (relic_code, kind)
+    UNIQUE (relic_code, kind, geom_geojson)
 );
+CREATE INDEX idx_polygons_relic ON polygons(relic_code);
 
 CREATE TABLE audit_log (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -403,12 +407,14 @@ def build_db(db_path: Path, dataset_dir: Path) -> None:
         log.info("[DB] 已插入 photos %d 行 / drawings %d 行", n_photos, n_drawings)
 
         cur = conn.cursor()
+        n_polys = 0
         for code, kind, geom in polygons:
             cur.execute(
-                "INSERT OR REPLACE INTO polygons (relic_code, kind, geom_geojson) VALUES (?, ?, ?)",
+                "INSERT OR IGNORE INTO polygons (relic_code, kind, geom_geojson) VALUES (?, ?, ?)",
                 (code, kind, geom),
             )
-        log.info("[DB] 已插入 polygons %d 行", len(polygons))
+            n_polys += cur.rowcount
+        log.info("[DB] 已插入 polygons %d 行 (源 %d 条,去重后)", n_polys, len(polygons))
 
         _refresh_has_photo(conn)
 

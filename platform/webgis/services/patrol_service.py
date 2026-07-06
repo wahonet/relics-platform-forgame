@@ -103,6 +103,10 @@ class PatrolDB:
         self._tls = threading.local()
         self.photos_dir: Optional[Path] = None
         self.frequency_days: dict[str, int] = dict(DEFAULT_FREQUENCY_DAYS)
+        # 连接注册表 + 代数号:close() 后各线程 TLS 里的旧连接自动重建
+        self._conn_registry: list[sqlite3.Connection] = []
+        self._conn_lock = threading.Lock()
+        self._gen = 0
 
     def init(self, patrol_dir: str | Path, frequency_days: Optional[dict] = None) -> None:
         d = Path(patrol_dir)
@@ -126,13 +130,30 @@ class PatrolDB:
         if not self._db_path:
             raise RuntimeError("PatrolDB 未初始化")
         c = getattr(self._tls, "conn", None)
-        if c is None:
+        if c is None or getattr(self._tls, "gen", -1) != self._gen:
             c = sqlite3.connect(str(self._db_path), check_same_thread=False)
             c.row_factory = sqlite3.Row
             c.execute("PRAGMA journal_mode=WAL;")
             c.execute("PRAGMA foreign_keys=ON;")
             self._tls.conn = c
+            self._tls.gen = self._gen
+            with self._conn_lock:
+                self._conn_registry.append(c)
         return c
+
+    def close(self) -> None:
+        """关闭全部连接并释放 patrol.db 文件句柄(清除数据前调用)。"""
+        with self._conn_lock:
+            conns = list(self._conn_registry)
+            self._conn_registry.clear()
+            self._gen += 1
+        for c in conns:
+            try:
+                c.close()
+            except Exception:  # noqa: BLE001
+                pass
+        self._db_path = None
+        self.photos_dir = None
 
     @property
     def ready(self) -> bool:

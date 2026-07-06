@@ -7,9 +7,14 @@
 """
 from __future__ import annotations
 
+import hashlib
+import hmac
+import secrets
 import sys
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
+from urllib.parse import quote, unquote
 
 PLATFORM_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PLATFORM_ROOT / "scripts"))
@@ -89,6 +94,16 @@ async def lifespan(app: FastAPI):
     cached = sum(1 for _ in TILE_CACHE_DIR.rglob("*.tile"))
     print(f"[startup] tile cache: {cached} -> {TILE_CACHE_DIR}")
 
+    # 市界/县界底图缺失时(如数据被清除后),从仓库 boundary/ 种子自动恢复
+    try:
+        if not (_PATHS.output_boundaries / "city.geojson").exists():
+            from services.boundary_seed import restore_seed_boundaries
+            seeded = restore_seed_boundaries()
+            if seeded:
+                print(f"[startup] 边界底图已从种子恢复: {', '.join(seeded)}")
+    except Exception as e:  # noqa: BLE001
+        print(f"[startup] 边界种子恢复失败: {e}")
+
     ai_service.init(_CONFIG)
     patrol.init_patrol(_CONFIG, _PATHS)
 
@@ -109,7 +124,9 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Relics Data-Element Platform", version="2.0.0", lifespan=lifespan)
 
-_PUBLIC_PREFIXES = (
+# 免鉴权路径。以 "/" 结尾的按前缀匹配,否则要求整段相等
+# (避免 startswith 把 /loginxxx 这类同前缀路径误放行)。
+_PUBLIC_PATHS = (
     "/login",
     "/api/login",
     "/static/",
@@ -123,16 +140,85 @@ _PUBLIC_PREFIXES = (
 )
 
 
+def _is_public_path(path: str) -> bool:
+    for p in _PUBLIC_PATHS:
+        if p.endswith("/"):
+            if path == p or path == p.rstrip("/") or path.startswith(p):
+                return True
+        elif path == p:
+            return True
+    return False
+
+
+# ── 会话 cookie:HMAC 签名 + 过期时间,不可伪造 ─────────────────
+_SESSION_TTL_SECONDS = 7 * 24 * 3600
+_SESSION_SECRET: str = ""
+
+
+def _session_secret() -> str:
+    """签名密钥。优先 config server.session_secret;否则生成并持久化,
+    避免重启后所有会话失效。"""
+    global _SESSION_SECRET
+    if _SESSION_SECRET:
+        return _SESSION_SECRET
+    cfg_secret = str((_CONFIG.get("server") or {}).get("session_secret") or "").strip()
+    if cfg_secret:
+        _SESSION_SECRET = cfg_secret
+        return _SESSION_SECRET
+    secret_file = _PATHS.output_dataset.parent / ".session_secret"
+    try:
+        if secret_file.exists():
+            saved = secret_file.read_text(encoding="utf-8").strip()
+            if saved:
+                _SESSION_SECRET = saved
+                return _SESSION_SECRET
+        secret_file.parent.mkdir(parents=True, exist_ok=True)
+        _SESSION_SECRET = secrets.token_hex(32)
+        secret_file.write_text(_SESSION_SECRET, encoding="utf-8")
+    except OSError:
+        # 文件不可写时退回进程内随机密钥(重启后会话失效,但仍然安全)。
+        _SESSION_SECRET = secrets.token_hex(32)
+    return _SESSION_SECRET
+
+
+def _sign_session(username: str, expires_at: int) -> str:
+    payload = f"{quote(username, safe='')}.{expires_at}"
+    sig = hmac.new(
+        _session_secret().encode("utf-8"), payload.encode("utf-8"), hashlib.sha256
+    ).hexdigest()
+    return f"{payload}.{sig}"
+
+
+def _verify_session(cookie: str | None) -> str | None:
+    """校验签名与过期时间,合法返回用户名,否则 None。"""
+    if not cookie:
+        return None
+    parts = cookie.rsplit(".", 2)
+    if len(parts) != 3:
+        return None
+    username_q, expires_s, sig = parts
+    payload = f"{username_q}.{expires_s}"
+    expect = hmac.new(
+        _session_secret().encode("utf-8"), payload.encode("utf-8"), hashlib.sha256
+    ).hexdigest()
+    if not hmac.compare_digest(sig, expect):
+        return None
+    try:
+        if int(expires_s) < time.time():
+            return None
+    except ValueError:
+        return None
+    return unquote(username_q)
+
+
 class AuthMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         if not (_CONFIG.get("server") or {}).get("enable_auth", False):
             return await call_next(request)
         path = request.url.path
-        if any(path == p or path.startswith(p) for p in _PUBLIC_PREFIXES):
+        if _is_public_path(path):
             return await call_next(request)
-        if request.cookies.get("session") != "authenticated":
-            from urllib.parse import quote
-
+        if _verify_session(request.cookies.get("session")) is None:
             target = path
             if request.url.query:
                 target = f"{path}?{request.url.query}"
@@ -246,8 +332,21 @@ _mount_if_exists("/archive-docs", _PATHS.input_archive_docs, "archive_docs", cre
 _mount_if_exists("/patrol-photos", _PATHS.output_patrol / "photos", "patrol_photos", create=True)
 _mount_if_exists("/static", STATIC_DIR, "static")
 
+class _FrontendStatic(StaticFiles):
+    """index.html 不缓存(每次协商),带哈希的静态资源长缓存。
+    否则重新构建后浏览器仍用旧 index.html,表现为"改了没生效"。"""
+
+    async def get_response(self, path: str, scope):
+        resp = await super().get_response(path, scope)
+        if path in (".", "index.html") or path.endswith(".html"):
+            resp.headers["Cache-Control"] = "no-cache"
+        elif "/assets/" in path or path.startswith("assets/"):
+            resp.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        return resp
+
+
 if _WEBGIS_REACT_DIST.exists():
-    app.mount("/app", StaticFiles(directory=str(_WEBGIS_REACT_DIST), html=True), name="webgis_react")
+    app.mount("/app", _FrontendStatic(directory=str(_WEBGIS_REACT_DIST), html=True), name="webgis_react")
     print(f"[startup] React WebGIS mounted: /app/ -> {_WEBGIS_REACT_DIST}")
 else:
     print("[startup] React WebGIS dist not found; skip /app/ mount")
@@ -301,10 +400,13 @@ def _auth_enabled() -> bool:
 
 
 def _login_response(username: str = "admin") -> JSONResponse:
-    resp = JSONResponse({"ok": True, "username": username or "admin"})
+    user = username or "admin"
+    expires_at = int(time.time()) + _SESSION_TTL_SECONDS
+    resp = JSONResponse({"ok": True, "username": user})
     resp.set_cookie(
         key="session",
-        value="authenticated",
+        value=_sign_session(user, expires_at),
+        max_age=_SESSION_TTL_SECONDS,
         httponly=True,
         samesite="lax",
         path="/",
@@ -316,8 +418,6 @@ def _login_response(username: str = "admin") -> JSONResponse:
 async def login_page(request: Request):
     nxt = request.query_params.get("next") or ""
     if nxt:
-        from urllib.parse import quote
-
         target = f"/app/#/login?next={quote(nxt, safe='/?&=#')}"
     else:
         target = "/app/#/login"

@@ -66,6 +66,11 @@ class DataStore:
         # 主连接在 lifespan 启动时打开;路由线程按需通过 _thread_conn() 获取各自连接。
         self._db: Optional[sqlite3.Connection] = None
         self._tls = threading.local()
+        # 全部已建连接的注册表 + 代数号:close_db() 关掉所有连接并使
+        # 各线程 TLS 里的旧连接失效(gen 不匹配时重建)。
+        self._conn_registry: list[sqlite3.Connection] = []
+        self._conn_lock = threading.Lock()
+        self._gen = 0
 
     # ── 加载入口 ────────────────────────────────────────────
     def load(
@@ -78,6 +83,18 @@ class DataStore:
         """一次性加载所有数据源。检测到 relics.db 则用 DB 模式,否则回退 JSON。"""
         dp = Path(dataset_dir)
         self._bounds = bounds
+
+        # 重载前清空全部容器:数据被清除后再 load,不能残留旧数据。
+        self.relics.clear()
+        self.relics_map.clear()
+        self.photo_index.clear()
+        self.photo_map.clear()
+        self.drawing_index.clear()
+        self.drawing_map.clear()
+        self.archive_map.clear()
+        self.geojson_points = {}
+        self.geojson_polygons = {}
+        self.get_relic_full.cache_clear()
 
         db_file = dp / "relics.db"
         if db_file.exists():
@@ -114,25 +131,50 @@ class DataStore:
         conn.execute("PRAGMA synchronous=NORMAL;")
         conn.execute("PRAGMA foreign_keys=ON;")
         self._db = conn
+        with self._conn_lock:
+            self._conn_registry.append(conn)
 
     def _thread_conn(self) -> sqlite3.Connection:
         """每线程独立连接,规避 sqlite3 cursor 跨线程共享问题。"""
         if not self._db_path:
             raise RuntimeError("DB 未开启")
         c = getattr(self._tls, "conn", None)
-        if c is None:
+        # close_db() 之后代数号变化,旧连接已关闭,需要重建
+        if c is None or getattr(self._tls, "gen", -1) != self._gen:
             c = sqlite3.connect(str(self._db_path), check_same_thread=False)
             c.row_factory = sqlite3.Row
             c.execute("PRAGMA journal_mode=WAL;")
             c.execute("PRAGMA foreign_keys=ON;")
             self._tls.conn = c
+            self._tls.gen = self._gen
+            with self._conn_lock:
+                self._conn_registry.append(c)
         return c
+
+    def close_db(self) -> None:
+        """关闭全部 SQLite 连接并释放文件句柄(清除数据前必须调用,
+        否则 Windows 上无法删除被占用的 relics.db)。"""
+        with self._conn_lock:
+            conns = list(self._conn_registry)
+            self._conn_registry.clear()
+            self._gen += 1
+        for c in conns:
+            try:
+                c.close()
+            except Exception:  # noqa: BLE001
+                pass
+        self._db = None
+        self._db_path = None
+        self._use_db = False
 
     # ── DB 模式初始化 ────────────────────────────────────────
     def _populate_legacy_from_db(self) -> None:
         """把 DB 全量读到 self.relics / relics_map / photo_map / drawing_map,
         供旧接口继续使用。"""
         assert self._db is not None
+        # 数据已变化(启动加载或 create/update/delete 之后都会走到这里),
+        # 必须同时清掉 get_relic_full 的 lru_cache,否则详情接口返回旧数据。
+        self.get_relic_full.cache_clear()
         self.relics.clear()
         self.relics_map.clear()
         self.photo_index.clear()

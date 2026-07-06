@@ -2,20 +2,32 @@ import { useEffect, useRef } from "react";
 import * as Cesium from "cesium";
 import { setViewer } from "./viewerRegistry";
 import { useUIStore } from "../stores/uiStore";
+import { usePlatformStore } from "../stores/platformStore";
 import { applyRenderQuality, watchDevicePixelRatio } from "./renderQuality";
 
 let _initedToken = false;
 
+function applyIonTokenFromConfig(): void {
+  const token = window.__PLATFORM_CONFIG?.cesium_ion_token;
+  if (!_initedToken && token) {
+    Cesium.Ion.defaultAccessToken = token;
+    _initedToken = true;
+  }
+}
+
 export function useCesiumViewer(containerRef: React.RefObject<HTMLDivElement>) {
   const viewerRef = useRef<Cesium.Viewer | null>(null);
+  // 平台配置是异步拉取的:viewer 创建时往往还没拿到 token,
+  // 这里再订阅 loaded,配置到达后补设一次。
+  const platformLoaded = usePlatformStore((s) => s.loaded);
+
+  useEffect(() => {
+    applyIonTokenFromConfig();
+  }, [platformLoaded]);
 
   useEffect(() => {
     if (!containerRef.current) return;
-    const cfg = window.__PLATFORM_CONFIG;
-    if (!_initedToken && cfg?.cesium_ion_token) {
-      Cesium.Ion.defaultAccessToken = cfg.cesium_ion_token;
-      _initedToken = true;
-    }
+    applyIonTokenFromConfig();
 
     const viewer = new Cesium.Viewer(containerRef.current, {
       baseLayerPicker: false,
@@ -64,7 +76,7 @@ export function useCesiumViewer(containerRef: React.RefObject<HTMLDivElement>) {
 
     // 注意:此时平台配置通常尚未拉取完成(cfg 为空),这里的兜底值只是首帧
     // 占位;MapView 会在配置加载完成后把相机校正到 config.geo.center。
-    const center = cfg?.geo?.center;
+    const center = window.__PLATFORM_CONFIG?.geo?.center;
     const startLng = center?.lng ?? 116.587;
     const startLat = center?.lat ?? 35.415;
     const startAlt = center?.alt ?? 220_000;

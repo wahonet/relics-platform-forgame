@@ -33,7 +33,8 @@ export async function fetchPatrolDue(params?: {
   return data;
 }
 
-export async function planPatrol(text: string, maxStops = 12): Promise<PlanResponse> {
+// 单日巡查上限 30 处:用户要求更多时按 30 截断
+export async function planPatrol(text: string, maxStops = 30): Promise<PlanResponse> {
   const { data } = await apiClient.post<PlanResponse>("/api/patrol/plan", {
     text,
     max_stops: maxStops,

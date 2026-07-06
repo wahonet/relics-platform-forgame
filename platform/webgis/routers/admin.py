@@ -3,6 +3,7 @@
 - GET  /api/admin/pipeline        管线各步骤输入/产物状态 + 上次运行清单
 - POST /api/admin/pipeline/run    后台运行管线(可选 only=步骤号 / demo=生成演示数据)
 - GET  /api/admin/pipeline/task   当前/上次任务状态与日志尾部
+- POST /api/admin/data/clear      清除全部已生成数据(需输入确认口令)
 - GET  /api/admin/config          外部 API key 配置状态(脱敏)
 - PUT  /api/admin/config          写入 config.yaml 并热更新 AI / 高德服务
 
@@ -12,6 +13,7 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 import subprocess
 import sys
 import threading
@@ -223,6 +225,114 @@ async def pipeline_task(tail: int = 200):
         "base_url": _task.get("base_url", ""),
         "log": _task["log"][-tail:],
         "log_file": _task.get("log_file", ""),
+    }
+
+
+# ── 清除全部数据 ─────────────────────────────────────────────
+CLEAR_CONFIRM_PHRASE = "清除全部数据"
+
+
+class ClearDataBody(BaseModel):
+    confirm: str
+    # 是否连同 data/input 原始资料(登记表 docx、Markdown 档案、台账、媒体、边界)一并清除
+    include_input: bool = False
+
+
+def _rmtree_contents(d: Path) -> tuple[bool, str]:
+    """删除目录本身(含内容)并原样重建空目录。返回 (是否成功, 错误信息)。"""
+    if not d.exists():
+        d.mkdir(parents=True, exist_ok=True)
+        return True, ""
+    try:
+        shutil.rmtree(d)
+    except OSError as e:
+        return False, str(e)
+    d.mkdir(parents=True, exist_ok=True)
+    return True, ""
+
+
+@router.post("/data/clear")
+async def clear_all_data(body: ClearDataBody):
+    """清除全部已生成数据:数据集库(relics.db)、照片/图纸、边界、巡查库
+    (patrol.db + 打卡照片)、管线日志与进度账本。离线地图瓦片缓存不在此列
+    (在「离线地图下载」页单独管理)。
+
+    必须提交 confirm=清除全部数据 才会执行;有任务运行时拒绝。
+    """
+    global _task
+    if (body.confirm or "").strip() != CLEAR_CONFIRM_PHRASE:
+        raise HTTPException(400, f"确认口令不正确,请输入「{CLEAR_CONFIRM_PHRASE}」")
+    with _task_lock:
+        if _task and _task.get("status") == "running":
+            raise HTTPException(409, "有任务正在运行,请先等待完成或停止后再清除")
+
+    from data_loader import store
+    from services.patrol_service import patrol_db
+
+    paths = get_paths()
+
+    # 先关掉两个库的所有 SQLite 连接,否则 Windows 上文件被占用无法删除
+    store.close_db()
+    patrol_db.close()
+
+    targets: list[tuple[str, Path]] = [
+        ("数据集(relics.db / JSON / GeoJSON / 索引)", paths.output_dataset),
+        ("照片", paths.output_photos),
+        ("图纸", paths.output_drawings),
+        ("行政边界产物", paths.output_boundaries),
+        ("巡查库与打卡照片(patrol.db)", paths.output_patrol),
+        ("管线日志与进度账本", paths.output_logs),
+    ]
+    if body.include_input:
+        targets += [
+            ("原始登记表 docx", paths.input_docs),
+            ("台账 / Markdown 档案", paths.input_relics),
+            ("原始照片图纸", paths.input_media),
+            ("原始行政边界", paths.input_boundaries),
+            ("普查档案 PDF", paths.input_archive_docs),
+        ]
+
+    removed: list[str] = []
+    failed: list[dict] = []
+    for label, d in targets:
+        ok, err = _rmtree_contents(d)
+        if ok:
+            removed.append(label)
+        else:
+            failed.append({"label": label, "path": str(d), "error": err})
+
+    # 重建目录骨架 + 热重载(store 变为空数据、AI 上下文重建、巡查库重建空表)
+    from _common import ensure_data_dirs
+    ensure_data_dirs()
+    _reload_store()
+    try:
+        cfg = load_config()
+        patrol_db.init(paths.output_patrol, (cfg.get("patrol") or {}).get("frequency_days"))
+    except Exception:  # noqa: BLE001
+        pass
+
+    # 市界/县界是地图底子(市界发光 + 域外遮罩),不属于业务数据,
+    # 从仓库 boundary/ 种子自动恢复,避免清除后地图一片黑。
+    seeded: list[str] = []
+    try:
+        from services.boundary_seed import restore_seed_boundaries
+        seeded = restore_seed_boundaries()
+    except Exception:  # noqa: BLE001
+        pass
+
+    # 清除后上一次任务记录已无意义,重置为空闲
+    with _task_lock:
+        _task = {}
+
+    return {
+        "ok": not failed,
+        "removed": removed,
+        "failed": failed,
+        "include_input": body.include_input,
+        "seeded_boundaries": seeded,
+        "message": ("已清除全部数据,可重新放入数据运行管线"
+                    + ("(市界/县界底图已自动恢复)" if seeded else "")
+                    if not failed else "部分目录清除失败,请查看 failed 明细"),
     }
 
 

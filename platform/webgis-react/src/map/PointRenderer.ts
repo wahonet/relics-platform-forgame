@@ -1,32 +1,68 @@
 import * as Cesium from "cesium";
+import { rankSize, rankLabelMaxDistance } from "../utils/dict";
 import {
-  CATEGORY_MAP,
-  categoryColor,
-  rankSize,
-  rankLabelMaxDistance,
-} from "../utils/dict";
+  ensureIconsLoaded,
+  getRelicBadge,
+  rankBadgeSize,
+  RANK_COLOR,
+  ICON_MODE_MAX_HEIGHT,
+} from "./relicIcons";
 import type { BboxRelic } from "../types";
 
 interface PointMeta {
-  point: Cesium.PointPrimitive;
+  dot?: Cesium.PointPrimitive;
+  badge?: Cesium.Billboard;
   label: Cesium.Label;
   rank: string;
+  category: string;
 }
 
+type RenderMode = "dot" | "badge";
+
 const LABEL_BUDGET = 300;
+// 模式切换加一点滞回,避免在阈值附近来回抖动
+const BADGE_ENTER_HEIGHT = ICON_MODE_MAX_HEIGHT;          // 低于此高度 → 图标
+const BADGE_EXIT_HEIGHT = ICON_MODE_MAX_HEIGHT * 1.25;    // 高于此高度 → 圆点
 
 export class PointRenderer {
   private viewer: Cesium.Viewer;
-  private points: Cesium.PointPrimitiveCollection;
+  private dots: Cesium.PointPrimitiveCollection;
+  private badges: Cesium.BillboardCollection;
   private labels: Cesium.LabelCollection;
   private map = new Map<string, PointMeta>();
+  private items: BboxRelic[] = [];
+  private mode: RenderMode = "dot";
   private clickHandler: Cesium.ScreenSpaceEventHandler;
   private onPick: ((code: string) => void) | null = null;
+  private iconsReady = false;
+  private destroyed = false;
+  private cameraCallback: () => void;
 
   constructor(viewer: Cesium.Viewer) {
     this.viewer = viewer;
-    this.points = viewer.scene.primitives.add(new Cesium.PointPrimitiveCollection());
+    this.dots = viewer.scene.primitives.add(new Cesium.PointPrimitiveCollection());
+    this.badges = viewer.scene.primitives.add(new Cesium.BillboardCollection());
     this.labels = viewer.scene.primitives.add(new Cesium.LabelCollection());
+    this.mode = this.desiredMode();
+
+    // 徽章素材异步加载;完成后若已处于图标模式则整体重画
+    ensureIconsLoaded()
+      .then(() => {
+        this.iconsReady = true;
+        if (!this.destroyed && this.mode === "badge") this.rebuild();
+      })
+      .catch((e) => console.warn("[PointRenderer] 图标加载失败:", e));
+
+    // 相机缩放跨过阈值时切换 圆点↔图标
+    this.cameraCallback = () => {
+      const next = this.desiredMode();
+      if (next !== this.mode) {
+        this.mode = next;
+        this.rebuild();
+      }
+    };
+    viewer.camera.changed.addEventListener(this.cameraCallback);
+
     this.clickHandler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
     this.clickHandler.setInputAction((click: { position: Cesium.Cartesian2 }) => {
       const picked = viewer.scene.pick(click.position);
@@ -44,7 +80,26 @@ export class PointRenderer {
     }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
   }
 
+  private desiredMode(): RenderMode {
+    let h = Infinity;
+    try {
+      h = this.viewer.camera.positionCartographic.height;
+    } catch {
+      return this.mode;
+    }
+    if (this.mode === "badge") {
+      return h > BADGE_EXIT_HEIGHT ? "dot" : "badge";
+    }
+    return h < BADGE_ENTER_HEIGHT ? "badge" : "dot";
+  }
+
   destroy() {
+    this.destroyed = true;
+    try {
+      this.viewer.camera.changed.removeEventListener(this.cameraCallback);
+    } catch {
+      /* ignore */
+    }
     try {
       this.clickHandler.destroy();
     } catch {
@@ -52,7 +107,8 @@ export class PointRenderer {
     }
     try {
       if (!this.viewer.isDestroyed()) {
-        this.viewer.scene.primitives.remove(this.points);
+        this.viewer.scene.primitives.remove(this.dots);
+        this.viewer.scene.primitives.remove(this.badges);
         this.viewer.scene.primitives.remove(this.labels);
       }
     } catch {
@@ -64,11 +120,27 @@ export class PointRenderer {
     this.onPick = cb;
   }
 
+  /** 清空全部并按当前模式重画(模式切换/图标就绪时用)。 */
+  private rebuild() {
+    if (this.destroyed) return;
+    this.dots.removeAll();
+    this.badges.removeAll();
+    this.labels.removeAll();
+    this.map.clear();
+    const items = this.items;
+    this.items = [];
+    this.diffUpdate(items);
+  }
+
   diffUpdate(items: BboxRelic[]) {
+    this.items = items;
+    const useBadge = this.mode === "badge" && this.iconsReady;
+
     const incoming = new Set(items.map((it) => it.code));
     for (const [code, meta] of this.map.entries()) {
       if (!incoming.has(code)) {
-        this.points.remove(meta.point);
+        if (meta.dot) this.dots.remove(meta.dot);
+        if (meta.badge) this.badges.remove(meta.badge);
         this.labels.remove(meta.label);
         this.map.delete(code);
       }
@@ -83,23 +155,38 @@ export class PointRenderer {
       const lat = r.lat;
       if (!Number.isFinite(lng) || !Number.isFinite(lat)) continue;
       const pos = Cesium.Cartesian3.fromDegrees(lng, lat, 0);
-      const color = Cesium.Color.fromCssColorString(
-        CATEGORY_MAP[r.category]?.color || categoryColor(r.category) || "#8b949e",
-      );
-      const px = rankSize(r.rank) || 8;
       const showLabel = labelAllowed.has(r.code);
+      const labelOffset = useBadge ? rankBadgeSize(r.rank) / 2 + 4 : 8;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const pickId = { _type: "relic", code: r.code, name: r.name } as any;
 
       let meta = this.map.get(r.code);
       if (!meta) {
-        const point = this.points.add({
-          position: pos,
-          color,
-          pixelSize: px,
-          outlineColor: Cesium.Color.fromCssColorString("rgba(13,17,23,0.85)"),
-          outlineWidth: 2,
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          id: { _type: "relic", code: r.code, name: r.name } as any,
-        });
+        let dot: Cesium.PointPrimitive | undefined;
+        let badge: Cesium.Billboard | undefined;
+        if (useBadge) {
+          const icon = getRelicBadge(r.category, r.rank);
+          if (!icon) continue;
+          const size = rankBadgeSize(r.rank);
+          badge = this.badges.add({
+            position: pos,
+            image: icon,
+            width: size,
+            height: size,
+            verticalOrigin: Cesium.VerticalOrigin.CENTER,
+            horizontalOrigin: Cesium.HorizontalOrigin.CENTER,
+            id: pickId,
+          });
+        } else {
+          dot = this.dots.add({
+            position: pos,
+            color: Cesium.Color.fromCssColorString(RANK_COLOR[r.rank] || RANK_COLOR["5"]),
+            pixelSize: rankSize(r.rank) || 8,
+            outlineColor: Cesium.Color.fromCssColorString("rgba(13,17,23,0.85)"),
+            outlineWidth: 2,
+            id: pickId,
+          });
+        }
         const label = this.labels.add({
           position: pos,
           text: r.name,
@@ -109,7 +196,7 @@ export class PointRenderer {
           outlineWidth: 4,
           style: Cesium.LabelStyle.FILL_AND_OUTLINE,
           horizontalOrigin: Cesium.HorizontalOrigin.LEFT,
-          pixelOffset: new Cesium.Cartesian2(8, 0),
+          pixelOffset: new Cesium.Cartesian2(labelOffset, 0),
           show: showLabel,
           distanceDisplayCondition: new Cesium.DistanceDisplayCondition(
             0,
@@ -117,16 +204,34 @@ export class PointRenderer {
           ),
           scale: 0.85,
         });
-        meta = { point, label, rank: r.rank };
+        meta = { dot, badge, label, rank: r.rank, category: r.category };
         this.map.set(r.code, meta);
       } else {
-        meta.point.position = pos;
-        meta.point.color = color;
-        meta.point.pixelSize = px;
+        if (meta.dot) {
+          meta.dot.position = pos;
+          if (meta.rank !== r.rank) {
+            meta.dot.color = Cesium.Color.fromCssColorString(
+              RANK_COLOR[r.rank] || RANK_COLOR["5"],
+            );
+            meta.dot.pixelSize = rankSize(r.rank) || 8;
+          }
+        }
+        if (meta.badge) {
+          meta.badge.position = pos;
+          if (meta.rank !== r.rank || meta.category !== r.category) {
+            const icon = getRelicBadge(r.category, r.rank);
+            if (icon) meta.badge.image = icon as unknown as string;
+            const size = rankBadgeSize(r.rank);
+            meta.badge.width = size;
+            meta.badge.height = size;
+            meta.label.pixelOffset = new Cesium.Cartesian2(size / 2 + 4, 0);
+          }
+        }
         meta.label.position = pos;
         meta.label.text = r.name;
         meta.label.show = showLabel;
         meta.rank = r.rank;
+        meta.category = r.category;
       }
     }
 

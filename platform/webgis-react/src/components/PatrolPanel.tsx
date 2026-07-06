@@ -99,6 +99,8 @@ export function PatrolPanel() {
       if (resp.routes.length === 1) {
         usePatrolStore.getState().adoptSuggestion(0);
         getRouteLayer()?.flyToRoute(resp.routes[0].stops);
+        // 路线名跟随本次规划结果(如 20260706嘉祥县国保巡查),覆盖旧值
+        setRouteName(resp.routes[0].name || "");
       }
     } catch (e) {
       const msg =
@@ -115,7 +117,7 @@ export function PatrolPanel() {
     const s = usePatrolStore.getState().suggestions[i];
     if (s) {
       getRouteLayer()?.flyToRoute(s.stops);
-      if (!routeName) setRouteName(s.name);
+      setRouteName(s.name || "");
     }
   };
 
@@ -218,13 +220,6 @@ export function PatrolPanel() {
                   <b>巡查提醒</b>
                   <span>{dueSummary}</span>
                 </div>
-                <button
-                  className="pp-btn sm"
-                  disabled={planning}
-                  onClick={() => doPlan("规划本月的巡查路线")}
-                >
-                  一键生成本月方案
-                </button>
               </div>
             ) : null}
 

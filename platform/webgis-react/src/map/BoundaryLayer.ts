@@ -27,6 +27,33 @@ function ringCenter(ring: number[][]) {
   ];
 }
 
+interface GeoJSONGeometry {
+  type?: string;
+  coordinates?: unknown;
+}
+
+/**
+ * 把 Polygon / MultiPolygon 统一展开成 ring 列表(含洞,洞同样是真实边界线)。
+ * 之前直接 `coordinates.forEach(ring)` 假设一定是 Polygon,遇到 MultiPolygon
+ * 会把整个 polygon 当 ring 用,画出乱线甚至崩溃。
+ */
+function extractRings(geometry: GeoJSONGeometry | null | undefined): number[][][] {
+  if (!geometry?.type || !geometry.coordinates) return [];
+  if (geometry.type === "Polygon") {
+    return (geometry.coordinates as number[][][]).filter((r) => r?.length >= 3);
+  }
+  if (geometry.type === "MultiPolygon") {
+    const out: number[][][] = [];
+    (geometry.coordinates as number[][][][]).forEach((poly) => {
+      poly?.forEach((r) => {
+        if (r?.length >= 3) out.push(r);
+      });
+    });
+    return out;
+  }
+  return [];
+}
+
 export class BoundaryLayer {
   private viewer: Cesium.Viewer;
   /** 市域外暗色遮罩 + 市界发光描边(仿驾驶舱大屏的区域聚焦效果)。 */
@@ -42,7 +69,7 @@ export class BoundaryLayer {
   private villageGeojson: {
     features: {
       properties?: Record<string, string>;
-      geometry: { coordinates: number[][][] };
+      geometry: GeoJSONGeometry;
     }[];
   } | null = null;
   public townshipNames: string[] = [];
@@ -212,7 +239,7 @@ export class BoundaryLayer {
         county.features?.forEach(
           (f: {
             properties?: Record<string, string>;
-            geometry: { coordinates: number[][][] };
+            geometry: GeoJSONGeometry;
           }) => {
             // 县名取自 DataV(name/XZQMC)或 step06 输出。一个县多边形只挂一个 label
             // (取面积最大那个 ring 的中心),避免飞地重复显示。
@@ -223,7 +250,7 @@ export class BoundaryLayer {
               "";
             let mainRing: number[][] | null = null;
             let mainArea = -1;
-            f.geometry.coordinates.forEach((ring) => {
+            extractRings(f.geometry).forEach((ring) => {
               this.layers.county.push(this.addBoundary(ring, "county", name));
               // 用 bbox 近似面积,简单稳健,不需要球面积
               const lngs = ring.map((p) => p[0]);
@@ -258,11 +285,11 @@ export class BoundaryLayer {
         towns.features?.forEach(
           (f: {
             properties?: Record<string, string>;
-            geometry: { coordinates: number[][][] };
+            geometry: GeoJSONGeometry;
           }) => {
             const name = f.properties?.XZQMC || f.properties?._township_name || "";
             if (name) namesSet.add(name);
-            f.geometry.coordinates.forEach((ring) => {
+            extractRings(f.geometry).forEach((ring) => {
               this.layers.township.push(this.addBoundary(ring, "township", name));
               if (name) {
                 const [cx, cy] = ringCenter(ring);
@@ -306,7 +333,7 @@ export class BoundaryLayer {
     if (!this.villageGeojson) return;
     this.villageGeojson.features.forEach((f) => {
       const name = f.properties?.ZLDWMC || "";
-      f.geometry.coordinates.forEach((ring) => {
+      extractRings(f.geometry).forEach((ring) => {
         this.layers.village.push(this.addBoundary(ring, "village", name));
       });
     });
@@ -318,9 +345,9 @@ export class BoundaryLayer {
     this.villageGeojson.features.forEach((f) => {
       const name = f.properties?.ZLDWMC || "";
       if (!name) return;
-      const coords = f.geometry.coordinates;
-      if (!coords?.length) return;
-      const [cx, cy] = ringCenter(coords[0]);
+      const rings = extractRings(f.geometry);
+      if (!rings.length) return;
+      const [cx, cy] = ringCenter(rings[0]);
       this.layers.villageLabel.push(this.addVillageLabel(cx, cy, name));
     });
   }

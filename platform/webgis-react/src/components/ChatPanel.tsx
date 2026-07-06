@@ -58,7 +58,7 @@ export function ChatPanel() {
     if (actionStr.startsWith("fly:")) {
       const code = actionStr.slice(4);
       const r = useRelicsStore.getState().byCode.get(code);
-      if (r?.center_lng && r.center_lat) {
+      if (r?.center_lng != null && r.center_lat != null) {
         flyTo(r.center_lng, r.center_lat, 600);
         setUI({ selectedRelic: r });
       }

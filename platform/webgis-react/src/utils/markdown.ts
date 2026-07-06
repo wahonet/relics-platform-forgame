@@ -4,15 +4,37 @@
  */
 
 function escapeHtml(t: string): string {
-  return t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return t
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+/** 属性值转义:action 会被放进 data-action="...",必须转义引号防注入。 */
+function escapeAttr(t: string): string {
+  return t
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
 }
 
 export function renderChatMarkdown(text: string): string {
   let h = escapeHtml(text);
 
   h = h.replace(/\[\[([^\]|]+)\|([^\]]+)\]\]/g, (_, label, action) => {
-    const a = String(action).replace(/&amp;/g, "&").replace(/'/g, "\\'");
-    return `<a class="cf" data-action="${a}" title="在地图上查看">${label} 📍</a>`;
+    // label/action 来自已整体 escapeHtml 的文本;action 先还原为原始字符串
+    // 再按属性上下文重新转义,避免 `"` 逃出 data-action 属性。
+    const raw = String(action)
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'")
+      .replace(/&lt;/g, "<")
+      .replace(/&gt;/g, ">")
+      .replace(/&amp;/g, "&");
+    return `<a class="cf" data-action="${escapeAttr(raw)}" title="在地图上查看">${label} 📍</a>`;
   });
 
   h = h.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");

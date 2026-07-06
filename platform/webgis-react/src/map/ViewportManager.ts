@@ -63,25 +63,63 @@ export class ViewportManager {
   }
 
   private currentBBox() {
+    let west: number, south: number, east: number, north: number;
     const rect = this.viewer.camera.computeViewRectangle();
-    if (!rect) return null;
-    const west = Cesium.Math.toDegrees(rect.west);
-    const south = Cesium.Math.toDegrees(rect.south);
-    const east = Cesium.Math.toDegrees(rect.east);
-    const north = Cesium.Math.toDegrees(rect.north);
-    if (!isFinite(west) || !isFinite(east)) return null;
+    if (rect) {
+      west = Cesium.Math.toDegrees(rect.west);
+      south = Cesium.Math.toDegrees(rect.south);
+      east = Cesium.Math.toDegrees(rect.east);
+      north = Cesium.Math.toDegrees(rect.north);
+    } else {
+      // SCENE2D + WebMercatorProjection 下 computeViewRectangle() 会返回
+      // undefined,退回画布四角 pickEllipsoid 求视口范围。
+      const corners = this.pickCornersBBox();
+      if (!corners) return null;
+      ({ west, south, east, north } = corners);
+    }
+    if (![west, south, east, north].every(isFinite)) return null;
+    if (west >= east || south >= north) return null;
     return {
-      min_lng: parseFloat(west.toFixed(COORD_DECIMALS)),
-      min_lat: parseFloat(south.toFixed(COORD_DECIMALS)),
-      max_lng: parseFloat(east.toFixed(COORD_DECIMALS)),
-      max_lat: parseFloat(north.toFixed(COORD_DECIMALS)),
+      min_lng: parseFloat(Math.max(west, -180).toFixed(COORD_DECIMALS)),
+      min_lat: parseFloat(Math.max(south, -90).toFixed(COORD_DECIMALS)),
+      max_lng: parseFloat(Math.min(east, 180).toFixed(COORD_DECIMALS)),
+      max_lat: parseFloat(Math.min(north, 90).toFixed(COORD_DECIMALS)),
+    };
+  }
+
+  /** 画布四角 pickEllipsoid 兜底求视口 bbox(2D 场景专用)。 */
+  private pickCornersBBox() {
+    const canvas = this.viewer.scene.canvas;
+    const w = canvas.clientWidth;
+    const h = canvas.clientHeight;
+    if (!w || !h) return null;
+    const ellipsoid = this.viewer.scene.globe.ellipsoid;
+    const lngs: number[] = [];
+    const lats: number[] = [];
+    for (const [x, y] of [[0, 0], [w, 0], [0, h], [w, h]]) {
+      const cart = this.viewer.camera.pickEllipsoid(
+        new Cesium.Cartesian2(x, y),
+        ellipsoid,
+      );
+      if (!cart) return null;
+      const c = Cesium.Cartographic.fromCartesian(cart, ellipsoid);
+      lngs.push(Cesium.Math.toDegrees(c.longitude));
+      lats.push(Cesium.Math.toDegrees(c.latitude));
+    }
+    return {
+      west: Math.min(...lngs),
+      south: Math.min(...lats),
+      east: Math.max(...lngs),
+      north: Math.max(...lats),
     };
   }
 
   async refresh() {
     const bbox = this.currentBBox();
     if (!bbox) return;
-    const params = { ...bbox, ...this.filters };
+    // 后端默认 limit=2000,整市视角会截断一半点位;显式提到上限 5000,
+    // PointPrimitive 渲染几千个点毫无压力。
+    const params = { ...bbox, limit: 5000, ...this.filters };
     const qs = new URLSearchParams(
       Object.entries(params)
         .filter(([, v]) => v != null && v !== "")

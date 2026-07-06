@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  clearAllData,
   fetchPipelineStatus,
   fetchTask,
   fetchApiConfig,
@@ -712,6 +713,10 @@ export default function AdminPage() {
   const [concSaving, setConcSaving] = useState(false);
   const [extract, setExtract] = useState<ExtractProgress | null>(null);
   const [stopping, setStopping] = useState(false);
+  const [clearOpen, setClearOpen] = useState(false);
+  const [clearText, setClearText] = useState("");
+  const [clearInput, setClearInput] = useState(false);
+  const [clearing, setClearing] = useState(false);
   const [toast, setToast] = useState("");
   const logRef = useRef<HTMLPreElement>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -845,6 +850,29 @@ export default function AdminPage() {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         (e as any)?.response?.data?.detail || "启动任务失败";
       flash(detail);
+    }
+  };
+
+  const doClearAll = async () => {
+    if (clearText.trim() !== "清除全部数据" || clearing) return;
+    setClearing(true);
+    try {
+      const res = await clearAllData(clearText.trim(), clearInput);
+      if (res.ok) {
+        flash("已清除全部数据,页面即将刷新...");
+        // 数据全空,前端各 store 里的旧数据一并作废,整页刷新最干净
+        setTimeout(() => window.location.reload(), 1200);
+      } else {
+        flash(`部分清除失败: ${res.failed.map((f) => f.label).join("、")}`);
+        setClearOpen(false);
+        refreshPipeline();
+      }
+    } catch (e) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      flash((e as any)?.response?.data?.detail || "清除失败");
+    } finally {
+      setClearing(false);
+      setClearText("");
     }
   };
 
@@ -1074,8 +1102,77 @@ export default function AdminPage() {
             尚未运行任务。首次使用可先点「生成演示数据」,再「运行全部管线」建库。
           </div>
         )}
+
+        {/* ── 危险操作:清除全部数据 ─────────────── */}
+        <div className="adm-danger-row">
+          <div className="adm-danger-text">
+            <b>清除所有数据</b>
+            <em>
+              删除全部管线产物:数据集库(relics.db)、照片图纸、行政边界、
+              巡查库(patrol.db)与打卡照片、管线日志。不影响 config.yaml 与离线地图瓦片。
+            </em>
+          </div>
+          <button
+            className="pp-btn sm danger"
+            disabled={running || clearing}
+            onClick={() => {
+              setClearText("");
+              setClearInput(false);
+              setClearOpen(true);
+            }}
+          >
+            清除所有数据
+          </button>
+        </div>
       </div>
       </div>
+
+      {clearOpen && (
+        <div className="adm-modal-mask" onClick={() => !clearing && setClearOpen(false)}>
+          <div className="adm-modal" onClick={(e) => e.stopPropagation()}>
+            <h3>⚠ 清除所有数据</h3>
+            <p>
+              此操作将<b>永久删除</b>所有已生成的数据,且<b>无法恢复</b>:
+            </p>
+            <ul>
+              <li>数据集库 relics.db、全量 JSON / GeoJSON、照片图纸索引</li>
+              <li>照片、图纸文件与行政边界产物</li>
+              <li>巡查库 patrol.db(全部路线与打卡记录)及打卡照片</li>
+              <li>管线日志与档案提取进度账本</li>
+            </ul>
+            <label className="adm-modal-check">
+              <input
+                type="checkbox"
+                checked={clearInput}
+                onChange={(e) => setClearInput(e.target.checked)}
+              />
+              同时清除 data/input 原始资料(登记表 docx、Markdown 档案、台账、媒体、边界、档案 PDF)
+            </label>
+            <p className="adm-modal-tip">
+              请输入 <b>清除全部数据</b> 以确认:
+            </p>
+            <input
+              className="pp-input"
+              value={clearText}
+              placeholder="清除全部数据"
+              onChange={(e) => setClearText(e.target.value)}
+              autoFocus
+            />
+            <div className="adm-modal-actions">
+              <button className="pp-btn sm" disabled={clearing} onClick={() => setClearOpen(false)}>
+                取消
+              </button>
+              <button
+                className="pp-btn sm danger"
+                disabled={clearText.trim() !== "清除全部数据" || clearing}
+                onClick={doClearAll}
+              >
+                {clearing ? "清除中..." : "确定清除"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── API 配置 ─────────────────────────────── */}
       <div style={{ display: activeTab === "api" ? "contents" : "none" }}>

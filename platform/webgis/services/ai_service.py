@@ -133,19 +133,65 @@ JSON 结构:
 {
   "type": "near" | "monthly" | "county" | "condition" | "list",
   "anchor": "锚点文物名称(type=near 时)",
-  "count": 数字(需要巡查的文物数量,默认5,type=monthly 时忽略),
-  "county": "县区名(可选)",
+  "count": 数字(仅当用户明确提到数量时才输出,否则省略此字段),
+  "county": "县区名(可选,用户提到的行政区,如 嘉祥县/任城区)",
   "township": "乡镇名(可选)",
   "condition": "保存状况筛选,取值 差/较差/一般/较好/好(可选)",
+  "level": "保护级别筛选,取值 国保/省保/市保/县保/未定级(可选。全国重点文物保护单位=国保,省级=省保,市级=市保,县级=县保)",
   "names": ["明确点名的文物名称"(type=list 时)]
 }
+
+重要:用户提到的县区、保护级别、保存状况都必须解析出来,不能遗漏。
 
 示例:
 "巡查武氏墓群石刻附近的大约5处文物" → {"type":"near","anchor":"武氏墓群石刻","count":5}
 "规划本月的巡查路线" → {"type":"monthly"}
-"帮我安排嘉祥县保存较差的文物巡查" → {"type":"condition","county":"嘉祥县","condition":"较差","count":8}
+"帮我安排嘉祥县保存较差的文物巡查" → {"type":"condition","county":"嘉祥县","condition":"较差"}
+"巡查嘉祥县的全国重点文物保护单位" → {"type":"condition","county":"嘉祥县","level":"国保"}
+"巡查任城区的3处省级文物保护单位" → {"type":"condition","county":"任城区","level":"省保","count":3}
 "巡查青山寺、曾庙和武氏墓群" → {"type":"list","names":["青山寺","曾庙","武氏墓群"]}
 """
+
+# 级别关键词 → 统一别名(供规则解析和 LLM 结果兜底)
+_LEVEL_PATTERNS: list[tuple[str, str]] = [
+    ("全国重点文物保护单位", "国保"),
+    ("全国重点", "国保"),
+    ("国家级", "国保"),
+    ("国保", "国保"),
+    ("省级文物保护单位", "省保"),
+    ("省级", "省保"),
+    ("省保", "省保"),
+    ("市级文物保护单位", "市保"),
+    ("市级", "市保"),
+    ("市保", "市保"),
+    ("县级文物保护单位", "县保"),
+    ("县级", "县保"),
+    ("县保", "县保"),
+    ("未定级", "未定级"),
+    ("未核定", "未定级"),
+]
+
+
+def detect_level(text: str, county: str = "") -> str:
+    """从文本中识别保护级别关键词,返回 国保/省保/市保/县保/未定级 或空串。
+    先剥掉县区名,避免「嘉祥县保存较差」里的"县保"被误判为县保级别。"""
+    t = text.replace(county, "") if county else text
+    for pat, label in _LEVEL_PATTERNS:
+        if pat in t:
+            return label
+    return ""
+
+
+_VERB_PREFIX = re.compile(r"^(请|帮我|帮忙|麻烦)?(安排|规划|巡查|巡察|巡视|检查)?")
+
+
+def detect_county(text: str) -> str:
+    """从文本中识别县区名。先剥掉开头动词,避免把「巡查嘉祥县」整体当县名。"""
+    t = _VERB_PREFIX.sub("", (text or "").strip())
+    m = re.search(r"([\u4e00-\u9fa5]{1,4}?(?:县|区|市))", t)
+    if m and m.group(1) not in ("济宁市",):
+        return m.group(1)
+    return ""
 
 
 def parse_patrol_intent_llm(text: str) -> Optional[dict]:
@@ -155,7 +201,8 @@ def parse_patrol_intent_llm(text: str) -> Optional[dict]:
 def parse_patrol_intent_rules(text: str) -> dict:
     """无 Key 时的规则兜底解析。"""
     t = (text or "").strip()
-    out: dict[str, Any] = {"type": "list", "names": [], "count": 5}
+    # count 只在用户明确提到数量时设置,便于上游区分"默认值"和"用户要求"
+    out: dict[str, Any] = {"type": "list", "names": []}
 
     m = re.search(r"(大约|约|附近的?)?(\d+|[一二两三四五六七八九十]+)\s*处", t)
     if m:
@@ -180,11 +227,18 @@ def parse_patrol_intent_rules(text: str) -> dict:
             out["condition"] = cond
             break
 
-    m = re.search(r"([\u4e00-\u9fa5]{2,4}(?:县|市|区))", t)
-    if m and m.group(1) != "济宁市":
-        out["county"] = m.group(1)
+    county = detect_county(t)
+    if county:
+        out["county"] = county
         if out["type"] == "list":
             out["type"] = "county"
+
+    # 级别识别要先剥掉县区名,防止「嘉祥县保存」误命中"县保"
+    level = detect_level(t, county)
+    if level:
+        out["level"] = level
+        if out["type"] in ("list", "county"):
+            out["type"] = "condition"
 
     if out["type"] == "list":
         # 顿号/逗号分隔的点名清单
@@ -205,6 +259,16 @@ def parse_patrol_intent(text: str) -> dict:
         intent["_parser"] = "rules"
     else:
         intent["_parser"] = "llm"
+        # LLM 偶尔漏掉县区/级别筛选,用规则识别兜底补齐,
+        # 避免"巡查嘉祥县的国保单位"被规划到别的县区/级别。
+        if not intent.get("county"):
+            county = detect_county(text)
+            if county:
+                intent["county"] = county
+        if not intent.get("level"):
+            level = detect_level(text, str(intent.get("county") or ""))
+            if level:
+                intent["level"] = level
     return intent
 
 

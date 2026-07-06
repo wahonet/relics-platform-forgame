@@ -9,6 +9,7 @@ import { ChatPanel } from "./components/ChatPanel";
 import { PatrolPanel } from "./components/PatrolPanel";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { CoordReadout } from "./components/CoordReadout";
+import { MapLegend } from "./components/MapLegend";
 import { CoordReadoutRestore } from "./components/CoordReadoutRestore";
 import { CrsInspectorPanel } from "./components/CrsInspectorPanel";
 import { Toast } from "./components/Toast";
@@ -98,6 +99,7 @@ function App() {
         <ErrorBoundary label="InfoPanel"><InfoPanel /></ErrorBoundary>
         <ErrorBoundary label="ChatPanel"><ChatPanel /></ErrorBoundary>
         <ErrorBoundary label="CoordReadout"><CoordReadout /></ErrorBoundary>
+        <ErrorBoundary label="MapLegend"><MapLegend /></ErrorBoundary>
         <ErrorBoundary label="CoordReadoutRestore"><CoordReadoutRestore /></ErrorBoundary>
         <ErrorBoundary label="CrsInspectorPanel"><CrsInspectorPanel /></ErrorBoundary>
       </div>
