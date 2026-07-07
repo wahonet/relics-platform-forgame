@@ -101,11 +101,50 @@ def plan_driving_route(points_wgs84: list[tuple[float, float]]) -> Optional[dict
     return {"distance_m": total_dist, "duration_s": total_dur, "polyline": full_line}
 
 
+def geocode(address: str, city: str = "") -> Optional[dict]:
+    """地理编码:地名 → WGS-84 坐标。
+
+    返回 {lng, lat, formatted}(WGS-84);无 key / 无结果 / 失败返回 None。
+    city 用于限定行政区(如 "济宁市"),避免同名地点落到外地。
+    """
+    addr = (address or "").strip()
+    if not _KEY or not addr:
+        return None
+    params = {"key": _KEY, "address": addr}
+    if city:
+        params["city"] = city
+    url = "https://restapi.amap.com/v3/geocode/geo?" + urllib.parse.urlencode(params)
+    try:
+        with _DIRECT_OPENER.open(url, timeout=8) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+    except Exception as e:  # noqa: BLE001
+        log.warning("[高德] 地理编码请求失败: %s", e)
+        return None
+    geocodes = data.get("geocodes") or []
+    if str(data.get("status")) != "1" or not geocodes:
+        log.info("[高德] 地理编码无结果: %s (%s)", addr, data.get("info"))
+        return None
+    loc = (geocodes[0].get("location") or "").split(",")
+    if len(loc) != 2:
+        return None
+    try:
+        glng, glat = float(loc[0]), float(loc[1])
+    except ValueError:
+        return None
+    wlng, wlat = gcj02_to_wgs84(glng, glat)
+    return {
+        "lng": round(wlng, 8),
+        "lat": round(wlat, 8),
+        "formatted": geocodes[0].get("formatted_address") or addr,
+    }
+
+
 def nav_uri(stops_wgs84: list[dict], *, mode: str = "car") -> str:
     """生成高德 URI(https),微信内打开后可跳转高德 App 开始导航。
 
-    stops: [{lng, lat, name}] WGS-84,首个为当前段起点之后的第一站。
-    多站时中间站写入 via(高德 URI 支持途经点;个别版本忽略时仍导航至终点)。
+    注意:高德官方 H5 URI(uri.amap.com/navigation)的 via 参数
+    「最多只支持 1 个途经点」,多站导航请用 nav_uri_app()(App scheme,
+    支持 16 个途经点),本函数仅作单站导航与 App 未安装时的兜底。
     """
     if not stops_wgs84:
         return ""
@@ -125,5 +164,39 @@ def nav_uri(stops_wgs84: list[dict], *, mode: str = "car") -> str:
     }
     vias = conv[:-1]
     if vias:
-        params["via"] = ";".join(f"{v['lng']:.6f},{v['lat']:.6f},{v['name']}" for v in vias[:16])
+        # H5 URI 只认 1 个途经点,带上第一站聊胜于无
+        v = vias[0]
+        params["via"] = f"{v['lng']:.6f},{v['lat']:.6f},{v['name']}"
     return "https://uri.amap.com/navigation?" + urllib.parse.urlencode(params, safe=",;")
+
+
+def nav_uri_app(stops_wgs84: list[dict]) -> str:
+    """生成高德 App scheme(amapuri://route/plan/),支持最多 16 个途经点。
+
+    stops: [{lng, lat, name}] WGS-84,最后一个为终点,其余为途经点;
+    起点不传(高德自动取手机当前位置)。需已安装高德地图 App,
+    调用方应在唤起失败时回退 nav_uri() 的 H5 链接。
+    """
+    if not stops_wgs84:
+        return ""
+    conv = []
+    for s in stops_wgs84:
+        glng, glat = wgs84_to_gcj02(float(s["lng"]), float(s["lat"]))
+        conv.append({"lng": glng, "lat": glat, "name": (s.get("name") or "巡查点")[:20]})
+
+    dest = conv[-1]
+    vias = conv[:-1][:16]  # scheme 上限 16 个途经点
+    params: dict[str, str] = {
+        "dlat": f"{dest['lat']:.6f}",
+        "dlon": f"{dest['lng']:.6f}",
+        "dname": dest["name"],
+        "dev": "0",
+        "t": "0",  # 驾车
+        "sourceApplication": "relics-platform",
+    }
+    if vias:
+        params["vian"] = str(len(vias))
+        params["vialons"] = "|".join(f"{v['lng']:.6f}" for v in vias)
+        params["vialats"] = "|".join(f"{v['lat']:.6f}" for v in vias)
+        params["vianames"] = "|".join(v["name"] for v in vias)
+    return "amapuri://route/plan/?" + urllib.parse.urlencode(params, safe="|")

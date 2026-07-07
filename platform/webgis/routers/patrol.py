@@ -265,6 +265,24 @@ def _chunk_routes(due: list[dict], *, chunk: int = 8, max_routes: int = 4) -> li
     return routes
 
 
+def _resolve_origin(origin_name: str) -> Optional[dict]:
+    """把出发地名称解析成坐标:先按文物名匹配台账,再走高德地理编码。
+    返回 {lng, lat, name} 或 None。"""
+    name = (origin_name or "").strip()
+    if not name:
+        return None
+    r = _find_relic_by_name(name)
+    if r and r.get("center_lng") is not None and r.get("center_lat") is not None:
+        return {"lng": float(r["center_lng"]), "lat": float(r["center_lat"]),
+                "name": r.get("name") or name}
+    from _common import load_config
+    city = ((load_config().get("project") or {}).get("name") or "").strip()
+    g = amap_service.geocode(name, city=city)
+    if g:
+        return {"lng": g["lng"], "lat": g["lat"], "name": name}
+    return None
+
+
 @router.post("/patrol/plan")
 async def patrol_plan(req: PlanRequest):
     """自然语言 → 巡查路线建议(不落库,由前端确认后 POST /patrol/routes 保存)。"""
@@ -274,6 +292,13 @@ async def patrol_plan(req: PlanRequest):
 
     intent = ai_service.parse_patrol_intent(text)
     itype = intent.get("type") or "condition"
+
+    # 出发地:「从XX出发」→ 文物名匹配 / 高德地理编码 → 路线起点
+    start = _resolve_origin(intent.get("origin") or "")
+    start_xy = (start["lng"], start["lat"]) if start else None
+    origin_note = ""
+    if intent.get("origin") and not start:
+        origin_note = f"(出发地「{intent['origin']}」未能定位,已忽略)"
     # 用户明确说了数量才按数量截断;只给筛选条件(县区/级别/状况)时,
     # 把符合条件的都排进去。上限一律 30 处(单日体力上限)。
     hard_cap = max(1, min(req.max_stops, MAX_STOPS_HARD_LIMIT))
@@ -310,7 +335,7 @@ async def patrol_plan(req: PlanRequest):
         ordered = order_nearest_neighbor([
             {"code": r["archive_code"], "lng": r["center_lng"], "lat": r["center_lat"], "name": r["name"]}
             for r in stops
-        ])
+        ], start=start_xy)
         suggestions.append({
             "name": f"{anchor['name']}周边巡查",
             "codes": [s["code"] for s in ordered],
@@ -327,7 +352,7 @@ async def patrol_plan(req: PlanRequest):
                 missing.append(nm)
         if not codes:
             raise HTTPException(404, "未匹配到点名的文物")
-        ordered = order_nearest_neighbor(_resolve_stops(codes))
+        ordered = order_nearest_neighbor(_resolve_stops(codes), start=start_xy)
         suggestions.append({"name": "自定义点名巡查", "codes": [s["code"] for s in ordered]})
         explanation = "已按最近邻排序点名文物。" + (f"未找到: {'、'.join(missing)}" if missing else "")
     else:  # condition / county
@@ -359,7 +384,8 @@ async def patrol_plan(req: PlanRequest):
         due = patrol_db.compute_due(relics)[:count]
         ordered = order_nearest_neighbor(
             [{"code": d["archive_code"], "lng": d["lng"], "lat": d["lat"], **d} for d in due
-             if d["lng"] is not None]
+             if d["lng"] is not None],
+            start=start_xy,
         )
         stamp = date.today().strftime("%Y%m%d")
         label = f"{stamp}{county or ''}{level or ''}{('保存' + cond) if cond else ''}巡查"
@@ -372,11 +398,15 @@ async def patrol_plan(req: PlanRequest):
 
     if raw_count and int(raw_count) > hard_cap:
         explanation += f"(要求 {raw_count} 处超出单日上限,已按 {hard_cap} 处安排)"
+    if start:
+        explanation = f"从「{start['name']}」出发," + explanation
+    elif origin_note:
+        explanation += origin_note
 
     out_routes = []
     for s in suggestions:
         stops = _resolve_stops(s["codes"])
-        geom = _plan_geometry(stops)
+        geom = _plan_geometry(stops, start=start)
         out_routes.append({**s, "stops": stops, **geom})
 
     return {
@@ -384,6 +414,7 @@ async def patrol_plan(req: PlanRequest):
         "explanation": explanation,
         "routes": out_routes,
         "parser": intent.get("_parser", ""),
+        "start": start,
     }
 
 
@@ -657,7 +688,11 @@ async def mobile_route(token: str):
         if r["relic_code"] not in latest:
             latest[r["relic_code"]] = r
 
-    full_nav = amap_service.nav_uri([{"lng": s["lng"], "lat": s["lat"], "name": s["name"]} for s in stops])
+    nav_stops = [{"lng": s["lng"], "lat": s["lat"], "name": s["name"]} for s in stops]
+    # H5 URI 只支持 1 个途经点(高德官方限制),App scheme 支持 16 个;
+    # 页面优先唤起 App,失败回退 H5。
+    full_nav = amap_service.nav_uri(nav_stops)
+    full_nav_app = amap_service.nav_uri_app(nav_stops)
     out_stops = []
     for s in stops:
         rec = latest.get(s["code"])
@@ -675,6 +710,7 @@ async def mobile_route(token: str):
         "note": route.get("note") or "",
         "stops": out_stops,
         "nav_uri_full": full_nav,
+        "nav_uri_full_app": full_nav_app,
         "verify_radius_m": _VERIFY_RADIUS_M,
     }
 

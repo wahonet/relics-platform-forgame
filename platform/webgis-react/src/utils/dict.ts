@@ -94,14 +94,17 @@ export const rankSize = (code: string) => (RANK_MAP[code] || RANK_MAP["5"]).size
 export const rankProminent = (code: string) =>
   (RANK_MAP[code] || RANK_MAP["5"]).prominent;
 
+/** 各级别名称标签的最大可见距离(米,相机高度)。
+ * 国保常显;省/市/县保在县域视野(~50-80km)就应看到名字,
+ * 未定级放大到乡镇视野再显示,避免全图糊成一片。 */
 const RANK_LABEL_DISTANCE: Record<string, number> = {
   "1": Number.MAX_VALUE,
-  "2": 30000,
-  "3": 15000,
-  "4": 8000,
-  "5": 4000,
+  "2": 80000,
+  "3": 55000,
+  "4": 35000,
+  "5": 15000,
 };
-export const rankLabelMaxDistance = (code: string) => RANK_LABEL_DISTANCE[code] || 4000;
+export const rankLabelMaxDistance = (code: string) => RANK_LABEL_DISTANCE[code] || 15000;
 
 export const DEF_COLOR = "#8b99ad";
 export const PALETTE = [

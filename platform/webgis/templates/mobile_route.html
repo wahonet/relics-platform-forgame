@@ -99,8 +99,8 @@ function render(){
   h += '<div class="hero"><h1>' + esc(d.name) + '</h1>';
   h += '<div class="meta">计划日期 ' + esc(d.plan_date || '—') + ' · 共 ' + d.stops.length + ' 站 · 已打卡 ' + done + ' 站</div>';
   h += '<div class="prog"><i style="width:' + pct + '%"></i></div></div>';
-  h += '<button class="navbtn" onclick="navAll()">开启导航（请安装高德地图）</button>';
-  h += '<div class="hint">微信内如无法跳转，请点右上角 ··· 选择「在浏览器打开」</div>';
+  h += '<button class="navbtn" onclick="navAll()">开启全程导航（' + d.stops.length + ' 站，需安装高德地图）</button>';
+  h += '<div class="hint">多站途经点需唤起高德 App；微信内如无法跳转，请点右上角 ··· 选择「在浏览器打开」</div>';
   h += '<div class="list">';
   d.stops.forEach(function(s, i){
     h += '<div class="stop' + (s.checked ? ' done' : '') + '">';
@@ -126,7 +126,30 @@ function render(){
 function esc(s){ return String(s == null ? '' : s).replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
 function fmtDist(m){ if (m == null) return '—'; return m >= 1000 ? (m/1000).toFixed(1) + ' 公里' : Math.round(m) + ' 米'; }
 
-function navAll(){ if (DATA && DATA.nav_uri_full) window.location.href = DATA.nav_uri_full; }
+function navAll(){
+  if (!DATA) return;
+  // 高德 H5 链接官方限制只带 1 个途经点;多站导航必须唤起高德 App
+  // (amapuri:// scheme,支持 16 个途经点)。先试 App,~2.5s 未离开页面
+  // 说明未安装/被拦截,回退 H5 链接(仅首站+终点)。
+  var appUri = DATA.nav_uri_full_app;
+  var h5Uri = DATA.nav_uri_full;
+  if (appUri && DATA.stops.length > 2) {
+    var t0 = Date.now();
+    var timer = setTimeout(function(){
+      // 页面还在前台才回退,已切到高德则不再跳
+      if (!document.hidden && Date.now() - t0 < 4000 && h5Uri) {
+        toast('未检测到高德地图 App，已用网页版导航（仅含首站途经点）', 4000);
+        window.location.href = h5Uri;
+      }
+    }, 2500);
+    document.addEventListener('visibilitychange', function onHide(){
+      if (document.hidden) { clearTimeout(timer); document.removeEventListener('visibilitychange', onHide); }
+    });
+    window.location.href = appUri;
+  } else if (h5Uri) {
+    window.location.href = h5Uri;
+  }
+}
 function navTo(i){ var s = DATA.stops[i]; if (s && s.nav_uri) window.location.href = s.nav_uri; }
 
 function shoot(code){

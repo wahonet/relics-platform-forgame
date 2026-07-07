@@ -1,6 +1,8 @@
 # User data and local configuration
 data/input/
 data/*两线*/
+data/*.xls
+data/*.xlsx
 config.yaml
 .env
 .env.*

@@ -35,6 +35,16 @@ export class TwoLineLayer {
     }
   }
 
+  /** 显隐开关(整层控制,不动数据)。 */
+  setVisible(v: boolean) {
+    this.ds.show = v;
+    try {
+      this.viewer.scene.requestRender();
+    } catch {
+      /* ignore */
+    }
+  }
+
   async load(): Promise<void> {
     if (this.loaded) return;
     let fc: { features?: { properties?: { kind?: string }; geometry?: { type?: string; coordinates?: unknown } }[] };

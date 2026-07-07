@@ -64,6 +64,12 @@ export function MapView({ onCompassRotate, onScaleUpdate }: MapViewProps) {
   const offlineTick = useUIStore((s) => s.offlineCoverageTick);
   const boundaryReloadTick = useUIStore((s) => s.boundaryReloadTick);
   const theme = useUIStore((s) => s.theme);
+  const twoLineVisible = useUIStore((s) => s.twoLineVisible);
+
+  /** 两线范围整层显隐(工具栏「边界」菜单控制)。 */
+  useEffect(() => {
+    twoLineRef.current?.setVisible(twoLineVisible);
+  }, [twoLineVisible]);
 
   /** 主题切换时更新域外遮罩配色(亮白=浅雾,深色=压暗)。 */
   useEffect(() => {
@@ -87,6 +93,7 @@ export function MapView({ onCompassRotate, onScaleUpdate }: MapViewProps) {
     routeLayerRef.current = routeLayer;
     twoLineRef.current = twoLine;
     setRouteLayer(routeLayer);
+    twoLine.setVisible(useUIStore.getState().twoLineVisible);
     twoLine.load();
 
     renderer.setOnPick(async (code: string) => {

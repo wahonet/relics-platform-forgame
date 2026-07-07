@@ -172,6 +172,8 @@ export interface PlanResponse {
   explanation: string;
   routes: PlanSuggestion[];
   parser: string;
+  /** 从「从XX出发」解析出的出发点(文物匹配或高德地理编码),可为 null。 */
+  start?: { lng: number; lat: number; name: string } | null;
 }
 
 export interface PatrolRecord {

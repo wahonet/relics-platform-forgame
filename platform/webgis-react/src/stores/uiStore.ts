@@ -10,8 +10,8 @@ import {
 
 export type RenderQuality = "standard" | "hd" | "ultra";
 
-/** 主题配色。dark=深墨蓝(默认) light=经典亮白 navy=藏青政务 green=青碧 */
-export type ThemeId = "dark" | "light" | "navy" | "green";
+/** 主题配色。dark=深墨蓝(默认) light=经典亮白 navy=藏青政务 green=青碧 red=胭脂红 */
+export type ThemeId = "dark" | "light" | "navy" | "green" | "red";
 
 export function applyTheme(theme: ThemeId): void {
   document.documentElement.dataset.theme = theme;
@@ -39,6 +39,8 @@ interface UIState {
   bndTownshipName: boolean;
   bndVillage: boolean;
   bndVillageName: boolean;
+  /** 两线范围(保护范围/建控地带)常驻图层开关。 */
+  twoLineVisible: boolean;
 
   symbolMode: boolean;
   /** @deprecated 仅作向后兼容,真实状态以 renderQuality 为准。 */
@@ -102,6 +104,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   bndTownshipName: true,
   bndVillage: false,
   bndVillageName: false,
+  twoLineVisible: true,
 
   symbolMode: false,
   hdMode: localStorage.getItem("hdMode") === "1",
@@ -116,7 +119,8 @@ export const useUIStore = create<UIState>((set, get) => ({
   uiSize: "md",
   theme: ((): ThemeId => {
     const v = localStorage.getItem("theme");
-    const t = (v === "light" || v === "navy" || v === "green" || v === "dark") ? v : "dark";
+    const t = (v === "light" || v === "navy" || v === "green" || v === "red" || v === "dark")
+      ? v : "dark";
     document.documentElement.dataset.theme = t;
     return t;
   })(),

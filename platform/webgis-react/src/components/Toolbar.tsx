@@ -6,7 +6,7 @@ import { usePlatformStore } from "../stores/platformStore";
 import { flyHomeFn } from "../map/MapView";
 import { getViewer } from "../map/viewerRegistry";
 import { passFilter } from "./FilterPanel";
-import { DIMS } from "../utils/dict";
+import { DIMS, dimValues, rankCode, rankShort } from "../utils/dict";
 import type { BaseLayerType } from "../types";
 
 const BASE_OPTIONS: { value: BaseLayerType; label: string }[] = [
@@ -30,6 +30,7 @@ export function Toolbar() {
   const bndTownshipName = useUIStore((s) => s.bndTownshipName);
   const bndVillage = useUIStore((s) => s.bndVillage);
   const bndVillageName = useUIStore((s) => s.bndVillageName);
+  const twoLineVisible = useUIStore((s) => s.twoLineVisible);
   const toastObj = useUIStore((s) => s.toast);
   const setUI = useUIStore((s) => s.set);
   const showToast = useUIStore((s) => s.showToast);
@@ -42,11 +43,15 @@ export function Toolbar() {
   const tier = useFilterStore((s) => s.tier);
   const threeD = useFilterStore((s) => s.threeD);
   const activeCats = useFilterStore((s) => s.activeCats);
+  const statFilters = useFilterStore((s) => s.statFilters);
   const allRelics = useRelicsStore((s) => s.all);
   const allCount = allRelics.length;
+  const cityName = usePlatformStore(
+    (s) => s.config?.project?.name || "全市",
+  );
 
   const lvDim = DIMS.find((d) => d.id === "heritage_level");
-  // 真实通过筛选的文物数,用于"筛选"按钮徽章。
+  // 真实通过筛选的文物数(含统计面板点选),用于徽章与"当前视图"。
   const filteredCount = useMemo(() => {
     const catNames = new Set(
       allRelics.map((r) => r.category_main).filter(Boolean) as string[],
@@ -54,11 +59,55 @@ export function Toolbar() {
     const catFilterOn = activeCats.size > 0 && activeCats.size < catNames.size;
     const anyFilter =
       catFilterOn || !!search.trim() || !!county || !!township || !!level ||
-      !!cond || !!tier || !!threeD;
+      !!cond || !!tier || !!threeD || Object.keys(statFilters).length > 0;
     if (!anyFilter) return allCount;
     const f = { search, county, township, level, cond, tier, threeD, activeCats };
-    return allRelics.filter((r) => passFilter(r, f, lvDim)).length;
-  }, [allRelics, allCount, activeCats, search, county, township, level, cond, tier, threeD, lvDim]);
+    return allRelics.filter((r) => {
+      if (!passFilter(r, f, lvDim)) return false;
+      for (const [dimId, val] of Object.entries(statFilters)) {
+        const dim = DIMS.find((d) => d.id === dimId);
+        if (dim && !dimValues(r as unknown as Record<string, unknown>, dim).includes(val))
+          return false;
+      }
+      return true;
+    }).length;
+  }, [allRelics, allCount, activeCats, search, county, township, level, cond, tier, threeD, statFilters, lvDim]);
+
+  /** 「当前视图」层级:区域 → 级别 → 类别 → 年代 → 保存状况(→ 关键词)。 */
+  const viewCrumbs = useMemo(() => {
+    const parts: string[] = [];
+    // 1. 区域(县区 + 乡镇)
+    const rgCounty = county || statFilters.county || "";
+    const rgTown = (township || statFilters.township || "").replace(/^\d+/, "");
+    if (rgCounty || rgTown) parts.push([rgCounty, rgTown].filter(Boolean).join(" "));
+    else parts.push(cityName);
+    // 2. 文物级别(简称:国保/省保/市保/县保/未定级)
+    const lv = level || statFilters.heritage_level || "";
+    if (lv) parts.push(rankShort(rankCode(lv)));
+    // 3. 文物类别
+    const catNames = new Set(
+      allRelics.map((r) => r.category_main).filter(Boolean) as string[],
+    );
+    if (statFilters.category_main) {
+      parts.push(statFilters.category_main);
+    } else if (activeCats.size > 0 && activeCats.size < catNames.size) {
+      const names = [...activeCats].map(
+        (n) => (n === "近现代重要史迹及代表性建筑" ? "近现代史迹" : n),
+      );
+      parts.push(names.length <= 2 ? names.join("/") : `${names[0]}等${names.length}类`);
+    }
+    // 4. 年代分布
+    if (statFilters.era) parts.push(statFilters.era);
+    // 5. 保存状况
+    const cd = cond || statFilters.condition_level || "";
+    if (cd) parts.push(`保存${cd}`);
+    // 附加:关键词/3D
+    if (search.trim()) parts.push(`“${search.trim()}”`);
+    if (threeD === "1") parts.push("有三维模型");
+    return parts;
+  }, [county, township, level, cond, search, threeD, activeCats, statFilters, allRelics, cityName]);
+
+  const hasFilter = filteredCount < allCount;
 
   const [baseMenuOpen, setBaseMenuOpen] = useState(false);
   const [boundaryMenuOpen, setBoundaryMenuOpen] = useState(false);
@@ -235,16 +284,37 @@ export function Toolbar() {
                 />{" "}
                 村名
               </label>
+              <div className="dropdown-divider" />
+              <label className="dropdown-item" title="保护范围(红)与建设控制地带(蓝)">
+                <input
+                  type="checkbox"
+                  checked={twoLineVisible}
+                  onChange={(e) => setUI({ twoLineVisible: e.target.checked })}
+                />{" "}
+                两线范围
+              </label>
             </div>
           )}
         </div>
       </div>
 
       <div className="status-summary">
-        {toastObj?.text ||
-          (filteredCount < allCount
-            ? `筛选结果 ${filteredCount} / ${allCount} 处文物`
-            : `全市在册文物 ${allCount} 处`)}
+        {toastObj?.text ? (
+          toastObj.text
+        ) : (
+          <>
+            <em className="vw-label">当前视图</em>
+            {viewCrumbs.map((c, i) => (
+              <span key={i} className="vw-crumb">
+                {i > 0 ? <i className="vw-sep">›</i> : null}
+                {c}
+              </span>
+            ))}
+            <b className="vw-count">
+              {hasFilter ? `${filteredCount} / ${allCount} 处` : `${allCount} 处`}
+            </b>
+          </>
+        )}
       </div>
 
       <div className="tb-group" style={{ marginLeft: "auto" }}>

@@ -54,6 +54,7 @@ const THEMES: { id: ThemeId; label: string; swatch: string }[] = [
   { id: "light", label: "经典亮白", swatch: "#2d8cf0" },
   { id: "navy", label: "藏青政务", swatch: "#12233f" },
   { id: "green", label: "青碧", swatch: "#0e2420" },
+  { id: "red", label: "胭脂红", swatch: "#b3485a" },
 ];
 
 export function SettingsPanel() {

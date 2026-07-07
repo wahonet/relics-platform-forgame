@@ -388,6 +388,156 @@ def _write_points_geojson(relics: list[dict], out: Path) -> None:
     )
 
 
+# ── 市保/县保级别精化 ────────────────────────────────────────
+# 四普登记表把市保与县保合并为一个勾选项「市级和县级文物保护单位」。
+# 用 data/ 下的两份权威名单(市保名单 xls + 县保实有名录 xlsx)拆分,
+# 名单未覆盖的再看简介中的公布语句,最后兜底县保。
+_MERGED_LEVEL = "市级和县级文物保护单位"
+_CITY_LEVEL = "市级文物保护单位"
+_COUNTY_LEVEL = "县级文物保护单位"
+
+
+def _norm_name(s) -> str:
+    import re as _re
+    t = _re.sub(r"\s+", "", str(s or ""))
+    return t.replace("（", "(").replace("）", ")")
+
+
+def _load_rank_rosters() -> tuple[dict, dict] | None:
+    """读市保/县保名单。返回 (city_idx, county_idx),
+    索引结构 {norm_name: {county...}};任一名单缺失返回 None(跳过精化)。"""
+    data_dir = PROJECT_ROOT / "data"
+    if not data_dir.exists():
+        return None
+    xlsx = next((p for p in data_dir.glob("*.xlsx") if "县级" in p.name and "名录" in p.name), None)
+    xls = next((p for p in data_dir.glob("*.xls")
+                if p.suffix.lower() == ".xls" and "名单" in p.name), None)
+    if not xlsx or not xls:
+        return None
+
+    county_idx: dict[str, set[str]] = {}
+    try:
+        import openpyxl
+        wb = openpyxl.load_workbook(xlsx, read_only=True, data_only=True)
+        for ws in wb.worksheets:
+            for row in ws.iter_rows(min_row=2, max_col=10, values_only=True):
+                name = row[3] if len(row) > 3 else None
+                county = row[7] if len(row) > 7 else ""
+                if not name or str(name).strip() in ("文物保护单位名称",):
+                    continue
+                county_idx.setdefault(_norm_name(name), set()).add(str(county or "").strip())
+        wb.close()
+    except Exception as e:  # noqa: BLE001
+        log.warning("[级别] 县保名录读取失败(%s): %s", xlsx.name, e)
+        return None
+
+    city_idx: dict[str, set[str]] = {}
+    try:
+        import xlrd
+        wb2 = xlrd.open_workbook(str(xls))
+        for sheet in wb2.sheets():
+            if "济宁市文物保护单位" not in sheet.name and "市文物保护单位" not in sheet.name:
+                continue
+            for r in range(sheet.nrows):
+                vals = sheet.row_values(r)
+                if len(vals) < 5 or not vals[1]:
+                    continue
+                try:
+                    float(vals[0])  # 数据行序号为数字
+                except (TypeError, ValueError):
+                    continue
+                city_idx.setdefault(_norm_name(vals[1]), set()).add(str(vals[4] or "").strip())
+    except ImportError:
+        log.warning("[级别] 未安装 xlrd,无法读取市保名单(pip install xlrd)")
+        return None
+    except Exception as e:  # noqa: BLE001
+        log.warning("[级别] 市保名单读取失败(%s): %s", xls.name, e)
+        return None
+
+    log.info("[级别] 名单载入: 市保 %d 处 / 县保 %d 处", len(city_idx), len(county_idx))
+    return city_idx, county_idx
+
+
+def _roster_hit(idx: dict[str, set[str]], name: str, county: str) -> bool:
+    """名单命中判断:名称精确 + 县区一致(名单地址含县区名或未填县区)。"""
+    entry = idx.get(name)
+    if entry is None:
+        return False
+    if not county:
+        return True
+    return any((not loc) or (county in loc) or (loc in county) for loc in entry)
+
+
+def _fuzzy_hit(idx: dict[str, set[str]], name: str) -> bool:
+    """模糊命中:名称包含关系(限 >=4 字,避免「张氏家祠」这类泛称误配)。"""
+    if len(name) < 4:
+        return False
+    return any(len(k) >= 4 and (k in name or name in k) for k in idx)
+
+
+def _refine_merged_levels(relics: list[dict]) -> None:
+    """把 heritage_level=「市级和县级文物保护单位」拆分为市保/县保(就地覆写)。"""
+    import re as _re
+
+    merged = [r for r in relics if (r.get("heritage_level") or "").strip() == _MERGED_LEVEL]
+    if not merged:
+        return
+    rosters = _load_rank_rosters()
+    if rosters is None:
+        log.warning("[级别] 未找到市/县保名单 Excel,%d 处「市级和县级」保持市保口径", len(merged))
+        return
+    city_idx, county_idx = rosters
+
+    re_cnty = _re.compile(r"(?:公布|核定|批准|定)[^。;；]{0,25}[县区]级(?:重点)?文物保护单位")
+    re_city = _re.compile(r"(?:公布|核定|批准|定)[^。;；]{0,25}市级(?:重点)?文物保护单位")
+
+    stat = {"roster_city": 0, "roster_county": 0, "intro_city": 0, "intro_county": 0,
+            "fuzzy_city": 0, "fuzzy_county": 0, "default_county": 0}
+
+    def set_level(r: dict, level: str) -> None:
+        r["heritage_level"] = level
+        r["rank_code"] = normalize_rank(level)
+
+    for r in merged:
+        name = _norm_name(r.get("name"))
+        county = (r.get("county") or "").strip()
+        in_city = _roster_hit(city_idx, name, county)
+        in_cnty = _roster_hit(county_idx, name, county)
+        if in_city and in_cnty:
+            in_cnty = False  # 两名单同名同县(极少):就高按市保
+        if in_city:
+            set_level(r, _CITY_LEVEL); stat["roster_city"] += 1
+            continue
+        if in_cnty:
+            set_level(r, _COUNTY_LEVEL); stat["roster_county"] += 1
+            continue
+        brief = r.get("intro") or ""
+        has_c, has_s = bool(re_cnty.search(brief)), bool(re_city.search(brief))
+        if has_s and not has_c:
+            set_level(r, _CITY_LEVEL); stat["intro_city"] += 1
+            continue
+        if has_c and not has_s:
+            set_level(r, _COUNTY_LEVEL); stat["intro_county"] += 1
+            continue
+        if _fuzzy_hit(city_idx, name):
+            set_level(r, _CITY_LEVEL); stat["fuzzy_city"] += 1
+            continue
+        if _fuzzy_hit(county_idx, name):
+            set_level(r, _COUNTY_LEVEL); stat["fuzzy_county"] += 1
+            continue
+        # 无任何证据:市保名单是封闭名录(198 处)且已尽数命中,兜底县保
+        set_level(r, _COUNTY_LEVEL); stat["default_county"] += 1
+
+    n_city = stat["roster_city"] + stat["intro_city"] + stat["fuzzy_city"]
+    n_cnty = len(merged) - n_city
+    log.info("[级别] 市县保拆分: 共 %d 处 → 市保 %d / 县保 %d "
+             "(名单 %d+%d, 简介 %d+%d, 模糊 %d+%d, 兜底县保 %d)",
+             len(merged), n_city, n_cnty,
+             stat["roster_city"], stat["roster_county"],
+             stat["intro_city"], stat["intro_county"],
+             stat["fuzzy_city"], stat["fuzzy_county"], stat["default_county"])
+
+
 # ── 外部两线范围导入 ─────────────────────────────────────────
 # rangeType: 0=保护范围(protection) 1=建设控制地带(control)
 _RANGE_TYPE_KIND = {"0": "protection", "1": "control"}
@@ -547,6 +697,9 @@ def main() -> int:
     drawing_count: dict[str, int] = {}
     for d in drawing_index:
         drawing_count[d["archive_code"]] = drawing_count.get(d["archive_code"], 0) + 1
+
+    # 市保/县保拆分(登记表合并勾选项按权威名单+简介精化)
+    _refine_merged_levels(relics)
 
     # 外部两线范围(名称+县区匹配);匹配到的文物打 has_boundary 标记
     two_line_features = _match_two_lines(relics)

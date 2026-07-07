@@ -98,11 +98,22 @@ export function PatrolPanel() {
       usePatrolStore.getState().setSuggestions(resp.routes);
       setPlanExplain(resp.explanation);
       setPlanParser(resp.parser);
+      // 「从XX出发」解析出的出发点自动填入(未识别则保留手选的起点)
+      if (resp.start) {
+        usePatrolStore.getState().setStartPoint({
+          lng: resp.start.lng,
+          lat: resp.start.lat,
+          name: resp.start.name || "AI 识别起点",
+        });
+      }
       if (resp.routes.length === 1) {
         usePatrolStore.getState().adoptSuggestion(0);
-        getRouteLayer()?.flyToRoute(resp.routes[0].stops);
+        const s0 = resp.routes[0];
+        getRouteLayer()?.flyToRoute(
+          resp.start ? [resp.start, ...s0.stops] : s0.stops,
+        );
         // 路线名跟随本次规划结果(如 20260706嘉祥县国保巡查),覆盖旧值
-        setRouteName(resp.routes[0].name || "");
+        setRouteName(s0.name || "");
       }
     } catch (e) {
       const msg =
@@ -291,8 +302,10 @@ export function PatrolPanel() {
               {startPoint ? (
                 <div className="pp-start-row">
                   <span className="pp-start-badge">起</span>
-                  <span className="pp-start-coord">
-                    {startPoint.lng.toFixed(5)}, {startPoint.lat.toFixed(5)}
+                  <span className="pp-start-coord" title={`${startPoint.lng.toFixed(5)}, ${startPoint.lat.toFixed(5)}`}>
+                    {startPoint.name && startPoint.name !== "自定义起点"
+                      ? startPoint.name
+                      : `${startPoint.lng.toFixed(5)}, ${startPoint.lat.toFixed(5)}`}
                   </span>
                   <button
                     className="pp-btn sm"

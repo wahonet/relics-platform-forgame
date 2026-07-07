@@ -19,7 +19,9 @@ interface PointMeta {
 
 type RenderMode = "dot" | "badge";
 
-const LABEL_BUDGET = 300;
+// 视口内最多同时挂标签的点数(按级别优先)。距离条件会再按缩放过滤,
+// 实际同屏可见的名字远少于预算,450 在县域视野下足够覆盖省/市/县保。
+const LABEL_BUDGET = 450;
 // 模式切换加一点滞回,避免在阈值附近来回抖动
 const BADGE_ENTER_HEIGHT = ICON_MODE_MAX_HEIGHT;          // 低于此高度 → 图标
 const BADGE_EXIT_HEIGHT = ICON_MODE_MAX_HEIGHT * 1.25;    // 高于此高度 → 圆点

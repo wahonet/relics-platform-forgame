@@ -138,10 +138,12 @@ JSON 结构:
   "township": "乡镇名(可选)",
   "condition": "保存状况筛选,取值 差/较差/一般/较好/好(可选)",
   "level": "保护级别筛选,取值 国保/省保/市保/县保/未定级(可选。全国重点文物保护单位=国保,省级=省保,市级=市保,县级=县保)",
+  "origin": "出发地名称(可选。用户说「从XX出发/由XX开始」时,XX 就是出发地,可以是任意地名/单位,不一定是文物)",
   "names": ["明确点名的文物名称"(type=list 时)]
 }
 
-重要:用户提到的县区、保护级别、保存状况都必须解析出来,不能遗漏。
+重要:用户提到的县区、保护级别、保存状况、出发地都必须解析出来,不能遗漏。
+出发地(origin)只是路线起点,不参与文物筛选。
 
 示例:
 "巡查武氏墓群石刻附近的大约5处文物" → {"type":"near","anchor":"武氏墓群石刻","count":5}
@@ -149,6 +151,8 @@ JSON 结构:
 "帮我安排嘉祥县保存较差的文物巡查" → {"type":"condition","county":"嘉祥县","condition":"较差"}
 "巡查嘉祥县的全国重点文物保护单位" → {"type":"condition","county":"嘉祥县","level":"国保"}
 "巡查任城区的3处省级文物保护单位" → {"type":"condition","county":"任城区","level":"省保","count":3}
+"从嘉祥县为民服务中心出发去武氏祠附近巡察5个点" → {"type":"near","anchor":"武氏祠","count":5,"origin":"嘉祥县为民服务中心"}
+"从县文旅局出发巡查保存较差的文物" → {"type":"condition","condition":"较差","origin":"县文旅局"}
 "巡查青山寺、曾庙和武氏墓群" → {"type":"list","names":["青山寺","曾庙","武氏墓群"]}
 """
 
@@ -204,7 +208,13 @@ def parse_patrol_intent_rules(text: str) -> dict:
     # count 只在用户明确提到数量时设置,便于上游区分"默认值"和"用户要求"
     out: dict[str, Any] = {"type": "list", "names": []}
 
-    m = re.search(r"(大约|约|附近的?)?(\d+|[一二两三四五六七八九十]+)\s*处", t)
+    # 出发地:「从XX出发/由XX开始」,XX 可为任意地名。先摘出来避免干扰后续解析
+    m = re.search(r"[从由]\s*([\u4e00-\u9fa5A-Za-z0-9（）()]+?)\s*(?:出发|开始|起步|走)", t)
+    if m:
+        out["origin"] = m.group(1)
+        t = t.replace(m.group(0), "")
+
+    m = re.search(r"(大约|约|附近的?)?(\d+|[一二两三四五六七八九十]+)\s*[处个]", t)
     if m:
         num_map = {"一": 1, "二": 2, "两": 2, "三": 3, "四": 4, "五": 5,
                    "六": 6, "七": 7, "八": 8, "九": 9, "十": 10}
@@ -215,7 +225,7 @@ def parse_patrol_intent_rules(text: str) -> dict:
         out["type"] = "monthly"
         return out
 
-    m = re.search(r"巡查\s*([\u4e00-\u9fa5A-Za-z0-9（）()]+?)\s*(附近|周边|周围)", t)
+    m = re.search(r"(?:巡[查察]|去|到)\s*([\u4e00-\u9fa5A-Za-z0-9（）()]+?)\s*(?:附近|周边|周围)", t)
     if m:
         out["type"] = "near"
         out["anchor"] = m.group(1)
@@ -269,6 +279,10 @@ def parse_patrol_intent(text: str) -> dict:
             level = detect_level(text, str(intent.get("county") or ""))
             if level:
                 intent["level"] = level
+        if not intent.get("origin"):
+            m = re.search(r"[从由]\s*([\u4e00-\u9fa5A-Za-z0-9（）()]+?)\s*(?:出发|开始|起步)", text)
+            if m:
+                intent["origin"] = m.group(1)
     return intent
 
 
