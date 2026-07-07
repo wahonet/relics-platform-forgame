@@ -76,6 +76,8 @@ export interface BackendFilters {
   township?: string;
   tier?: string;
   condition?: string;
+  /** era_stats 原始值集合(逗号分隔),"__empty__" 表示空值。 */
+  era?: string;
   has_3d?: boolean;
   q?: string;
 }
@@ -139,6 +141,8 @@ export interface PatrolRoute {
   mobile_url?: string;
   qr_url?: string;
   created_at?: number;
+  /** 自定义出发点(可选)。 */
+  start?: { lng: number; lat: number; name?: string } | null;
 }
 
 export interface PatrolDueItem {

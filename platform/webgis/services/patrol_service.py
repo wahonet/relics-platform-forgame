@@ -124,6 +124,10 @@ class PatrolDB:
             self.frequency_days = merged
         conn = self._conn()
         conn.executescript(SCHEMA)
+        # 老库迁移:自定义出发点列(JSON {lng,lat,name})
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(patrol_routes)")}
+        if "start_json" not in cols:
+            conn.execute("ALTER TABLE patrol_routes ADD COLUMN start_json TEXT")
         conn.commit()
 
     def _conn(self) -> sqlite3.Connection:
@@ -172,6 +176,7 @@ class PatrolDB:
         distance_m: Optional[float] = None,
         duration_s: Optional[float] = None,
         polyline: Optional[list] = None,
+        start: Optional[dict] = None,
     ) -> dict:
         if not relic_codes:
             raise ValueError("路线至少需要 1 处文物")
@@ -181,13 +186,14 @@ class PatrolDB:
         cur = conn.execute(
             """INSERT INTO patrol_routes
                (name, plan_date, mode, relic_codes, note, token, status,
-                distance_m, duration_s, polyline, created_by, created_at, updated_at)
-               VALUES (?,?,?,?,?,?, 'planned', ?,?,?,?,?,?)""",
+                distance_m, duration_s, polyline, start_json, created_by, created_at, updated_at)
+               VALUES (?,?,?,?,?,?, 'planned', ?,?,?,?,?,?,?)""",
             (
                 name, plan_date or date.today().isoformat(), mode,
                 json.dumps(list(relic_codes), ensure_ascii=False), note, token,
                 distance_m, duration_s,
                 json.dumps(polyline, ensure_ascii=False) if polyline else None,
+                json.dumps(start, ensure_ascii=False) if start else None,
                 created_by, now, now,
             ),
         )
@@ -252,6 +258,14 @@ class PatrolDB:
                 d["polyline"] = json.loads(d["polyline"])
             except json.JSONDecodeError:
                 d["polyline"] = None
+        # 出发点 {lng, lat, name},无则 None
+        start = d.pop("start_json", None)
+        d["start"] = None
+        if start:
+            try:
+                d["start"] = json.loads(start)
+            except json.JSONDecodeError:
+                pass
         return d
 
     # ── 打卡记录 ────────────────────────────────────────────

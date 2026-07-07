@@ -162,9 +162,117 @@ def _run_subprocess(task: dict, cmd: list[str]) -> None:
                 pass
 
 
+def _run_dual_extract(task: dict, then_pipeline: bool) -> None:
+    """双通道档案提取:step00 --channel a(SiliconFlow 正序)与
+    --channel b(DeepSeek 官方倒序)两个子进程并行,日志按 [A]/[B] 前缀合并;
+    两边都成功后可选继续跑剩余管线(--skip 00)。"""
+    log_fh = None
+    lock = threading.Lock()
+    try:
+        ADMIN_TASK_LOG_DIR.mkdir(parents=True, exist_ok=True)
+        stamp = time.strftime("%Y%m%d_%H%M%S")
+        log_path = ADMIN_TASK_LOG_DIR / f"{stamp}_{task['id']}.log"
+        task["log_file"] = str(log_path)
+        log_fh = log_path.open("w", encoding="utf-8")
+        log_fh.write(f"# {task.get('label', '')}\n"
+                     f"# started {time.strftime('%Y-%m-%d %H:%M:%S')}\n\n")
+        log_fh.flush()
+    except OSError:
+        log_fh = None
+
+    def emit(line: str) -> None:
+        with lock:
+            task["log"].append(line)
+            if len(task["log"]) > 2000:
+                del task["log"][:500]
+            if log_fh:
+                try:
+                    log_fh.write(line + "\n")
+                    log_fh.flush()
+                except OSError:
+                    pass
+
+    def run_streamed(cmd: list[str], tag: str) -> int:
+        try:
+            proc = subprocess.Popen(
+                cmd, cwd=str(PROJECT_ROOT),
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                text=True, encoding="utf-8", errors="replace",
+            )
+            assert proc.stdout is not None
+            for line in proc.stdout:
+                emit(f"[{tag}] {line.rstrip()}" if tag else line.rstrip())
+            proc.wait()
+            return proc.returncode or 0
+        except Exception as e:  # noqa: BLE001
+            emit(f"[{tag}] 子进程异常: {e}")
+            return -1
+
+    try:
+        step00 = str(SCRIPTS_DIR / "step00_convert_docs.py")
+        results: dict[str, int] = {}
+
+        def worker(channel: str, tag: str) -> None:
+            results[tag] = run_streamed(
+                [sys.executable, step00, "--channel", channel], tag)
+
+        emit("[admin] 双通道提取启动: A=SiliconFlow(正序) B=DeepSeek官方(倒序)")
+        ta = threading.Thread(target=worker, args=("a", "A"), daemon=True)
+        tb = threading.Thread(target=worker, args=("b", "B"), daemon=True)
+        ta.start(); tb.start()
+        ta.join(); tb.join()
+
+        rc_a, rc_b = results.get("A", -1), results.get("B", -1)
+        emit(f"[admin] 通道结束: A exit={rc_a} / B exit={rc_b}")
+        hard_fail = [rc for rc in (rc_a, rc_b) if rc not in (0, 4)]
+        stopped = 4 in (rc_a, rc_b)
+
+        if hard_fail and rc_a != 0 and rc_b != 0:
+            # 两边都没正常完成且至少一边硬错误
+            task["returncode"] = hard_fail[0]
+            task["status"] = "error"
+            return
+        if stopped:
+            task["returncode"] = 4
+            task["status"] = "stopped"
+            return
+        if hard_fail:
+            # 一边成功一边失败:提取未必完整,标记错误但提示可续传
+            emit("[admin] 一个通道失败,已完成部分保留,重跑即续传")
+            task["returncode"] = hard_fail[0]
+            task["status"] = "error"
+            return
+
+        if then_pipeline:
+            emit("[admin] 双通道提取完成,继续执行剩余管线(step01-03)...")
+            rc = run_streamed(
+                [sys.executable, str(SCRIPTS_DIR / "run_pipeline.py"), "--skip", "00"], "")
+            task["returncode"] = rc
+            task["status"] = "done" if rc == 0 else "error"
+            if rc == 0 and _reload_store():
+                emit("[admin] 数据集已热重载,前端刷新即可看到新数据")
+        else:
+            task["returncode"] = 0
+            task["status"] = "done"
+    except Exception as e:  # noqa: BLE001
+        emit(f"[admin] 任务异常: {e}")
+        task["status"] = "error"
+        task["returncode"] = -1
+    finally:
+        task["finished"] = time.time()
+        if log_fh:
+            try:
+                log_fh.write(f"\n# finished {time.strftime('%Y-%m-%d %H:%M:%S')}"
+                             f" exit={task['returncode']}\n")
+                log_fh.close()
+            except OSError:
+                pass
+
+
 class RunBody(BaseModel):
     only: Optional[str] = None   # "01" / "02" / "03";None = 全部
     demo: bool = False           # True = 先生成演示数据
+    dual: bool = False           # True = step00 双通道(SiliconFlow + DeepSeek 官方)
 
 
 @router.post("/pipeline/run")
@@ -174,12 +282,23 @@ async def pipeline_run(body: RunBody):
         if _task and _task.get("status") == "running":
             raise HTTPException(409, "已有任务在运行,请等待完成")
 
+        use_dual = bool(body.dual) and not body.demo and body.only in (None, "00")
+        if use_dual:
+            ds = ((load_config().get("api") or {}).get("deepseek") or {})
+            ds_key = (ds.get("key") or "").strip()
+            if not ds_key or (ds_key.startswith("${") and ds_key.endswith("}")):
+                raise HTTPException(400, "未配置 DeepSeek API Key(api.deepseek.key),无法双通道提取")
+
         if body.demo:
             script = TOOLS_DIR / "generate_demo_data.py"
             if not script.exists():
                 raise HTTPException(404, "演示数据生成器不存在")
             cmd = [sys.executable, str(script)]
             label = "生成演示数据"
+        elif use_dual:
+            cmd = None
+            label = ("双通道档案提取" if body.only == "00"
+                     else "双通道提取 + 剩余管线")
         else:
             cmd = [sys.executable, str(SCRIPTS_DIR / "run_pipeline.py")]
             label = "运行数据管线"
@@ -204,9 +323,14 @@ async def pipeline_run(body: RunBody):
             "returncode": None,
             "model": sf.get("default_model", ""),
             "base_url": sf.get("base_url", "") or "https://api.siliconflow.cn/v1",
-            "log": [f"$ {' '.join(Path(c).name if '/' in c else c for c in cmd)}"],
+            "log": ([f"$ {' '.join(Path(c).name if '/' in c else c for c in cmd)}"]
+                    if cmd else ["$ step00 --channel a & step00 --channel b"]),
         }
-        threading.Thread(target=_run_subprocess, args=(_task, cmd), daemon=True).start()
+        if use_dual:
+            threading.Thread(target=_run_dual_extract,
+                             args=(_task, body.only is None), daemon=True).start()
+        else:
+            threading.Thread(target=_run_subprocess, args=(_task, cmd), daemon=True).start()
     return {"id": _task["id"], "label": label, "status": "running"}
 
 
@@ -374,13 +498,19 @@ async def extract_progress():
     done = 0
     if paths.input_markdown.exists():
         done = sum(1 for _ in paths.input_markdown.rglob("*.md"))
-    failed = 0
-    ledger = paths.output_logs / "step00_progress.json"
-    if ledger.exists():
-        try:
-            failed = len((json.loads(ledger.read_text(encoding="utf-8")) or {}).get("failed") or {})
-        except Exception:  # noqa: BLE001
-            failed = 0
+    # 失败数合并两个通道的账本(双通道时 b 通道账本独立)
+    failed_names: set[str] = set()
+    for ledger_name in ("step00_progress.json", "step00_progress_b.json"):
+        ledger = paths.output_logs / ledger_name
+        if ledger.exists():
+            try:
+                data = json.loads(ledger.read_text(encoding="utf-8")) or {}
+                failed_names.update((data.get("failed") or {}).keys())
+                # 一个通道失败、另一个通道后来成功的,不算失败
+                failed_names.difference_update(data.get("completed") or [])
+            except Exception:  # noqa: BLE001
+                pass
+    failed = len(failed_names)
     cfg = load_config()
     sf = (cfg.get("api") or {}).get("siliconflow") or {}
     return {
@@ -421,6 +551,7 @@ async def get_api_config():
     cfg = load_config()
     api = cfg.get("api") or {}
     sf = api.get("siliconflow") or {}
+    ds = api.get("deepseek") or {}
     amap = api.get("amap") or {}
     ion = api.get("cesium_ion") or {}
     tdt = api.get("tianditu") or {}
@@ -431,6 +562,13 @@ async def get_api_config():
             "base_url": sf.get("base_url", ""),
             "default_model": sf.get("default_model", ""),
             "extract_concurrency": _safe_concurrency(sf.get("extract_concurrency")),
+        },
+        "deepseek": {
+            "configured": _configured(ds.get("key", "")),
+            "masked": _mask(ds.get("key", "")),
+            "base_url": ds.get("base_url", "") or "https://api.deepseek.com/v1",
+            "default_model": ds.get("default_model", "") or "deepseek-chat",
+            "extract_concurrency": _safe_concurrency(ds.get("extract_concurrency")),
         },
         "amap": {
             "configured": _configured(amap.get("web_key", "")),
@@ -460,13 +598,42 @@ _NON_CHAT_KEYWORDS = (
 
 
 @router.get("/models")
-async def list_ai_models():
-    """从 SiliconFlow /models 拉取账号可用的对话模型列表。
+async def list_ai_models(provider: str = "siliconflow"):
+    """拉取账号可用的对话模型列表。
 
-    未配置 Key 或请求失败时回退到 config.yaml 的 available_models,
-    保证管理页始终有可选项。
+    provider=siliconflow(默认): 复用 AI 服务客户端,回退 config available_models
+    provider=deepseek:          用 api.deepseek 配置临时建连,回退内置列表
+    未配置 Key 或请求失败时均回退,保证管理页始终有可选项。
     """
     cfg = load_config()
+
+    if provider == "deepseek":
+        ds = (cfg.get("api") or {}).get("deepseek") or {}
+        current = ds.get("default_model", "") or "deepseek-chat"
+        fallback = [{"id": "deepseek-chat", "name": "deepseek-chat"},
+                    {"id": "deepseek-reasoner", "name": "deepseek-reasoner"}]
+        key = (ds.get("key") or "").strip()
+        if not key or (key.startswith("${") and key.endswith("}")):
+            return {"models": fallback, "current": current, "source": "config",
+                    "error": "未配置 DeepSeek API Key"}
+        try:
+            import httpx
+            from openai import OpenAI
+            client = OpenAI(
+                api_key=key,
+                base_url=ds.get("base_url") or "https://api.deepseek.com/v1",
+                http_client=httpx.Client(trust_env=False, timeout=30),
+            )
+            resp = await run_in_threadpool(client.models.list)
+            ids = sorted({m.id for m in (resp.data or [])})
+            models = [{"id": i, "name": i} for i in ids]
+            if not models:
+                return {"models": fallback, "current": current, "source": "config",
+                        "error": "API 未返回可用模型"}
+            return {"models": models, "current": current, "source": "api"}
+        except Exception as e:  # noqa: BLE001
+            return {"models": fallback, "current": current, "source": "config", "error": str(e)}
+
     sf = (cfg.get("api") or {}).get("siliconflow") or {}
     current = sf.get("default_model", "")
     fallback = sf.get("available_models", []) or []
@@ -494,6 +661,9 @@ async def list_ai_models():
 class ConfigBody(BaseModel):
     siliconflow_key: Optional[str] = None
     siliconflow_base_url: Optional[str] = None  # OpenAI 兼容 API 地址
+    deepseek_key: Optional[str] = None          # DeepSeek 官方 API(提取第二通道)
+    deepseek_base_url: Optional[str] = None
+    deepseek_model: Optional[str] = None
     amap_web_key: Optional[str] = None
     cesium_ion_token: Optional[str] = None
     tianditu_key: Optional[str] = None
@@ -577,6 +747,9 @@ async def save_api_config(body: ConfigBody):
         ("siliconflow", "default_model", body.default_model),
         ("siliconflow", "extract_concurrency",
          str(_safe_concurrency(body.extract_concurrency)) if body.extract_concurrency is not None else None),
+        ("deepseek", "key", body.deepseek_key),
+        ("deepseek", "base_url", body.deepseek_base_url),
+        ("deepseek", "default_model", body.deepseek_model),
         ("amap", "web_key", body.amap_web_key),
         ("cesium_ion", "token", body.cesium_ion_token),
         ("tianditu", "key", body.tianditu_key),

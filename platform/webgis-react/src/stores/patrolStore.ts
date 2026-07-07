@@ -8,9 +8,19 @@ import type { PatrolStop, PlanSuggestion } from "../types";
  * - preview 是"待保存"的路线几何(AI 方案或手选点后端算出的线),
  *   由 RouteLayer 监听渲染;保存成功后转为正式路线。
  */
+export interface PatrolStartPoint {
+  lng: number;
+  lat: number;
+  name: string;
+}
+
 interface PatrolState {
   /** 地图选点模式(巡查面板打开时默认开启)。 */
   picking: boolean;
+  /** 地图选起点模式:开启时点击地图任意位置设为出发点。 */
+  pickingStart: boolean;
+  /** 自定义出发点(可选,不设则从第一站出发)。 */
+  startPoint: PatrolStartPoint | null;
   /** 手选/AI 生成的途经文物点(有序)。 */
   stops: PatrolStop[];
   /** 当前预览的路线折线([[lng,lat],...],高德或直线)。 */
@@ -22,6 +32,8 @@ interface PatrolState {
   activeSuggestion: number;
 
   setPicking: (v: boolean) => void;
+  setPickingStart: (v: boolean) => void;
+  setStartPoint: (p: PatrolStartPoint | null) => void;
   addStop: (s: PatrolStop) => void;
   removeStop: (code: string) => void;
   moveStop: (code: string, dir: -1 | 1) => void;
@@ -38,6 +50,8 @@ interface PatrolState {
 
 export const usePatrolStore = create<PatrolState>((set, get) => ({
   picking: false,
+  pickingStart: false,
+  startPoint: null,
   stops: [],
   previewPolyline: null,
   previewMeta: null,
@@ -46,6 +60,12 @@ export const usePatrolStore = create<PatrolState>((set, get) => ({
 
   setPicking(v) {
     set({ picking: v });
+  },
+  setPickingStart(v) {
+    set({ pickingStart: v });
+  },
+  setStartPoint(p) {
+    set({ startPoint: p, previewPolyline: null, previewMeta: null });
   },
   addStop(s) {
     const { stops } = get();
@@ -92,6 +112,8 @@ export const usePatrolStore = create<PatrolState>((set, get) => ({
   resetAll() {
     set({
       picking: false,
+      pickingStart: false,
+      startPoint: null,
       stops: [],
       previewPolyline: null,
       previewMeta: null,

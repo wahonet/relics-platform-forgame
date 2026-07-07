@@ -6,10 +6,16 @@
        照片与图纸直接从 data/input/00_docs 对应 docx 内嵌图片按清单顺序抽取。
     B. 台账 Excel/CSV data/input/01_relics/*.xlsx|csv (旧格式,兼容保留)
 
+两线范围(保护范围/建设控制地带):
+    来自外部测绘成果 data/*两线*/ 目录下的 GeoJSON(WGS-84,
+    properties: name/county/rangeType 0=保护范围 1=建设控制地带),
+    按 名称+县区 匹配台账文物后并入 relics_polygons.geojson。
+    (登记表档案中只有本体边界测点,两线不再从档案提取)
+
 输出:
     data/output/dataset/relics_full.json
     data/output/dataset/relics_points.geojson
-    data/output/dataset/relics_polygons.geojson   (本体边界 kind=body + 两线面)
+    data/output/dataset/relics_polygons.geojson   (本体 kind=body + 两线 protection/control)
     data/output/dataset/photo_index.csv / drawing_index.csv
     data/output/photos/{code}/... / data/output/drawings/{code}/...
 """
@@ -21,7 +27,7 @@ import shutil
 import sys
 from pathlib import Path
 
-from _common import get_logger, get_paths, load_config
+from _common import PROJECT_ROOT, get_logger, get_paths, load_config
 from codes import normalize_category, normalize_rank, parse_coord
 from md_archive import extract_media_from_docx, parse_archive_md
 
@@ -171,17 +177,11 @@ def import_from_markdown(paths, cfg: dict) -> tuple[list[dict], list[dict], list
         r["category_code"] = normalize_category(r.get("category_main"))
         r["rank_code"] = normalize_rank(r.get("heritage_level"))
 
-        # 本体边界(≥3 个边界点成面, kind=body)
-        r["has_boundary"] = len(boundary_points) >= 3
+        # 档案里的本体边界测点只记数量,不再生成面——
+        # 地图上的边界面只用外部两线范围(保护范围/建控地带)。
+        # has_boundary 由两线匹配结果决定(见 main)。
+        r["has_boundary"] = False
         r["boundary_count"] = len(boundary_points)
-        if r["has_boundary"]:
-            ring = [[p["lng"], p["lat"]] for p in boundary_points]
-            ring.append(ring[0])
-            boundary_features.append({
-                "type": "Feature",
-                "properties": {"archive_code": code, "kind": "body", "name": name},
-                "geometry": {"type": "Polygon", "coordinates": [ring]},
-            })
 
         # 媒体:优先从源 docx 抽取内嵌图片,否则回退 02_media 目录
         docx = _find_docx_for(md_path, md_root, code, paths.input_docs)
@@ -388,16 +388,118 @@ def _write_points_geojson(relics: list[dict], out: Path) -> None:
     )
 
 
-def _write_polygons_geojson(boundary_features: list[dict], paths, out: Path) -> None:
-    """本体边界(md 解析) + 两线范围面(protection_zones.geojson,若有)合并输出。"""
+# ── 外部两线范围导入 ─────────────────────────────────────────
+# rangeType: 0=保护范围(protection) 1=建设控制地带(control)
+_RANGE_TYPE_KIND = {"0": "protection", "1": "control"}
+
+
+def _find_two_line_dirs() -> list[Path]:
+    """定位两线范围数据目录:data/ 下目录名含「两线」的全部目录。"""
+    data_dir = PROJECT_ROOT / "data"
+    if not data_dir.exists():
+        return []
+    return sorted(d for d in data_dir.iterdir() if d.is_dir() and "两线" in d.name)
+
+
+def _load_two_line_features() -> list[dict]:
+    """读取两线目录下全部 GeoJSON,按 polyId 去重(分县文件与汇总文件重叠)。
+    优先分县文件(文件名 城市_县区.geojson);没有分县文件才读汇总。"""
+    dirs = _find_two_line_dirs()
+    if not dirs:
+        return []
+    by_id: dict[str, dict] = {}
+    for d in dirs:
+        files = sorted(d.glob("*_*.geojson")) or sorted(d.glob("*.geojson"))
+        for p in files:
+            try:
+                gj = json.loads(p.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError, UnicodeDecodeError) as e:
+                log.warning("[两线] 读取失败,跳过 %s: %s", p.name, e)
+                continue
+            for f in gj.get("features") or []:
+                props = f.get("properties") or {}
+                pid = str(props.get("polyId") or f"{p.name}:{len(by_id)}")
+                by_id.setdefault(pid, f)
+        if by_id:
+            log.info("[两线] 数据目录 %s: %d 个面(按 polyId 去重)", d.name, len(by_id))
+    return list(by_id.values())
+
+
+def _match_two_lines(relics: list[dict]) -> list[dict]:
+    """把外部两线面匹配到台账文物,返回带 archive_code/kind 的 Feature 列表。
+
+    匹配策略(依次):
+    1. 名称+县区 精确匹配
+    2. 名称唯一时仅按名称
+    未匹配的记录数量并抽样告警,不阻断导入。
+    """
+    feats = _load_two_line_features()
+    if not feats:
+        return []
+
+    by_name_county: dict[tuple[str, str], str] = {}
+    by_name: dict[str, list[str]] = {}
+    for r in relics:
+        name = (r.get("name") or "").strip()
+        county = (r.get("county") or "").strip()
+        code = r.get("archive_code") or ""
+        if not name or not code:
+            continue
+        by_name_county.setdefault((name, county), code)
+        by_name.setdefault(name, []).append(code)
+
+    out: list[dict] = []
+    unmatched: dict[str, int] = {}
+    kind_count = {"protection": 0, "control": 0}
+    for f in feats:
+        props = f.get("properties") or {}
+        name = (props.get("name") or "").strip()
+        county = (props.get("county") or "").strip()
+        kind = _RANGE_TYPE_KIND.get(str(props.get("rangeType")))
+        if not name or kind is None:
+            continue
+        geom = f.get("geometry")
+        if not geom or geom.get("type") not in ("Polygon", "MultiPolygon"):
+            continue
+        code = by_name_county.get((name, county))
+        if not code:
+            codes = by_name.get(name) or []
+            if len(set(codes)) == 1:
+                code = codes[0]
+        if not code:
+            unmatched[name] = unmatched.get(name, 0) + 1
+            continue
+        kind_count[kind] += 1
+        out.append({
+            "type": "Feature",
+            "properties": {"archive_code": code, "kind": kind, "name": name},
+            "geometry": geom,
+        })
+
+    log.info("[两线] 匹配成功 %d 个面(保护范围 %d / 建控地带 %d)",
+             len(out), kind_count["protection"], kind_count["control"])
+    if unmatched:
+        sample = list(unmatched)[:8]
+        log.warning("[两线] %d 处文物未匹配到台账(共 %d 个面),样例: %s%s",
+                    len(unmatched), sum(unmatched.values()), "、".join(sample),
+                    " …" if len(unmatched) > 8 else "")
+    return out
+
+
+def _write_polygons_geojson(boundary_features: list[dict], paths, out: Path,
+                            two_line_features: list[dict] | None = None) -> None:
+    """本体边界(md 解析) + 外部两线范围面合并输出。
+    也兼容旧的 data/input/01_relics/protection_zones.geojson。"""
     feats = list(boundary_features)
+    if two_line_features:
+        feats.extend(two_line_features)
     zones = paths.input_relics / "protection_zones.geojson"
     if zones.exists():
         try:
             data = json.loads(zones.read_text(encoding="utf-8"))
             extra = data.get("features") or []
             feats.extend(extra)
-            log.info("[导出] 合并两线范围面 %d 个要素", len(extra))
+            log.info("[导出] 合并 protection_zones.geojson %d 个要素", len(extra))
         except Exception as e:  # noqa: BLE001
             log.warning("[导出] protection_zones.geojson 解析失败: %s", e)
     if not feats:
@@ -446,6 +548,10 @@ def main() -> int:
     for d in drawing_index:
         drawing_count[d["archive_code"]] = drawing_count.get(d["archive_code"], 0) + 1
 
+    # 外部两线范围(名称+县区匹配);匹配到的文物打 has_boundary 标记
+    two_line_features = _match_two_lines(relics)
+    two_line_codes = {f["properties"]["archive_code"] for f in two_line_features}
+
     for r in relics:
         code = r["archive_code"]
         r["photo_count"] = photo_count.get(code, 0)
@@ -455,6 +561,8 @@ def main() -> int:
         r["has_archive_fpu"] = bool(arch.get("sipu"))
         model_dir = models_root / code
         r["has_3d"] = model_dir.exists() and any(model_dir.iterdir()) if model_dir.exists() else bool(r.get("has_3d"))
+        if code in two_line_codes:
+            r["has_boundary"] = True
 
     paths.output_dataset.mkdir(parents=True, exist_ok=True)
     out_json = paths.output_dataset / "relics_full.json"
@@ -462,7 +570,8 @@ def main() -> int:
     log.info("[导出] relics_full.json: %d 条 (数据源: %s)", len(relics), source)
 
     _write_points_geojson(relics, paths.output_dataset / "relics_points.geojson")
-    _write_polygons_geojson(boundary_features, paths, paths.output_dataset / "relics_polygons.geojson")
+    _write_polygons_geojson(boundary_features, paths, paths.output_dataset / "relics_polygons.geojson",
+                            two_line_features=two_line_features)
 
     _write_index_csv(photo_index, paths.output_dataset / "photo_index.csv",
                      ["archive_code", "path", "photo_no", "description"])

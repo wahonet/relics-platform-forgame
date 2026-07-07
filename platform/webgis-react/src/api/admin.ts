@@ -65,6 +65,12 @@ export interface ApiConfigStatus {
     /** step00 档案提取并发数(1-8)。 */
     extract_concurrency?: number;
   };
+  /** DeepSeek 官方 API(档案提取第二通道,可选)。 */
+  deepseek?: ApiKeyEntry & {
+    base_url: string;
+    default_model: string;
+    extract_concurrency?: number;
+  };
   amap: ApiKeyEntry;
   cesium_ion: ApiKeyEntry;
   tianditu?: ApiKeyEntry;
@@ -77,7 +83,7 @@ export async function fetchPipelineStatus(): Promise<PipelineStatus> {
   return data;
 }
 
-export async function runPipeline(opts: { only?: string; demo?: boolean }) {
+export async function runPipeline(opts: { only?: string; demo?: boolean; dual?: boolean }) {
   const { data } = await apiClient.post("/api/admin/pipeline/run", opts);
   return data as { id: number; label: string; status: string };
 }
@@ -99,9 +105,13 @@ export interface AiModelsResp {
   error?: string;
 }
 
-/** 从 SiliconFlow 拉取账号可用的对话模型列表(失败时回退 config 内置列表)。 */
-export async function fetchAiModels(): Promise<AiModelsResp> {
-  const { data } = await apiClient.get<AiModelsResp>("/api/admin/models");
+/** 拉取账号可用的对话模型列表(失败时回退 config 内置列表)。 */
+export async function fetchAiModels(
+  provider: "siliconflow" | "deepseek" = "siliconflow",
+): Promise<AiModelsResp> {
+  const { data } = await apiClient.get<AiModelsResp>(
+    `/api/admin/models?provider=${provider}`,
+  );
   return data;
 }
 
@@ -143,6 +153,9 @@ export async function clearAllData(confirm: string, includeInput: boolean) {
 export async function saveApiConfig(body: {
   siliconflow_key?: string;
   siliconflow_base_url?: string;
+  deepseek_key?: string;
+  deepseek_base_url?: string;
+  deepseek_model?: string;
   amap_web_key?: string;
   cesium_ion_token?: string;
   tianditu_key?: string;

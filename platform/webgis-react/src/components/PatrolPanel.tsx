@@ -46,6 +46,8 @@ export function PatrolPanel() {
   const showToast = useUIStore((s) => s.showToast);
 
   const picking = usePatrolStore((s) => s.picking);
+  const pickingStart = usePatrolStore((s) => s.pickingStart);
+  const startPoint = usePatrolStore((s) => s.startPoint);
   const stops = usePatrolStore((s) => s.stops);
   const suggestions = usePatrolStore((s) => s.suggestions);
   const activeSuggestion = usePatrolStore((s) => s.activeSuggestion);
@@ -135,6 +137,7 @@ export function PatrolPanel() {
         plan_date: planDate,
         mode: sug ? "ai" : "manual",
         optimize: sug ? false : optimize,
+        start: startPoint ?? undefined,
       });
       showToast("路线已保存,扫码即可开始巡查");
       usePatrolStore.getState().clearStops();
@@ -158,8 +161,8 @@ export function PatrolPanel() {
     try {
       const r = await getRoute(id);
       setActiveRoute(r);
-      getRouteLayer()?.showRoute(r.stops, r.polyline);
-      getRouteLayer()?.flyToRoute(r.stops);
+      getRouteLayer()?.showRoute(r.stops, r.polyline, r.start);
+      getRouteLayer()?.flyToRoute(r.start ? [r.start, ...r.stops] : r.stops);
     } catch {
       showToast("路线加载失败");
     }
@@ -269,6 +272,40 @@ export function PatrolPanel() {
                       </div>
                     </div>
                   ))}
+                </div>
+              )}
+            </div>
+
+            <div className="pp-sec">
+              <div className="pp-label">
+                出发起点(可选)
+                <label className="pp-pick-toggle" title="开启后在地图上点击任意位置设为出发点">
+                  <input
+                    type="checkbox"
+                    checked={pickingStart}
+                    onChange={(e) => usePatrolStore.getState().setPickingStart(e.target.checked)}
+                  />
+                  地图选起点
+                </label>
+              </div>
+              {startPoint ? (
+                <div className="pp-start-row">
+                  <span className="pp-start-badge">起</span>
+                  <span className="pp-start-coord">
+                    {startPoint.lng.toFixed(5)}, {startPoint.lat.toFixed(5)}
+                  </span>
+                  <button
+                    className="pp-btn sm"
+                    onClick={() => usePatrolStore.getState().setStartPoint(null)}
+                  >
+                    清除
+                  </button>
+                </div>
+              ) : (
+                <div className="pp-empty">
+                  {pickingStart
+                    ? "在地图上点击任意位置设为出发点..."
+                    : "未设置,默认从第一站出发。勾选「地图选起点」后在地图上点选。"}
                 </div>
               )}
             </div>

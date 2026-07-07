@@ -5,7 +5,7 @@ import * as Cesium from "cesium";
  *
  * - showRoute: 导航风格路线(红色粗线 + 白色行车方向箭头,不画站点圆标,
  *   文物位置由点位图标本身表达)
- * - showBoundaries: 保护范围(红) / 建设控制地带(黄) 半透明面
+ * - showBoundaries: 保护范围(红) / 建设控制地带(蓝) 边线+浅填充
  */
 
 const ROUTE_COLOR = "#f5343b";        // 主线亮红
@@ -98,18 +98,28 @@ export class RouteLayer {
    * 渲染路线(导航风格):红色粗线(深红描边) + 白色行车方向箭头。
    * 不再画站点圆标——文物位置由点位图标表达。
    * stops 顺序即巡查顺序;polyline 为可选的实际路径
-   * (高德驾车路径,比 stops 连线更贴合道路)。
+   * (高德驾车路径,比 stops 连线更贴合道路);
+   * start 为自定义出发点,画绿色"起"标并作为直线路径的第一个点。
    */
   showRoute(
     stops: { lng: number; lat: number; name: string; checked?: boolean; verified?: boolean }[],
     polyline?: [number, number][] | null,
+    start?: { lng: number; lat: number; name?: string } | null,
   ) {
     this.clearRoute();
-    if (!stops.length) return;
+    if (start) this.addStartMarker(start);
+    if (!stops.length) {
+      this.requestRender();
+      return;
+    }
 
-    const path = polyline && polyline.length >= 2
-      ? polyline
-      : stops.map((s) => [s.lng, s.lat] as [number, number]);
+    let path: [number, number][];
+    if (polyline && polyline.length >= 2) {
+      path = polyline;
+    } else {
+      path = stops.map((s) => [s.lng, s.lat] as [number, number]);
+      if (start) path = [[start.lng, start.lat], ...path];
+    }
     if (path.length < 2) {
       this.requestRender();
       return;
@@ -140,6 +150,31 @@ export class RouteLayer {
 
     this.addDirectionArrows(path);
     this.requestRender();
+  }
+
+  /** 出发点标记:绿色圆底 + "起"字。 */
+  private addStartMarker(start: { lng: number; lat: number; name?: string }) {
+    this.routeEntities.push(
+      this.viewer.entities.add({
+        position: Cesium.Cartesian3.fromDegrees(start.lng, start.lat, 4),
+        point: {
+          pixelSize: 18,
+          color: Cesium.Color.fromCssColorString("#1f9d55"),
+          outlineColor: Cesium.Color.WHITE,
+          outlineWidth: 2.5,
+          disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        },
+        label: {
+          text: "起",
+          font: 'bold 12px "Microsoft YaHei", sans-serif',
+          fillColor: Cesium.Color.WHITE,
+          style: Cesium.LabelStyle.FILL,
+          verticalOrigin: Cesium.VerticalOrigin.CENTER,
+          horizontalOrigin: Cesium.HorizontalOrigin.CENTER,
+          disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        },
+      }),
+    );
   }
 
   /** 沿路径等距放置白色方向箭头(billboard 按行进方位角旋转)。 */
@@ -209,7 +244,9 @@ export class RouteLayer {
     this.requestRender();
   }
 
-  /** 渲染 FeatureCollection(properties.kind = protection|control|body)。 */
+  /** 渲染 FeatureCollection(properties.kind = protection|control)。
+   * 保护范围=红线,建设控制地带=蓝线;本体边界(body)不再显示,
+   * 地图上只保留外部测绘的两线范围。 */
   showBoundaries(fc: {
     features?: { properties?: { kind?: string }; geometry?: { type?: string; coordinates?: unknown } }[];
   }) {
@@ -217,9 +254,9 @@ export class RouteLayer {
     const feats = fc?.features || [];
     for (const f of feats) {
       const kind = f.properties?.kind || "protection";
+      if (kind === "body") continue;
       const isProtection = kind === "protection";
-      // protection=保护范围(红) control=建控地带(黄) body=本体边界(绿,四普测点围合)
-      const color = kind === "body" ? "#3fb950" : isProtection ? "#f85149" : "#d29922";
+      const color = isProtection ? "#ff3b30" : "#2f81f7";
       const geom = f.geometry;
       if (!geom?.type || !geom.coordinates) continue;
       const polys: number[][][][] =
@@ -236,13 +273,13 @@ export class RouteLayer {
         this.boundaryDs.entities.add({
           polygon: {
             hierarchy: Cesium.Cartesian3.fromDegreesArray(flat),
-            material: Cesium.Color.fromCssColorString(color).withAlpha(isProtection ? 0.22 : 0.14),
+            material: Cesium.Color.fromCssColorString(color).withAlpha(isProtection ? 0.18 : 0.10),
             outline: false,
           },
           polyline: {
             positions: Cesium.Cartesian3.fromDegreesArray([...flat, flat[0], flat[1]]),
-            width: isProtection ? 3 : 2,
-            material: Cesium.Color.fromCssColorString(color).withAlpha(0.9),
+            width: isProtection ? 4.5 : 4,
+            material: Cesium.Color.fromCssColorString(color).withAlpha(0.95),
             clampToGround: true,
           },
         });

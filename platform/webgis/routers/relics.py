@@ -35,6 +35,7 @@ async def relics_by_bbox(
     township: str | None = Query(None),
     tier: str | None = Query(None, description="数据层级 city/full"),
     condition: str | None = Query(None, description="保存状况 好/较好/一般/较差/差"),
+    era: str | None = Query(None, description="era_stats 原始值集合,逗号分隔;__empty__=空值"),
     has_3d: bool | None = Query(None, description="true=仅有三维模型 false=仅无"),
     q: str | None = Query(None, description="名称/编号/地址关键字(LIKE)"),
     limit: int = Query(2000, ge=1, le=5000),
@@ -56,6 +57,9 @@ async def relics_by_bbox(
     cats = None
     if category:
         cats = [v.strip() for v in category.split(",") if v.strip()]
+    eras = None
+    if era:
+        eras = [v.strip() for v in era.split(",") if v.strip()]
 
     data = store.query_bbox(
         qmin_lng, qmin_lat, qmax_lng, qmax_lat,
@@ -65,6 +69,7 @@ async def relics_by_bbox(
         township=township or None,
         tier=tier or None,
         condition=condition or None,
+        era_stats_in=eras,
         has_3d=has_3d,
         keyword=(q or "").strip() or None,
         limit=limit,

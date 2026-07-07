@@ -378,6 +378,7 @@ class DataStore:
         township: Optional[str] = None,
         tier: Optional[str] = None,
         condition: Optional[str] = None,
+        era_stats_in: Optional[Iterable[str]] = None,
         has_3d: Optional[bool] = None,
         keyword: Optional[str] = None,
         limit: int = 2000,
@@ -386,13 +387,15 @@ class DataStore:
 
         bbox 的 buffer 扩展由调用方处理(见 routers/relics.py);
         categories/ranks 支持多选,None 或空值表示不筛选。
-        keyword 按名称/编号/地址做 LIKE 匹配。
+        era_stats_in 是 era_stats 原始值集合(前端按统计口径反查),
+        "__empty__" 表示匹配空值。keyword 按名称/编号/地址做 LIKE 匹配。
         """
         if not self._use_db:
             return self._query_bbox_memory(min_lng, min_lat, max_lng, max_lat,
                                             categories=categories, ranks=ranks,
                                             county=county, township=township,
                                             tier=tier, condition=condition,
+                                            era_stats_in=era_stats_in,
                                             has_3d=has_3d, keyword=keyword,
                                             limit=limit)
 
@@ -430,6 +433,18 @@ class DataStore:
         if condition:
             sql.append("  AND r.condition = ?")
             params.append(str(condition))
+        if era_stats_in:
+            el = [str(v) for v in era_stats_in if v]
+            want_empty = "__empty__" in el
+            el = [v for v in el if v != "__empty__"]
+            clauses = []
+            if el:
+                clauses.append(f"r.era_stats IN ({','.join('?' for _ in el)})")
+                params.extend(el)
+            if want_empty:
+                clauses.append("(r.era_stats IS NULL OR r.era_stats = '')")
+            if clauses:
+                sql.append(f"  AND ({' OR '.join(clauses)})")
         if has_3d is not None:
             sql.append("  AND r.has_3d = ?")
             params.append(1 if has_3d else 0)
@@ -463,7 +478,7 @@ class DataStore:
     def _query_bbox_memory(
         self, min_lng, min_lat, max_lng, max_lat,
         *, categories, ranks, county, township, tier, condition,
-        has_3d=None, keyword=None, limit=2000,
+        era_stats_in=None, has_3d=None, keyword=None, limit=2000,
     ) -> list[dict]:
         """JSON 模式下的视口查询 fallback。全量遍历,性能仅足以支撑千条级。"""
         from codes import normalize_category, normalize_rank
@@ -496,6 +511,11 @@ class DataStore:
                 continue
             if condition and r.get("condition_level") != condition:
                 continue
+            if era_stats_in:
+                es = r.get("era_stats") or ""
+                eset = set(era_stats_in)
+                if not (es in eset or (not es and "__empty__" in eset)):
+                    continue
             if has_3d is not None and bool(r.get("has_3d")) != has_3d:
                 continue
             if keyword:

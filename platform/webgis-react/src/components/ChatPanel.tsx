@@ -2,8 +2,11 @@ import { useEffect, useRef, useState } from "react";
 import { useUIStore } from "../stores/uiStore";
 import { usePlatformStore } from "../stores/platformStore";
 import { useRelicsStore } from "../stores/relicsStore";
+import { useFilterStore } from "../stores/filterStore";
 import { streamChat } from "../api/chat";
+import { fetchRelicDetail } from "../api/relics";
 import { renderChatMarkdown, escapeStreamPreview } from "../utils/markdown";
+import { categoryCode, rankCode, RANK_MAP } from "../utils/dict";
 import type { ChatMessage } from "../types";
 import { flyTo } from "../map/viewerRegistry";
 
@@ -54,15 +57,84 @@ export function ChatPanel() {
     }
   }, [messages]);
 
-  const onAction = (actionStr: string) => {
+  /** 级别短语("省级"/"全国重点"等) → FilterPanel 的级别显示值。 */
+  const levelLabel = (v: string): string => {
+    const code = rankCode(v);
+    return code === "5" ? "未核定" : (RANK_MAP[code]?.label || v);
+  };
+
+  const onAction = async (actionStr: string) => {
+    // fly:编号 → 定位并打开详情
     if (actionStr.startsWith("fly:")) {
-      const code = actionStr.slice(4);
-      const r = useRelicsStore.getState().byCode.get(code);
+      const code = actionStr.slice(4).trim();
+      let r = useRelicsStore.getState().byCode.get(code);
+      if (!r) {
+        try {
+          r = await fetchRelicDetail(code);
+        } catch {
+          useUIStore.getState().showToast(`未找到编号 ${code} 的文物`);
+          return;
+        }
+      }
       if (r?.center_lng != null && r.center_lat != null) {
         flyTo(r.center_lng, r.center_lat, 600);
         setUI({ selectedRelic: r });
       }
+      return;
     }
+
+    // 筛选参数(& 连接): cty:县区 t:乡镇 l:级别 c:类别 s:现状 3d:1 kw:关键词
+    const fs = useFilterStore.getState();
+    const all = useRelicsStore.getState().all;
+    const counties = new Set(all.map((x) => x.county).filter(Boolean) as string[]);
+    const patch: Record<string, string> = {};
+    let catNames: Set<string> | null = null;
+    let applied = false;
+    for (const part of actionStr.split("&")) {
+      const i = part.indexOf(":");
+      if (i <= 0) continue;
+      const key = part.slice(0, i).trim();
+      const val = part.slice(i + 1).trim();
+      if (!val) continue;
+      applied = true;
+      switch (key) {
+        case "cty":
+          patch.county = val;
+          break;
+        case "t":
+          // 模型偶尔把县区当乡镇输出,按实际县区名单纠正
+          if (counties.has(val)) patch.county = val;
+          else patch.township = val;
+          break;
+        case "l":
+          patch.level = levelLabel(val);
+          break;
+        case "s":
+          patch.cond = val;
+          break;
+        case "3d":
+          patch.threeD = val === "1" ? "1" : "0";
+          break;
+        case "kw":
+          patch.search = val;
+          break;
+        case "c": {
+          const code = categoryCode(val);
+          catNames = new Set(
+            all.map((x) => x.category_main)
+              .filter((n): n is string => !!n && categoryCode(n) === code),
+          );
+          break;
+        }
+        default:
+          applied = false;
+      }
+    }
+    if (!applied && !catNames) return;
+    fs.setPartial(patch as Parameters<typeof fs.setPartial>[0]);
+    if (catNames?.size) fs.setActiveCats(catNames);
+    setUI({ filterPanelOpen: true });
+    useUIStore.getState().showToast("已按 AI 回答内容筛选地图点位");
   };
 
   const onMessageClick = (e: React.MouseEvent) => {

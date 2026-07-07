@@ -126,6 +126,51 @@
 [data-theme="light"] .pp-btn.primary { background: var(--accent); }
 [data-theme="light"] .pp-empty { background: #fafbfc; }
 [data-theme="light"] .adm-page .tile-progress { background: #e4e8ee; }
+/* 亮白主题:文字全面加深,白底上必须有足够对比度 */
+[data-theme="light"] {
+  --t1: #0d1626;
+  --t2: #3a4356;
+  --t3: #1f2837;
+}
+/* 亮白主题:地图上悬浮 UI(图例/坐标条)改白底深字 */
+[data-theme="light"] .map-legend {
+  background: rgba(255, 255, 255, 0.94);
+  border-color: #dcdfe6; color: #17233d;
+  box-shadow: 0 4px 16px rgba(30, 50, 80, 0.15);
+}
+[data-theme="light"] .map-legend-hdr { border-bottom-color: #e8ebf0; }
+[data-theme="light"] .map-legend-hdr i { color: #808695; }
+[data-theme="light"] .map-legend-title { color: #5c667a; }
+[data-theme="light"] .map-legend-dot { border-color: rgba(23, 35, 61, 0.35); }
+[data-theme="light"] .map-legend-icon { background: rgba(45, 140, 240, 0.85); }
+[data-theme="light"] .coord-readout {
+  background: rgba(255, 255, 255, 0.94);
+  border-color: #dcdfe6; color: #17233d;
+  box-shadow: 0 4px 16px rgba(30, 50, 80, 0.15);
+}
+[data-theme="light"] .coord-readout-crs { background: #f7f8fa; color: #17233d; }
+[data-theme="light"] .coord-readout-value { color: #17233d; }
+[data-theme="light"] .toast {
+  background: rgba(255, 255, 255, 0.96); color: #17233d; border-color: #dcdfe6;
+}
+[data-theme="light"] .pp-hint { color: #3a4356; }
+[data-theme="light"] .adm-hint { color: #3a4356; }
+/* 亮白主题:统计面板/筛选面板等文字逐项加深 */
+[data-theme="light"] .dash-hdr { color: #0d1626; }
+[data-theme="light"] .dc .l { color: #3a4356; }
+[data-theme="light"] .dash-sec h4 { color: #1f2837; }
+[data-theme="light"] .fp-label,
+[data-theme="light"] .pp-label { color: #1f2837; }
+[data-theme="light"] .map-legend { color: #0d1626; }
+[data-theme="light"] .map-legend-title { color: #3a4356; }
+[data-theme="light"] .pi-row em { color: #3a4356; }
+[data-theme="light"] .pp-due-text span { color: #3a4356; }
+[data-theme="light"] .pp-stop-name { color: #1f2837; }
+[data-theme="light"] .pp-route-meta { color: #3a4356; }
+[data-theme="light"] .pp-sug-meta { color: #3a4356; }
+[data-theme="light"] .adm-key-meta em { color: #3a4356; }
+[data-theme="light"] .adm-step-name em { color: #3a4356; }
+[data-theme="light"] .cm-bubble { color: #17233d; }
 
 /* ── 主题:藏青政务(深蓝端庄,适合汇报大屏) ────────────────── */
 [data-theme="navy"] {
@@ -506,8 +551,8 @@ a:hover { color: var(--accent2); }
   border: 1px dashed rgba(241, 106, 94, 0.3); border-radius: var(--r-md); font-size: 11px; color: var(--t2);
 }
 .pi-bnd-tip i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin: 0 4px 0 8px; vertical-align: -1px; }
-.pi-bnd-tip .bnd-p { background: rgba(241, 106, 94, 0.4); border: 1px solid var(--red); }
-.pi-bnd-tip .bnd-c { background: rgba(217, 166, 46, 0.35); border: 1px solid var(--yellow); }
+.pi-bnd-tip .bnd-p { background: rgba(255, 59, 48, 0.4); border: 1px solid #ff3b30; }
+.pi-bnd-tip .bnd-c { background: rgba(47, 129, 247, 0.35); border: 1px solid #2f81f7; }
 
 /* ── Lightbox ────────────────────────────────────────────── */
 .lightbox {
@@ -1056,6 +1101,21 @@ body.patrol-mode .patrol-panel { top: var(--hdr); }
 .pp-btn.danger:hover:not(:disabled) { background: rgba(241, 106, 94, 0.1); color: var(--red); }
 .pp-btn.sm { height: 26px; padding: 0 10px; font-size: 11px; }
 .pp-btn.block { width: 100%; }
+/* 巡查:自定义出发点 */
+.pp-start-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 10px; border: 1px solid var(--bd); border-radius: var(--r-sm);
+  background: rgba(31, 157, 85, 0.08);
+}
+.pp-start-badge {
+  width: 20px; height: 20px; border-radius: 50%; flex: none;
+  background: #1f9d55; color: #fff; font-size: 11px; font-weight: 700;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.pp-start-coord {
+  flex: 1; font-size: 12px; color: var(--t1);
+  font-family: ui-monospace, "Cascadia Code", "Consolas", monospace;
+}
 .pp-examples { display: flex; flex-wrap: wrap; gap: 6px; }
 .pp-examples span {
   font-size: 11px; color: var(--t2); background: var(--accent-dim); border: 1px solid rgba(94, 163, 247, 0.16);
@@ -1517,6 +1577,20 @@ textarea.pp-input { height: auto; padding: 8px 10px; resize: vertical; }
 .adm-modal-check input { margin-top: 2px; }
 .adm-modal-tip b { color: var(--red); }
 .adm-modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
+
+/* API 配置:平台分组框 */
+.adm-key-group {
+  border: 1px solid var(--bd); border-radius: var(--r-md);
+  margin-bottom: 14px; overflow: hidden;
+}
+.adm-key-group-title {
+  display: flex; align-items: baseline; gap: 10px;
+  padding: 10px 14px; font-size: 13px; font-weight: 600; color: var(--t1);
+  background: rgba(94, 163, 247, 0.06); border-bottom: 1px solid var(--bd);
+  letter-spacing: 1px;
+}
+.adm-key-group-title em { font-style: normal; font-weight: 400; font-size: 11px; color: var(--t2); letter-spacing: 0; }
+.adm-key-group .adm-keys { border: none; border-radius: 0; }
 
 /* API 配置:表单行,底边分隔 */
 .adm-keys { display: flex; flex-direction: column; border: 1px solid var(--bd); border-radius: 2px; }

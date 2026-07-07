@@ -12,18 +12,27 @@
 - 进度账本 data/output/logs/step00_progress.json 实时记录 完成/失败 清单
 - 中断后直接重跑本步即可续传,只处理缺失或损坏的文件
 
+双通道提取(--channel):
+- a 通道(默认): api.siliconflow 配置,文件列表正序处理
+- b 通道:      api.deepseek 配置(DeepSeek 官方 API),文件列表倒序处理
+- 两个通道可同时运行:一个从前往后、一个从后往前,在中间自然会合;
+  完成判定共享(md 已存在即跳过),会合点用 .claim 认领文件防止双方
+  同时提取同一份 docx
+- 各通道独立账本: step00_progress.json / step00_progress_b.json
+
 停止(供系统管理页控制):
 - 存在 data/output/logs/step00.stop 时,完成当前在途请求后不再领取新任务,
-  以退出码 4 结束(编排器随之停止,重跑即续传)
+  以退出码 4 结束(编排器随之停止,重跑即续传)。停止哨兵两个通道共用。
 - 模型/渠道每次启动时从 config 读取:停止后在管理页换模型,重跑即用新模型
 
 其他:
-- API Key / base_url / 模型取自 config.yaml api.siliconflow(可在系统管理页配置)
-- 并发数可用 config.api.siliconflow.extract_concurrency 调整(默认 2)
+- API Key / base_url / 模型取自 config.yaml api.siliconflow / api.deepseek
+- 并发数用各自配置段的 extract_concurrency 调整(默认 2)
 - docx 解析不依赖 python-docx,直接读 OOXML(word/document.xml)
 """
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import re
@@ -37,6 +46,7 @@ from pathlib import Path
 
 from _common import get_logger, get_paths, load_config
 
+# 通道 b 用独立日志文件,避免两个进程写同一个 log 文件互相干扰
 log = get_logger("step00_convert_docs")
 
 DEFAULT_CONCURRENCY = 2
@@ -321,6 +331,41 @@ def _atomic_write(path: Path, content: str) -> None:
     os.replace(tmp, path)
 
 
+# ── 双通道认领锁 ─────────────────────────────────────────────
+# 两个通道在会合点可能同时挑中同一份 docx。处理前先原子创建 {out}.claim,
+# 创建失败(已存在且未过期)说明对方正在提取,本方直接跳过。
+CLAIM_TTL_S = 30 * 60  # 超过 30 分钟的认领视为遗留(进程崩溃),可抢占
+
+
+def _try_claim(out: Path, channel: str) -> bool:
+    claim = out.with_suffix(out.suffix + ".claim")
+    claim.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        fd = os.open(str(claim), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        os.write(fd, channel.encode("utf-8"))
+        os.close(fd)
+        return True
+    except FileExistsError:
+        try:
+            if time.time() - claim.stat().st_mtime > CLAIM_TTL_S:
+                # 遗留认领:抢过来
+                claim.write_text(channel, encoding="utf-8")
+                return True
+        except OSError:
+            pass
+        return False
+    except OSError:
+        # 文件系统异常时宁可重复提取也不中断
+        return True
+
+
+def _release_claim(out: Path) -> None:
+    try:
+        out.with_suffix(out.suffix + ".claim").unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
 class ProgressLedger:
     """进度账本:实时落盘 完成/失败 清单,供中断后查看与续跑参考。"""
 
@@ -353,8 +398,9 @@ class ProgressLedger:
                 log.warning("进度账本写入失败: %s", e)
 
 
-def convert_one(client, model: str, task: dict) -> tuple[bool, str]:
-    """单文件提取,带重试。返回 (成功, 说明)。说明为 'stopped' 表示用户停止。"""
+def convert_one(client, model: str, task: dict, channel: str = "a") -> tuple[bool, str]:
+    """单文件提取,带重试。返回 (成功, 说明)。
+    说明为 'stopped' 表示用户停止,'claimed' 表示另一通道正在处理。"""
     out: Path = task["out"]
     if _md_is_valid(out):
         return True, "skip"
@@ -362,57 +408,98 @@ def convert_one(client, model: str, task: dict) -> tuple[bool, str]:
     if STOP_FLAG.exists():
         return False, "stopped"
 
-    try:
-        doc_text = docx_to_text(task["docx"])
-    except Exception as e:  # noqa: BLE001
-        return False, f"docx 解析失败: {e}"
-    if not doc_text.strip():
-        return False, "文档文本为空"
+    if not _try_claim(out, channel):
+        return False, "claimed"
 
-    last_err = ""
-    for attempt in range(1, MAX_RETRIES + 1):
+    try:
         try:
-            t0 = time.time()
-            resp = client.chat.completions.create(
-                model=model,
-                messages=[
-                    {"role": "system", "content": SYSTEM_PROMPT},
-                    {"role": "user",
-                     "content": f"请严格提取以下文物档案内容并按模板输出：\n\n---\n{doc_text}\n---"},
-                ],
-                temperature=TEMPERATURE,
-                max_tokens=MAX_TOKENS,
-            )
-            content = _strip_md_fence(resp.choices[0].message.content or "")
-            if not all(sec in content for sec in REQUIRED_SECTIONS):
-                last_err = "输出缺少关键章节(基本信息/坐标数据)"
-                log.warning("[%s] 第 %d 次输出不完整,重试", task["docx"].name, attempt)
+            doc_text = docx_to_text(task["docx"])
+        except Exception as e:  # noqa: BLE001
+            return False, f"docx 解析失败: {e}"
+        if not doc_text.strip():
+            return False, "文档文本为空"
+
+        last_err = ""
+        for attempt in range(1, MAX_RETRIES + 1):
+            # 认领后对方可能已抢先完成(TTL 抢占的边缘情况),再查一次
+            if _md_is_valid(out):
+                return True, "skip"
+            try:
+                t0 = time.time()
+                resp = client.chat.completions.create(
+                    model=model,
+                    messages=[
+                        {"role": "system", "content": SYSTEM_PROMPT},
+                        {"role": "user",
+                         "content": f"请严格提取以下文物档案内容并按模板输出：\n\n---\n{doc_text}\n---"},
+                    ],
+                    temperature=TEMPERATURE,
+                    max_tokens=MAX_TOKENS,
+                )
+                content = _strip_md_fence(resp.choices[0].message.content or "")
+                if not all(sec in content for sec in REQUIRED_SECTIONS):
+                    last_err = "输出缺少关键章节(基本信息/坐标数据)"
+                    log.warning("[%s] 第 %d 次输出不完整,重试", task["docx"].name, attempt)
+                    if attempt < MAX_RETRIES:
+                        time.sleep(RETRY_DELAY_S)
+                    continue
+                _atomic_write(out, content)
+                return True, f"ok {time.time() - t0:.1f}s"
+            except Exception as e:  # noqa: BLE001
+                last_err = f"{type(e).__name__}: {e}"
+                log.warning("[%s] 第 %d 次失败: %s", task["docx"].name, attempt, last_err)
+                if STOP_FLAG.exists():
+                    return False, "stopped"
                 if attempt < MAX_RETRIES:
                     time.sleep(RETRY_DELAY_S)
-                continue
-            _atomic_write(out, content)
-            return True, f"ok {time.time() - t0:.1f}s"
-        except Exception as e:  # noqa: BLE001
-            last_err = f"{type(e).__name__}: {e}"
-            log.warning("[%s] 第 %d 次失败: %s", task["docx"].name, attempt, last_err)
-            if STOP_FLAG.exists():
-                return False, "stopped"
-            if attempt < MAX_RETRIES:
-                time.sleep(RETRY_DELAY_S)
-    return False, last_err
+        return False, last_err
+    finally:
+        _release_claim(out)
+
+
+# 通道定义: 配置段 / 账本文件 / 扫描方向 / 缺省 base_url 与模型
+CHANNELS = {
+    "a": {
+        "section": "siliconflow",
+        "ledger": "step00_progress.json",
+        "reverse": False,
+        "default_base_url": "https://api.siliconflow.cn/v1",
+        "default_model": "deepseek-ai/DeepSeek-V3.2",
+        "label": "SiliconFlow(正序)",
+    },
+    "b": {
+        "section": "deepseek",
+        "ledger": "step00_progress_b.json",
+        "reverse": True,
+        "default_base_url": "https://api.deepseek.com/v1",
+        "default_model": "deepseek-chat",
+        "label": "DeepSeek 官方(倒序)",
+    },
+}
 
 
 def main() -> int:
+    global log
+    parser = argparse.ArgumentParser(description="step00 docx → Markdown 档案提取")
+    parser.add_argument("--channel", choices=("a", "b"), default="a",
+                        help="a=SiliconFlow 正序(默认) b=DeepSeek 官方倒序,两通道可同时运行")
+    args = parser.parse_args()
+    ch = CHANNELS[args.channel]
+    if args.channel != "a":
+        log = get_logger(f"step00_convert_docs_{args.channel}")
+
     paths = get_paths()
     cfg = load_config()
 
     log.info("=" * 56)
-    log.info("step00 启动 | docx → Markdown 档案提取")
+    log.info("step00 启动 | docx → Markdown 档案提取 | 通道 %s: %s", args.channel, ch["label"])
 
     tasks = collect_tasks(paths.input_docs, paths.input_markdown)
     if not tasks:
         log.info("data/input/00_docs 下没有 docx,跳过本步。")
         return 0
+    if ch["reverse"]:
+        tasks = list(reversed(tasks))
 
     pending = [t for t in tasks if not _md_is_valid(t["out"])]
     log.info("docx 总数 %d / 已有有效 md %d / 待提取 %d (断点续传:只处理缺失或损坏的)",
@@ -421,16 +508,16 @@ def main() -> int:
         log.info("全部已提取完毕。")
         return 0
 
-    sf = (cfg.get("api") or {}).get("siliconflow") or {}
-    api_key = (sf.get("key") or "").strip()
+    sec = (cfg.get("api") or {}).get(ch["section"]) or {}
+    api_key = (sec.get("key") or "").strip()
     if not api_key or (api_key.startswith("${") and api_key.endswith("}")):
-        log.error("未配置 SiliconFlow API Key(config.api.siliconflow.key),无法做 docx 提取。"
-                  "请在「系统管理 → API 配置」填写后重试。")
+        log.error("未配置 %s API Key(config.api.%s.key),无法做 docx 提取。"
+                  "请在「系统管理 → API 配置」填写后重试。", ch["section"], ch["section"])
         return 2
-    model = sf.get("default_model") or "deepseek-ai/DeepSeek-V3.2"
-    base_url = sf.get("base_url") or "https://api.siliconflow.cn/v1"
+    model = sec.get("default_model") or sec.get("model") or ch["default_model"]
+    base_url = sec.get("base_url") or ch["default_base_url"]
     try:
-        concurrency = max(1, min(int(sf.get("extract_concurrency", DEFAULT_CONCURRENCY)), 8))
+        concurrency = max(1, min(int(sec.get("extract_concurrency", DEFAULT_CONCURRENCY)), 8))
     except (TypeError, ValueError):
         concurrency = DEFAULT_CONCURRENCY
 
@@ -447,13 +534,15 @@ def main() -> int:
         http_client=httpx.Client(trust_env=False, timeout=300),
     )
 
-    # 新一轮运行:清掉上次遗留的停止哨兵
+    # 新一轮运行:清掉上次遗留的停止哨兵。只清"旧"哨兵(>60s):
+    # 刚创建的哨兵可能是用户正在停止另一个并行通道,不能误删
     try:
-        STOP_FLAG.unlink(missing_ok=True)
+        if STOP_FLAG.exists() and time.time() - STOP_FLAG.stat().st_mtime > 60:
+            STOP_FLAG.unlink(missing_ok=True)
     except OSError:
         pass
 
-    ledger = ProgressLedger(paths.output_logs / "step00_progress.json")
+    ledger = ProgressLedger(paths.output_logs / ch["ledger"])
     log.info("模型: %s / 渠道: %s / 并发: %d / 进度账本: %s",
              model, base_url, concurrency, ledger.path)
 
@@ -461,13 +550,16 @@ def main() -> int:
     failures: list[str] = []
     t_start = time.time()
     with ThreadPoolExecutor(max_workers=concurrency) as pool:
-        futures = {pool.submit(convert_one, client, model, t): t for t in pending}
+        futures = {pool.submit(convert_one, client, model, t, args.channel): t
+                   for t in pending}
         for fut in as_completed(futures):
             t = futures[fut]
             success, msg = fut.result()
             if not success and msg == "stopped":
                 stopped += 1
                 continue  # 用户停止,不计失败、不写账本
+            if not success and msg == "claimed":
+                continue  # 另一通道正在处理,不计数不写账本
             ledger.mark(t["docx"].name, success, "" if success else msg)
             if success:
                 ok += 1
@@ -484,12 +576,13 @@ def main() -> int:
                 log.info("── 进度 %d/%d (%.0f%%),预计还需 %.0f 分钟",
                          done, len(pending), done / len(pending) * 100, eta_min)
 
-    try:
-        STOP_FLAG.unlink(missing_ok=True)
-    except OSError:
-        pass
-
     if stopped:
+        # 只有确实响应了停止的通道才清哨兵;正常跑完不清,
+        # 避免误删另一通道正要响应的停止信号
+        try:
+            STOP_FLAG.unlink(missing_ok=True)
+        except OSError:
+            pass
         log.info("已停止: 本轮完成 %d / 失败 %d / 未处理 %d(重跑即续传)", ok, fail, stopped)
         return EXIT_STOPPED
     log.info("提取完成: 成功 %d / 失败 %d / 总耗时 %.1f 分钟",

@@ -153,18 +153,22 @@ def _straight_stats(stops: list[dict]) -> tuple[float, float]:
     return dist, dist / (40000 / 3600)
 
 
-def _plan_geometry(stops: list[dict]) -> dict:
-    """尝试高德路径;失败用直线。返回 {distance_m, duration_s, polyline, source}。"""
-    pts = [(s["lng"], s["lat"]) for s in stops]
+def _plan_geometry(stops: list[dict], start: Optional[dict] = None) -> dict:
+    """尝试高德路径;失败用直线。返回 {distance_m, duration_s, polyline, source}。
+    start 为可选出发点 {lng, lat},提供时路线几何从出发点开始。"""
+    seq = list(stops)
+    if start and start.get("lng") is not None and start.get("lat") is not None:
+        seq = [{"lng": float(start["lng"]), "lat": float(start["lat"])}] + seq
+    pts = [(s["lng"], s["lat"]) for s in seq]
     if len(pts) >= 2:
         amap = amap_service.plan_driving_route(pts)
         if amap:
             return {**amap, "source": "amap"}
-    dist, dur = _straight_stats(stops)
+    dist, dur = _straight_stats(seq)
     return {
         "distance_m": dist,
         "duration_s": dur,
-        "polyline": [[s["lng"], s["lat"]] for s in stops],
+        "polyline": [[s["lng"], s["lat"]] for s in seq],
         "source": "straight",
     }
 
@@ -384,6 +388,12 @@ async def patrol_plan(req: PlanRequest):
 
 
 # ── 路线 CRUD ───────────────────────────────────────────────
+class RouteStart(BaseModel):
+    lng: float
+    lat: float
+    name: str = ""
+
+
 class RouteCreate(BaseModel):
     name: str
     codes: list[str]
@@ -392,6 +402,7 @@ class RouteCreate(BaseModel):
     note: str = ""
     optimize: bool = True         # 是否用最近邻重排
     created_by: str = ""
+    start: Optional[RouteStart] = None  # 自定义出发点
 
 
 class RoutePatch(BaseModel):
@@ -414,9 +425,12 @@ async def create_route(body: RouteCreate, request: Request):
     stops = _resolve_stops(body.codes)
     if not stops:
         raise HTTPException(400, "路线中没有有效文物点")
+    start = body.start.dict() if body.start else None
     if body.optimize and len(stops) > 2:
-        stops = order_nearest_neighbor(stops)
-    geom = _plan_geometry(stops)
+        # 有出发点时按"离出发点最近"作为第一站做最近邻排序
+        origin = (start["lng"], start["lat"]) if start else None
+        stops = order_nearest_neighbor(stops, start=origin)
+    geom = _plan_geometry(stops, start=start)
     route = patrol_db.create_route(
         name=body.name.strip() or _default_route_name(stops),
         relic_codes=[s["code"] for s in stops],
@@ -427,6 +441,7 @@ async def create_route(body: RouteCreate, request: Request):
         distance_m=geom["distance_m"],
         duration_s=geom["duration_s"],
         polyline=geom["polyline"],
+        start=start,
     )
     return _route_payload(route, request=request)
 

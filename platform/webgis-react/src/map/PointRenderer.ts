@@ -181,9 +181,9 @@ export class PointRenderer {
           dot = this.dots.add({
             position: pos,
             color: Cesium.Color.fromCssColorString(RANK_COLOR[r.rank] || RANK_COLOR["5"]),
-            pixelSize: rankSize(r.rank) || 8,
+            pixelSize: rankSize(r.rank) || 3,
             outlineColor: Cesium.Color.fromCssColorString("rgba(13,17,23,0.85)"),
-            outlineWidth: 2,
+            outlineWidth: 1,
             id: pickId,
           });
         }
@@ -213,7 +213,7 @@ export class PointRenderer {
             meta.dot.color = Cesium.Color.fromCssColorString(
               RANK_COLOR[r.rank] || RANK_COLOR["5"],
             );
-            meta.dot.pixelSize = rankSize(r.rank) || 8;
+            meta.dot.pixelSize = rankSize(r.rank) || 3;
           }
         }
         if (meta.badge) {

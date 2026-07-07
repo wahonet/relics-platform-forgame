@@ -110,7 +110,14 @@ api:
     temperature: 0.2
     # step00 档案提取(docx→Markdown)的并发请求数,1-8;账号限流严可调低
     extract_concurrency: 2
-    # step00 档案提取(docx→markdown)的并发请求数,1-8;调大提速但更容易限流
+
+  # DeepSeek 官方 API（可选,档案提取第二通道: https://platform.deepseek.com/）
+  # 配置后可在系统管理页启用"双通道提取":SiliconFlow 正序 + DeepSeek 倒序
+  # 同时跑,两边各自断点续传,中间会合,提取速度约翻倍
+  deepseek:
+    key: "${DEEPSEEK_KEY}"
+    base_url: "https://api.deepseek.com/v1"
+    default_model: "deepseek-chat"
     extract_concurrency: 2
 
   # 高德开放平台（巡查路线规划,免费申请: https://lbs.amap.com/）

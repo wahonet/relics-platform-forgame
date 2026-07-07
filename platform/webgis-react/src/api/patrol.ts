@@ -49,6 +49,8 @@ export async function createRoute(body: {
   mode?: string;
   note?: string;
   optimize?: boolean;
+  /** 自定义出发点(可选)。 */
+  start?: { lng: number; lat: number; name?: string };
 }): Promise<PatrolRoute> {
   const { data } = await apiClient.post<PatrolRoute>("/api/patrol/routes", body);
   return data;

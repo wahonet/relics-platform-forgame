@@ -54,10 +54,17 @@ function extractRings(geometry: GeoJSONGeometry | null | undefined): number[][][
   return [];
 }
 
+// 域外遮罩配色:深色主题压暗聚焦,亮白主题用浅白雾(不能是黑色,
+// 否则亮白 UI 下地图周边一片黑,图例文字都看不清)
+const MASK_DARK = { css: "#060c18", alpha: 0.72 };
+const MASK_LIGHT = { css: "#f4f7fb", alpha: 0.55 };
+
 export class BoundaryLayer {
   private viewer: Cesium.Viewer;
   /** 市域外暗色遮罩 + 市界发光描边(仿驾驶舱大屏的区域聚焦效果)。 */
   private cityMask: Cesium.Entity[] = [];
+  private maskEntity: Cesium.Entity | null = null;
+  private maskLight = false;
   private layers = {
     county: [] as BoundaryItem[],
     countyLabel: [] as Cesium.Entity[],
@@ -177,15 +184,15 @@ export class BoundaryLayer {
           r.map((p) => Cesium.Cartesian3.fromDegrees(p[0], p[1])),
         ),
     );
-    this.cityMask.push(
-      this.viewer.entities.add({
-        polygon: {
-          hierarchy: new Cesium.PolygonHierarchy(outer, holes),
-          material: Cesium.Color.fromCssColorString("#060c18").withAlpha(0.72),
-          height: 0,
-        },
-      }),
-    );
+    const mask = this.maskLight ? MASK_LIGHT : MASK_DARK;
+    this.maskEntity = this.viewer.entities.add({
+      polygon: {
+        hierarchy: new Cesium.PolygonHierarchy(outer, holes),
+        material: Cesium.Color.fromCssColorString(mask.css).withAlpha(mask.alpha),
+        height: 0,
+      },
+    });
+    this.cityMask.push(this.maskEntity);
     // 市界:内层实线 + 外层发光,双线叠出大屏效果
     rings.forEach((r) => {
       const positions = [...r, r[0]].map((p) =>
@@ -378,6 +385,7 @@ export class BoundaryLayer {
       }
     });
     this.cityMask = [];
+    this.maskEntity = null;
     this.layers = {
       county: [],
       countyLabel: [],
@@ -395,6 +403,18 @@ export class BoundaryLayer {
   async reload(): Promise<void> {
     this.clear();
     await this.load();
+  }
+
+  /** 主题切换:亮白用浅色遮罩,深色主题恢复压暗遮罩。 */
+  setMaskTheme(light: boolean): void {
+    this.maskLight = light;
+    if (this.maskEntity?.polygon) {
+      const mask = light ? MASK_LIGHT : MASK_DARK;
+      this.maskEntity.polygon.material = new Cesium.ColorMaterialProperty(
+        Cesium.Color.fromCssColorString(mask.css).withAlpha(mask.alpha),
+      );
+      this.viewer.scene.requestRender();
+    }
   }
 
   setVisibility(opts: {

@@ -7,6 +7,7 @@ import { ViewportManager } from "./ViewportManager";
 import { BoundaryLayer } from "./BoundaryLayer";
 import { OfflineCoverageLayer } from "./OfflineCoverageLayer";
 import { RouteLayer, setRouteLayer } from "./RouteLayer";
+import { TwoLineLayer } from "./TwoLineLayer";
 import { useUIStore } from "../stores/uiStore";
 import { useFilterStore } from "../stores/filterStore";
 import { useRelicsStore } from "../stores/relicsStore";
@@ -30,6 +31,7 @@ export function MapView({ onCompassRotate, onScaleUpdate }: MapViewProps) {
   const boundaryRef = useRef<BoundaryLayer | null>(null);
   const offlineCoverageRef = useRef<OfflineCoverageLayer | null>(null);
   const routeLayerRef = useRef<RouteLayer | null>(null);
+  const twoLineRef = useRef<TwoLineLayer | null>(null);
 
   const baseLayer = useUIStore((s) => s.baseLayer);
   const baseLayerAlpha = useUIStore((s) => s.baseLayerAlpha);
@@ -56,10 +58,17 @@ export function MapView({ onCompassRotate, onScaleUpdate }: MapViewProps) {
   const selectedRelic = useUIStore((s) => s.selectedRelic);
   const patrolStops = usePatrolStore((s) => s.stops);
   const patrolPreview = usePatrolStore((s) => s.previewPolyline);
+  const patrolStart = usePatrolStore((s) => s.startPoint);
 
   const homeView = useHomeViewStore((s) => s.view);
   const offlineTick = useUIStore((s) => s.offlineCoverageTick);
   const boundaryReloadTick = useUIStore((s) => s.boundaryReloadTick);
+  const theme = useUIStore((s) => s.theme);
+
+  /** 主题切换时更新域外遮罩配色(亮白=浅雾,深色=压暗)。 */
+  useEffect(() => {
+    boundaryRef.current?.setMaskTheme(theme === "light");
+  }, [theme]);
 
   useEffect(() => {
     const viewer = viewerRef.current;
@@ -69,16 +78,21 @@ export function MapView({ onCompassRotate, onScaleUpdate }: MapViewProps) {
     const boundary = new BoundaryLayer(viewer);
     const offlineCoverage = new OfflineCoverageLayer(viewer);
     const routeLayer = new RouteLayer(viewer);
+    const twoLine = new TwoLineLayer(viewer);
 
     pointRendererRef.current = renderer;
     viewportRef.current = viewport;
     boundaryRef.current = boundary;
     offlineCoverageRef.current = offlineCoverage;
     routeLayerRef.current = routeLayer;
+    twoLineRef.current = twoLine;
     setRouteLayer(routeLayer);
+    twoLine.load();
 
     renderer.setOnPick(async (code: string) => {
       try {
+        // 选起点模式下点到文物也不响应(由起点 handler 处理该次点击)
+        if (usePatrolStore.getState().pickingStart) return;
         const r = useRelicsStore.getState().byCode.get(code);
         // 巡查选点模式:点击文物点 → 加入路线,不打开详情。
         if (usePatrolStore.getState().picking) {
@@ -106,6 +120,7 @@ export function MapView({ onCompassRotate, onScaleUpdate }: MapViewProps) {
       }
     });
 
+    boundary.setMaskTheme(useUIStore.getState().theme === "light");
     boundary.load().then(() => {
       const ui = useUIStore.getState();
       boundary.setVisibility({
@@ -116,6 +131,7 @@ export function MapView({ onCompassRotate, onScaleUpdate }: MapViewProps) {
         village: ui.bndVillage,
         villageName: ui.bndVillageName,
       });
+      boundary.setMaskTheme(useUIStore.getState().theme === "light");
     });
 
     viewport.start((count, truncated) => {
@@ -159,6 +175,23 @@ export function MapView({ onCompassRotate, onScaleUpdate }: MapViewProps) {
     };
     viewer.scene.preRender.addEventListener(onPreRender);
     viewer.scene.postRender.addEventListener(onPostRender);
+
+    // 巡查"选起点"模式:点击地图任意位置设为出发点。
+    const startPickHandler = new Cesium.ScreenSpaceEventHandler(viewer.canvas);
+    startPickHandler.setInputAction((click: { position: Cesium.Cartesian2 }) => {
+      const ps = usePatrolStore.getState();
+      if (!ps.pickingStart) return;
+      const cart = viewer.camera.pickEllipsoid(click.position);
+      if (!cart) return;
+      const c = Cesium.Cartographic.fromCartesian(cart);
+      ps.setStartPoint({
+        lng: +Cesium.Math.toDegrees(c.longitude).toFixed(8),
+        lat: +Cesium.Math.toDegrees(c.latitude).toFixed(8),
+        name: "自定义起点",
+      });
+      ps.setPickingStart(false);
+      useUIStore.getState().showToast("出发起点已设置");
+    }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
 
     // 鼠标移动 → WGS84 经纬度,推到 mouseCoordStore 给底部坐标读数。
     // 用独立 store 避免 MapView 自己重渲染。节流到 ~60fps。
@@ -212,10 +245,16 @@ export function MapView({ onCompassRotate, onScaleUpdate }: MapViewProps) {
       } catch {
         /* ignore */
       }
+      try {
+        startPickHandler.destroy();
+      } catch {
+        /* ignore */
+      }
       useMouseCoordStore.getState().set(null, null, null);
       viewport.stop();
       renderer.destroy();
       routeLayer.destroy();
+      twoLine.destroy();
       setRouteLayer(null);
       try {
         offlineCoverage.clear();
@@ -227,6 +266,7 @@ export function MapView({ onCompassRotate, onScaleUpdate }: MapViewProps) {
       boundaryRef.current = null;
       offlineCoverageRef.current = null;
       routeLayerRef.current = null;
+      twoLineRef.current = null;
     };
   }, [viewerRef, onCompassRotate, onScaleUpdate, setUI]);
 
@@ -324,14 +364,14 @@ export function MapView({ onCompassRotate, onScaleUpdate }: MapViewProps) {
     allRelicsLen,
   ]);
 
-  /** 巡查路线渲染:stops/预览折线变化时重画。 */
+  /** 巡查路线渲染:stops/预览折线/出发点变化时重画。 */
   useEffect(() => {
     const rl = routeLayerRef.current;
     if (!rl) return;
-    rl.showRoute(patrolStops, patrolPreview);
-  }, [patrolStops, patrolPreview]);
+    rl.showRoute(patrolStops, patrolPreview, patrolStart);
+  }, [patrolStops, patrolPreview, patrolStart]);
 
-  /** 选中文物时自动叠加两线范围(保护范围红 / 建控地带黄)。 */
+  /** 选中文物时自动叠加两线范围(保护范围红 / 建控地带蓝)。 */
   useEffect(() => {
     const rl = routeLayerRef.current;
     if (!rl) return;

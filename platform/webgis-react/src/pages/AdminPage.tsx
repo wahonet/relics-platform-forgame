@@ -702,7 +702,15 @@ export default function AdminPage() {
   const [pipeline, setPipeline] = useState<PipelineStatus | null>(null);
   const [task, setTask] = useState<AdminTask>({ status: "idle" });
   const [config, setConfig] = useState<ApiConfigStatus | null>(null);
-  const [form, setForm] = useState({ sf: "", sfUrl: "", amap: "", ion: "", tdt: "" });
+  const [form, setForm] = useState({ sf: "", sfUrl: "", ds: "", dsUrl: "", amap: "", ion: "", tdt: "" });
+  const [dualExtract, setDualExtract] = useState(
+    () => localStorage.getItem("dualExtract") === "1",
+  );
+  // DeepSeek 模型选择(与 SiliconFlow 平行的一套状态)
+  const [dsModels, setDsModels] = useState<AiModelsResp | null>(null);
+  const [dsModelSel, setDsModelSel] = useState("");
+  const [dsModelSaving, setDsModelSaving] = useState(false);
+  const [dsModelsLoading, setDsModelsLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [aiModels, setAiModels] = useState<AiModelsResp | null>(null);
   const [modelSel, setModelSel] = useState("");
@@ -784,7 +792,47 @@ export default function AdminPage() {
         setModelSel(d.current || "");
       })
       .catch(() => undefined);
+    fetchAiModels("deepseek")
+      .then((d) => {
+        setDsModels(d);
+        setDsModelSel(d.current || "");
+      })
+      .catch(() => undefined);
   }, []);
+
+  const reloadDsModels = async () => {
+    setDsModelsLoading(true);
+    try {
+      const d = await fetchAiModels("deepseek");
+      setDsModels(d);
+      if (!dsModelSel || !d.models.some((m) => m.id === dsModelSel)) {
+        setDsModelSel(d.current || "");
+      }
+      flash(d.source === "api"
+        ? `已刷新,DeepSeek 可用模型 ${d.models.length} 个`
+        : `刷新失败,使用内置列表(${d.error || "API 不可用"})`);
+    } catch {
+      flash("DeepSeek 模型列表刷新失败");
+    } finally {
+      setDsModelsLoading(false);
+    }
+  };
+
+  const applyDsModel = async () => {
+    if (!dsModelSel || dsModelSel === dsModels?.current) return;
+    setDsModelSaving(true);
+    try {
+      await saveApiConfig({ deepseek_model: dsModelSel });
+      flash(`DeepSeek 提取模型已切换为 ${dsModelSel}`);
+      refreshModels();
+      refreshConfig();
+    } catch (e) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      flash((e as any)?.response?.data?.detail || "模型保存失败");
+    } finally {
+      setDsModelSaving(false);
+    }
+  };
 
   const stopPolling = useCallback(() => {
     if (pollRef.current) {
@@ -840,9 +888,12 @@ export default function AdminPage() {
 
   const running = task.status === "running";
 
-  const run = async (opts: { only?: string; demo?: boolean }) => {
+  const run = async (opts: { only?: string; demo?: boolean; dual?: boolean }) => {
     try {
-      await runPipeline(opts);
+      // 双通道开关只影响含 step00 的运行(全部管线 / 单跑 step00)
+      const withDual =
+        dualExtract && !opts.demo && (opts.only == null || opts.only === "00");
+      await runPipeline(withDual ? { ...opts, dual: true } : opts);
       setTask({ status: "running", log: [] });
       startPolling();
     } catch (e) {
@@ -851,6 +902,15 @@ export default function AdminPage() {
         (e as any)?.response?.data?.detail || "启动任务失败";
       flash(detail);
     }
+  };
+
+  const toggleDual = (on: boolean) => {
+    if (on && !config?.deepseek?.configured) {
+      flash("请先在「API 配置」里填写 DeepSeek API Key");
+      return;
+    }
+    setDualExtract(on);
+    localStorage.setItem("dualExtract", on ? "1" : "0");
   };
 
   const doClearAll = async () => {
@@ -877,7 +937,9 @@ export default function AdminPage() {
   };
 
   const save = async () => {
-    if (!form.sf.trim() && !form.sfUrl.trim() && !form.amap.trim() && !form.ion.trim() && !form.tdt.trim()) {
+    const anyFilled = [form.sf, form.sfUrl, form.ds, form.dsUrl, form.amap, form.ion, form.tdt]
+      .some((v) => v.trim());
+    if (!anyFilled) {
       flash("请至少填写一项后再保存(留空表示不修改)");
       return;
     }
@@ -886,12 +948,14 @@ export default function AdminPage() {
       const res = await saveApiConfig({
         siliconflow_key: form.sf.trim() || undefined,
         siliconflow_base_url: form.sfUrl.trim() || undefined,
+        deepseek_key: form.ds.trim() || undefined,
+        deepseek_base_url: form.dsUrl.trim() || undefined,
         amap_web_key: form.amap.trim() || undefined,
         cesium_ion_token: form.ion.trim() || undefined,
         tianditu_key: form.tdt.trim() || undefined,
       });
       flash(res.message || "已保存");
-      setForm({ sf: "", sfUrl: "", amap: "", ion: "", tdt: "" });
+      setForm({ sf: "", sfUrl: "", ds: "", dsUrl: "", amap: "", ion: "", tdt: "" });
       refreshConfig();
       refreshModels(); // 新填了 Key 后模型列表可能变为可拉取
     } catch (e) {
@@ -993,18 +1057,33 @@ export default function AdminPage() {
                     <em>{STEP_DESC[s.id] || s.script}{s.optional ? " · 可选" : ""}</em>
                   </div>
                   {s.id === "00" ? (
-                    <label className="adm-conc" title="同时向大模型发起的提取请求数;账号限流严可调低">
-                      并发进程
-                      <select
-                        value={concurrency}
-                        disabled={running || concSaving}
-                        onChange={(e) => applyConcurrency(Number(e.target.value))}
+                    <>
+                      <label className="adm-conc" title="同时向大模型发起的提取请求数;账号限流严可调低">
+                        并发进程
+                        <select
+                          value={concurrency}
+                          disabled={running || concSaving}
+                          onChange={(e) => applyConcurrency(Number(e.target.value))}
+                        >
+                          {[1, 2, 3, 4, 5, 6, 7, 8].map((n) => (
+                            <option key={n} value={n}>{n}</option>
+                          ))}
+                        </select>
+                      </label>
+                      <label
+                        className="adm-conc"
+                        title={"同时用 SiliconFlow(正序)与 DeepSeek 官方 API(倒序)双通道提取,\n两边各自断点续传,中间会合,速度约翻倍。需先配置 DeepSeek Key。"}
                       >
-                        {[1, 2, 3, 4, 5, 6, 7, 8].map((n) => (
-                          <option key={n} value={n}>{n}</option>
-                        ))}
-                      </select>
-                    </label>
+                        <input
+                          type="checkbox"
+                          checked={dualExtract}
+                          disabled={running}
+                          onChange={(e) => toggleDual(e.target.checked)}
+                        />
+                        双通道提取
+                        {dualExtract ? <em className="c-green"> (A+B)</em> : null}
+                      </label>
+                    </>
                   ) : null}
                   <button
                     className="pp-btn sm"
@@ -1184,87 +1263,183 @@ export default function AdminPage() {
           </span>
         </div>
 
-        <div className="adm-keys">
-          <div className="adm-key-row">
-            <div className="adm-key-meta">
-              <b>SiliconFlow Key</b>
-              <em>AI 问答与档案提取</em>
-              <span className={"adm-key-st" + (config?.runtime.ai_ready ? " on" : "")}>
-                {config?.runtime.ai_ready
-                  ? `已启用 ${config?.siliconflow.masked}`
-                  : config?.siliconflow.configured
-                    ? `已配置(未就绪)`
-                    : "未配置"}
-              </span>
-            </div>
-            <input
-              className="pp-input"
-              type="password"
-              placeholder="sk-... (留空不修改)"
-              value={form.sf}
-              onChange={(e) => setForm({ ...form, sf: e.target.value })}
-            />
+        {/* ── 硅基流动 SiliconFlow ── */}
+        <div className="adm-key-group">
+          <div className="adm-key-group-title">
+            硅基流动 SiliconFlow
+            <em>AI 问答 / 巡查规划 / 报告生成 / 档案提取通道 A(正序)</em>
           </div>
-
-          <div className="adm-key-row">
-            <div className="adm-key-meta">
-              <b>API 地址</b>
-              <em>OpenAI 兼容接口地址(base_url)</em>
-              <span className={"adm-key-st" + (config?.siliconflow.base_url ? " on" : "")}>
-                当前 {config?.siliconflow.base_url || "https://api.siliconflow.cn/v1"}
-              </span>
-            </div>
-            <input
-              className="pp-input"
-              type="text"
-              placeholder="https://api.siliconflow.cn/v1 (留空不修改)"
-              value={form.sfUrl}
-              onChange={(e) => setForm({ ...form, sfUrl: e.target.value })}
-            />
-          </div>
-
-          <div className="adm-key-row">
-            <div className="adm-key-meta">
-              <b>AI 模型</b>
-              <em>问答 / 巡查规划 / 报告生成</em>
-              <span className={"adm-key-st" + (aiModels?.current ? " on" : "")}>
-                {aiModels?.current || "未设置"}
-                {aiModels?.source === "api" ? ` · 可选 ${aiModels.models.length} 个` : ""}
-              </span>
-            </div>
-            <div style={{ display: "flex", gap: 8, flex: 1, minWidth: 0 }}>
-              <select
+          <div className="adm-keys">
+            <div className="adm-key-row">
+              <div className="adm-key-meta">
+                <b>API Key</b>
+                <span className={"adm-key-st" + (config?.runtime.ai_ready ? " on" : "")}>
+                  {config?.runtime.ai_ready
+                    ? `已启用 ${config?.siliconflow.masked}`
+                    : config?.siliconflow.configured
+                      ? `已配置(未就绪)`
+                      : "未配置"}
+                </span>
+              </div>
+              <input
                 className="pp-input"
-                style={{ flex: 1, minWidth: 0 }}
-                value={modelSel}
-                onChange={(e) => setModelSel(e.target.value)}
-                disabled={modelSaving || !aiModels?.models?.length}
-              >
-                {modelSel && !aiModels?.models?.some((m) => m.id === modelSel) ? (
-                  <option value={modelSel}>{modelSel}</option>
-                ) : null}
-                {(aiModels?.models || []).map((m) => (
-                  <option key={m.id} value={m.id}>{m.name}</option>
-                ))}
-              </select>
-              <button
-                className="pp-btn"
-                title="重新从 SiliconFlow 拉取可用模型列表"
-                disabled={modelsLoading}
-                onClick={reloadModels}
-              >
-                {modelsLoading ? "刷新中..." : "刷新"}
-              </button>
-              <button
-                className="pp-btn primary"
-                onClick={applyModel}
-                disabled={modelSaving || !modelSel || modelSel === aiModels?.current}
-              >
-                {modelSaving ? "应用中..." : "应用"}
-              </button>
+                type="password"
+                placeholder="sk-... (留空不修改)"
+                value={form.sf}
+                onChange={(e) => setForm({ ...form, sf: e.target.value })}
+              />
+            </div>
+
+            <div className="adm-key-row">
+              <div className="adm-key-meta">
+                <b>API 地址</b>
+                <span className={"adm-key-st" + (config?.siliconflow.base_url ? " on" : "")}>
+                  当前 {config?.siliconflow.base_url || "https://api.siliconflow.cn/v1"}
+                </span>
+              </div>
+              <input
+                className="pp-input"
+                type="text"
+                placeholder="https://api.siliconflow.cn/v1 (留空不修改)"
+                value={form.sfUrl}
+                onChange={(e) => setForm({ ...form, sfUrl: e.target.value })}
+              />
+            </div>
+
+            <div className="adm-key-row">
+              <div className="adm-key-meta">
+                <b>AI 模型</b>
+                <span className={"adm-key-st" + (aiModels?.current ? " on" : "")}>
+                  {aiModels?.current || "未设置"}
+                  {aiModels?.source === "api" ? ` · 可选 ${aiModels.models.length} 个` : ""}
+                </span>
+              </div>
+              <div style={{ display: "flex", gap: 8, flex: 1, minWidth: 0 }}>
+                <select
+                  className="pp-input"
+                  style={{ flex: 1, minWidth: 0 }}
+                  value={modelSel}
+                  onChange={(e) => setModelSel(e.target.value)}
+                  disabled={modelSaving || !aiModels?.models?.length}
+                >
+                  {modelSel && !aiModels?.models?.some((m) => m.id === modelSel) ? (
+                    <option value={modelSel}>{modelSel}</option>
+                  ) : null}
+                  {(aiModels?.models || []).map((m) => (
+                    <option key={m.id} value={m.id}>{m.name}</option>
+                  ))}
+                </select>
+                <button
+                  className="pp-btn"
+                  title="重新从 SiliconFlow 拉取可用模型列表"
+                  disabled={modelsLoading}
+                  onClick={reloadModels}
+                >
+                  {modelsLoading ? "刷新中..." : "刷新"}
+                </button>
+                <button
+                  className="pp-btn primary"
+                  onClick={applyModel}
+                  disabled={modelSaving || !modelSel || modelSel === aiModels?.current}
+                >
+                  {modelSaving ? "应用中..." : "应用"}
+                </button>
+              </div>
             </div>
           </div>
+        </div>
 
+        {/* ── DeepSeek 官方 ── */}
+        <div className="adm-key-group">
+          <div className="adm-key-group-title">
+            DeepSeek 官方
+            <em>档案提取通道 B(倒序,与通道 A 并行,速度约翻倍)</em>
+          </div>
+          <div className="adm-keys">
+            <div className="adm-key-row">
+              <div className="adm-key-meta">
+                <b>API Key</b>
+                <span className={"adm-key-st" + (config?.deepseek?.configured ? " on" : "")}>
+                  {config?.deepseek?.configured
+                    ? `已配置 ${config.deepseek.masked}`
+                    : "未配置"}
+                </span>
+              </div>
+              <input
+                className="pp-input"
+                type="password"
+                placeholder="sk-... (留空不修改)"
+                value={form.ds}
+                onChange={(e) => setForm({ ...form, ds: e.target.value })}
+              />
+            </div>
+
+            <div className="adm-key-row">
+              <div className="adm-key-meta">
+                <b>API 地址</b>
+                <span className={"adm-key-st" + (config?.deepseek?.base_url ? " on" : "")}>
+                  当前 {config?.deepseek?.base_url || "https://api.deepseek.com/v1"}
+                </span>
+              </div>
+              <input
+                className="pp-input"
+                type="text"
+                placeholder="https://api.deepseek.com/v1 (留空不修改)"
+                value={form.dsUrl}
+                onChange={(e) => setForm({ ...form, dsUrl: e.target.value })}
+              />
+            </div>
+
+            <div className="adm-key-row">
+              <div className="adm-key-meta">
+                <b>AI 模型</b>
+                <span className={"adm-key-st" + (dsModels?.current ? " on" : "")}>
+                  {dsModels?.current || "未设置"}
+                  {dsModels?.source === "api" ? ` · 可选 ${dsModels.models.length} 个` : ""}
+                </span>
+              </div>
+              <div style={{ display: "flex", gap: 8, flex: 1, minWidth: 0 }}>
+                <select
+                  className="pp-input"
+                  style={{ flex: 1, minWidth: 0 }}
+                  value={dsModelSel}
+                  onChange={(e) => setDsModelSel(e.target.value)}
+                  disabled={dsModelSaving || !dsModels?.models?.length}
+                >
+                  {dsModelSel && !dsModels?.models?.some((m) => m.id === dsModelSel) ? (
+                    <option value={dsModelSel}>{dsModelSel}</option>
+                  ) : null}
+                  {(dsModels?.models || []).map((m) => (
+                    <option key={m.id} value={m.id}>{m.name}</option>
+                  ))}
+                </select>
+                <button
+                  className="pp-btn"
+                  title="重新从 DeepSeek 拉取可用模型列表"
+                  disabled={dsModelsLoading}
+                  onClick={reloadDsModels}
+                >
+                  {dsModelsLoading ? "刷新中..." : "刷新"}
+                </button>
+                <button
+                  className="pp-btn primary"
+                  onClick={applyDsModel}
+                  disabled={dsModelSaving || !dsModelSel || dsModelSel === dsModels?.current}
+                >
+                  {dsModelSaving ? "应用中..." : "应用"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* ── 其他服务 ── */}
+        <div className="adm-key-group">
+          <div className="adm-key-group-title">
+            其他服务
+            <em>地图与路线相关 Key</em>
+          </div>
+          <div className="adm-keys">
           <div className="adm-key-row">
             <div className="adm-key-meta">
               <b>高德 Web 服务 Key</b>
@@ -1316,6 +1491,7 @@ export default function AdminPage() {
               value={form.tdt}
               onChange={(e) => setForm({ ...form, tdt: e.target.value })}
             />
+          </div>
           </div>
         </div>
 

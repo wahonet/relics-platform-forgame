@@ -33,14 +33,14 @@ export const CATEGORY_MAP: Record<string, CategoryEntry> = {
 };
 
 export const RANK_MAP: Record<string, RankEntry> = {
-  "1": { label: "全国重点文物保护单位", short: "国保", size: 14, prominent: true },
-  "2": { label: "省级文物保护单位", short: "省保", size: 12, prominent: true },
-  "3": { label: "市级文物保护单位", short: "市保", size: 11, prominent: false },
-  "4": { label: "县级文物保护单位", short: "县保", size: 10, prominent: false },
+  "1": { label: "全国重点文物保护单位", short: "国保", size: 3.5, prominent: true },
+  "2": { label: "省级文物保护单位", short: "省保", size: 3, prominent: true },
+  "3": { label: "市级文物保护单位", short: "市保", size: 3, prominent: false },
+  "4": { label: "县级文物保护单位", short: "县保", size: 2.5, prominent: false },
   "5": {
     label: "尚未核定公布为文物保护单位的不可移动文物",
     short: "未定级",
-    size: 9,
+    size: 2,
     prominent: false,
   },
 };

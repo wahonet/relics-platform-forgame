@@ -12,11 +12,34 @@ import {
   type DashModuleCfg,
 } from "./dashboardModules";
 
-const TT = {
-  backgroundColor: "rgba(10,15,24,.95)",
-  borderColor: "rgba(94,163,247,.3)",
-  textStyle: { color: "#eaf0f9", fontSize: 11 },
-};
+/** 图表配色随主题切换:亮白主题用深色文字,否则白底上看不清。 */
+function chartPalette(light: boolean) {
+  return light
+    ? {
+        tooltip: {
+          backgroundColor: "rgba(255,255,255,.97)",
+          borderColor: "#dcdfe6",
+          textStyle: { color: "#0d1626", fontSize: 11 },
+        },
+        text: "#1f2837",
+        axis: "#3a4356",
+        split: "rgba(30,50,80,.12)",
+        axisLine: "rgba(30,50,80,.25)",
+        labelLine: "rgba(30,50,80,.3)",
+      }
+    : {
+        tooltip: {
+          backgroundColor: "rgba(10,15,24,.95)",
+          borderColor: "rgba(94,163,247,.3)",
+          textStyle: { color: "#eaf0f9", fontSize: 11 },
+        },
+        text: "#c6d0de",
+        axis: "#8b99ad",
+        split: "rgba(255,255,255,.06)",
+        axisLine: "rgba(255,255,255,.08)",
+        labelLine: "rgba(255,255,255,.2)",
+      };
+}
 
 function countDim(relics: RelicSummary[], dim: DimDef) {
   const counts: Record<string, number> = {};
@@ -41,6 +64,8 @@ interface ChartCardProps {
 }
 
 function ChartCard({ title, dimId, type, relics, colorMap, onClickItem }: ChartCardProps) {
+  const theme = useUIStore((s) => s.theme);
+  const P = chartPalette(theme === "light");
   const dim = DIMS.find((d) => d.id === dimId)!;
   const { counts, keys } = countDim(relics, dim);
   const data = keys.map((k) => ({
@@ -52,34 +77,34 @@ function ChartCard({ title, dimId, type, relics, colorMap, onClickItem }: ChartC
   let option: Record<string, unknown> = {};
   if (type === "pie") {
     option = {
-      tooltip: { trigger: "item", formatter: "{b}: {c} ({d}%)", ...TT },
+      tooltip: { trigger: "item", formatter: "{b}: {c} ({d}%)", ...P.tooltip },
       series: [
         {
           type: "pie",
           radius: ["28%", "58%"],
           center: ["50%", "52%"],
           data,
-          label: { color: "#c6d0de", fontSize: 10, formatter: "{b}\n{c}" },
-          labelLine: { lineStyle: { color: "rgba(255,255,255,.2)" } },
+          label: { color: P.text, fontSize: 10, formatter: "{b}\n{c}" },
+          labelLine: { lineStyle: { color: P.labelLine } },
         },
       ],
     };
   } else if (type === "bar") {
     const rev = [...keys].reverse();
     option = {
-      tooltip: { trigger: "axis", ...TT },
+      tooltip: { trigger: "axis", ...P.tooltip },
       grid: { left: 6, right: 36, top: 6, bottom: 6, containLabel: true },
       xAxis: {
         type: "value",
-        splitLine: { lineStyle: { color: "rgba(255,255,255,.06)" } },
-        axisLabel: { color: "#8b99ad", fontSize: 9 },
+        splitLine: { lineStyle: { color: P.split } },
+        axisLabel: { color: P.axis, fontSize: 9 },
       },
       yAxis: {
         type: "category",
         data: rev,
-        axisLabel: { color: "#c6d0de", fontSize: 10, width: 90, overflow: "truncate" },
+        axisLabel: { color: P.text, fontSize: 10, width: 90, overflow: "truncate" },
         axisTick: { show: false },
-        axisLine: { lineStyle: { color: "rgba(255,255,255,.08)" } },
+        axisLine: { lineStyle: { color: P.axisLine } },
       },
       series: [
         {
@@ -93,7 +118,7 @@ function ChartCard({ title, dimId, type, relics, colorMap, onClickItem }: ChartC
           label: {
             show: true,
             position: "right",
-            color: "#8b99ad",
+            color: P.axis,
             fontSize: 9,
             formatter: "{c}",
           },
@@ -102,19 +127,19 @@ function ChartCard({ title, dimId, type, relics, colorMap, onClickItem }: ChartC
     };
   } else {
     option = {
-      tooltip: { trigger: "axis", ...TT },
+      tooltip: { trigger: "axis", ...P.tooltip },
       grid: { left: 6, right: 6, top: 12, bottom: 6, containLabel: true },
       xAxis: {
         type: "category",
         data: keys,
-        axisLabel: { color: "#8b99ad", fontSize: 9, rotate: 25, interval: 0 },
+        axisLabel: { color: P.axis, fontSize: 9, rotate: 25, interval: 0 },
         axisTick: { show: false },
-        axisLine: { lineStyle: { color: "rgba(255,255,255,.08)" } },
+        axisLine: { lineStyle: { color: P.axisLine } },
       },
       yAxis: {
         type: "value",
-        splitLine: { lineStyle: { color: "rgba(255,255,255,.06)" } },
-        axisLabel: { color: "#8b99ad", fontSize: 9 },
+        splitLine: { lineStyle: { color: P.split } },
+        axisLabel: { color: P.axis, fontSize: 9 },
       },
       series: [
         {

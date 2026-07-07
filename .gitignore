@@ -1,5 +1,6 @@
 # User data and local configuration
 data/input/
+data/*两线*/
 config.yaml
 .env
 .env.*
