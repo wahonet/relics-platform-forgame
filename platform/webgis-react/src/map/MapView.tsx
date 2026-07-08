@@ -8,7 +8,7 @@ import { BoundaryLayer } from "./BoundaryLayer";
 import { OfflineCoverageLayer } from "./OfflineCoverageLayer";
 import { RouteLayer, setRouteLayer } from "./RouteLayer";
 import { TwoLineLayer } from "./TwoLineLayer";
-import { useUIStore } from "../stores/uiStore";
+import { useUIStore, isLightTheme } from "../stores/uiStore";
 import { useFilterStore } from "../stores/filterStore";
 import { useRelicsStore } from "../stores/relicsStore";
 import { usePlatformStore } from "../stores/platformStore";
@@ -73,7 +73,7 @@ export function MapView({ onCompassRotate, onScaleUpdate }: MapViewProps) {
 
   /** 主题切换时更新域外遮罩配色(亮白=浅雾,深色=压暗)。 */
   useEffect(() => {
-    boundaryRef.current?.setMaskTheme(theme === "light");
+    boundaryRef.current?.setMaskTheme(isLightTheme(theme));
   }, [theme]);
 
   useEffect(() => {
@@ -127,7 +127,7 @@ export function MapView({ onCompassRotate, onScaleUpdate }: MapViewProps) {
       }
     });
 
-    boundary.setMaskTheme(useUIStore.getState().theme === "light");
+    boundary.setMaskTheme(isLightTheme(useUIStore.getState().theme));
     boundary.load().then(() => {
       const ui = useUIStore.getState();
       boundary.setVisibility({
@@ -138,7 +138,7 @@ export function MapView({ onCompassRotate, onScaleUpdate }: MapViewProps) {
         village: ui.bndVillage,
         villageName: ui.bndVillageName,
       });
-      boundary.setMaskTheme(useUIStore.getState().theme === "light");
+      boundary.setMaskTheme(isLightTheme(useUIStore.getState().theme));
     });
 
     viewport.start((count, truncated) => {

@@ -13,8 +13,13 @@ export type RenderQuality = "standard" | "hd" | "ultra";
 /** Toast 类型:默认 info(主题色点),success/error/warning 换语义色点。 */
 export type ToastKind = "info" | "success" | "error" | "warning";
 
-/** 主题配色。dark=深墨蓝(默认) light=经典亮白 navy=藏青政务 green=青碧 red=胭脂红 */
-export type ThemeId = "dark" | "light" | "navy" | "green" | "red";
+/** 主题配色。dark=深墨蓝(默认) light=经典亮白 navy=藏青政务 green=青碧 red=胭脂红 glass=琉璃玻璃拟态 */
+export type ThemeId = "dark" | "light" | "navy" | "green" | "red" | "glass";
+
+/** 浅色主题(地图域外遮罩用浅雾、文字深墨) */
+export function isLightTheme(t: ThemeId): boolean {
+  return t === "light" || t === "glass";
+}
 
 export function applyTheme(theme: ThemeId): void {
   document.documentElement.dataset.theme = theme;
@@ -122,7 +127,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   uiSize: "md",
   theme: ((): ThemeId => {
     const v = localStorage.getItem("theme");
-    const t = (v === "light" || v === "navy" || v === "green" || v === "red" || v === "dark")
+    const t = (v === "light" || v === "navy" || v === "green" || v === "red" || v === "dark" || v === "glass")
       ? v : "dark";
     document.documentElement.dataset.theme = t;
     return t;
