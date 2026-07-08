@@ -1,0 +1,637 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>济宁市文物保护利用平台 · 系统介绍</title>
+<style>
+  :root {
+    --bg: #0a0f18;
+    --bg2: #101724;
+    --panel: rgba(17, 25, 40, 0.72);
+    --gold: #e3b95e;
+    --gold2: #f2d491;
+    --accent: #5ea3f7;
+    --accent2: #8cc2ff;
+    --green: #4cc38a;
+    --red: #f16a5e;
+    --seal: #d50808;
+    --t1: #eaf0f9;
+    --t2: #8b99ad;
+    --t3: #c6d0de;
+    --hairline: rgba(255, 255, 255, 0.07);
+    --serif: "Noto Serif SC", "Source Han Serif SC", "Songti SC", "STSong", "SimSun", serif;
+    --sans: "PingFang SC", "Microsoft YaHei", -apple-system, "Segoe UI", sans-serif;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: var(--bg); color: var(--t1); font-family: var(--sans); }
+
+  /* ── 幻灯片框架 ─────────────────────────────── */
+  .deck { width: 100%; height: 100%; position: relative; }
+  .slide {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    padding: 56px 88px 72px;
+    opacity: 0; visibility: hidden; transform: translateY(28px) scale(0.985);
+    transition: opacity .45s cubic-bezier(.22,.9,.3,1), transform .45s cubic-bezier(.22,.9,.3,1), visibility .45s;
+    background:
+      radial-gradient(1100px 520px at 85% -10%, rgba(227,185,94,.07), transparent 60%),
+      radial-gradient(1000px 560px at 8% 112%, rgba(61,128,216,.10), transparent 60%),
+      var(--bg);
+  }
+  .slide.on { opacity: 1; visibility: visible; transform: translateY(0) scale(1); z-index: 2; }
+
+  /* 顶部通栏 */
+  .slide::before {
+    content: ""; position: absolute; top: 0; left: 0; right: 0; height: 3px;
+    background: linear-gradient(90deg, transparent, var(--gold) 30%, var(--gold) 70%, transparent);
+    opacity: .55;
+  }
+  .brand {
+    position: absolute; top: 22px; left: 34px; display: flex; align-items: center; gap: 10px;
+    font-family: var(--serif); font-size: 15px; letter-spacing: 2px; color: var(--t2);
+  }
+  .brand img { width: 26px; height: 26px; object-fit: contain; }
+  .pageno { position: absolute; bottom: 20px; right: 30px; font-size: 12px; color: var(--t2); font-variant-numeric: tabular-nums; letter-spacing: 1px; }
+  .part-tag {
+    position: absolute; top: 24px; right: 34px; font-size: 12px; letter-spacing: 3px; color: var(--gold);
+    border: 1px solid rgba(227,185,94,.35); border-radius: 999px; padding: 4px 14px; background: rgba(227,185,94,.08);
+  }
+
+  /* ── 通用排版 ─────────────────────────────── */
+  h1 { font-family: var(--serif); font-weight: 700; }
+  .s-title {
+    font-family: var(--serif); font-size: 40px; letter-spacing: 6px; margin-bottom: 8px;
+    background: linear-gradient(100deg, var(--gold2), #fdf3d7 45%, var(--gold) 90%);
+    -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
+  }
+  .s-sub { font-size: 15px; color: var(--t2); letter-spacing: 2px; margin-bottom: 34px; }
+  .cols { display: flex; gap: 40px; align-items: center; width: 100%; max-width: 1560px; flex: 1; min-height: 0; }
+  .col-txt { flex: 1.02; min-width: 0; }
+  .col-img { flex: 1.55; min-width: 0; display: flex; flex-direction: column; gap: 10px; align-items: center; justify-content: center; }
+  .shot {
+    max-width: 100%; max-height: 66vh; object-fit: contain; border-radius: 12px;
+    border: 1px solid rgba(148,166,197,.25);
+    box-shadow: 0 22px 70px rgba(2,6,14,.65), 0 0 0 1px rgba(255,255,255,.04) inset;
+  }
+  .shot-cap { font-size: 12px; color: var(--t2); letter-spacing: 1px; }
+
+  ul.feat { list-style: none; display: flex; flex-direction: column; gap: 15px; }
+  ul.feat li { position: relative; padding-left: 22px; font-size: 16.5px; line-height: 1.75; color: var(--t3); }
+  ul.feat li::before { content: "▪"; color: var(--gold); position: absolute; left: 0; top: 1px; }
+  ul.feat b { color: var(--t1); }
+  ul.feat i { color: var(--accent2); font-style: normal; }
+
+  .chip {
+    display: inline-block; font-size: 12.5px; color: var(--accent2); background: rgba(94,163,247,.12);
+    border: 1px solid rgba(94,163,247,.32); border-radius: 999px; padding: 3px 12px; margin: 0 6px 8px 0;
+  }
+  .chip.g { color: var(--gold2); background: rgba(227,185,94,.10); border-color: rgba(227,185,94,.36); }
+  .chip.gr { color: var(--green); background: rgba(76,195,138,.10); border-color: rgba(76,195,138,.36); }
+
+  /* ── 封面 ────────────────────────────────── */
+  .cover { text-align: center; }
+  .cover .emblem {
+    width: 148px; height: 148px; object-fit: contain; margin-bottom: 30px;
+    filter: drop-shadow(0 0 34px rgba(213,8,8,.4));
+  }
+  .cover h1 {
+    font-size: 62px; letter-spacing: 14px; margin-bottom: 22px;
+    background: linear-gradient(100deg, var(--gold2), #fdf3d7 45%, var(--gold) 90%);
+    -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
+  }
+  .cover .sub { font-size: 19px; color: var(--t3); letter-spacing: 8px; margin-bottom: 46px; }
+  .cover .meta { font-size: 13px; color: var(--t2); letter-spacing: 3px; line-height: 2.2; }
+  .cover .rule { width: 420px; height: 1px; margin: 26px auto; background: linear-gradient(90deg, transparent, rgba(227,185,94,.55), transparent); }
+
+  /* ── 目录 / 章节页 ───────────────────────── */
+  .toc { display: flex; gap: 34px; margin-top: 16px; }
+  .toc-card {
+    width: 320px; padding: 40px 34px 34px; border-radius: 18px; text-align: left;
+    background: linear-gradient(165deg, rgba(227,185,94,.07), transparent 55%), var(--panel);
+    border: 1px solid var(--hairline); position: relative; overflow: hidden;
+    box-shadow: 0 18px 56px rgba(2,6,14,.5);
+  }
+  .toc-card::before { content: ""; position: absolute; top: 0; left: 22px; right: 22px; height: 1px; background: linear-gradient(90deg, transparent, rgba(94,163,247,.6), transparent); }
+  .toc-card .no { font-family: var(--serif); font-size: 46px; color: var(--gold); opacity: .9; }
+  .toc-card h3 { font-family: var(--serif); font-size: 25px; letter-spacing: 4px; margin: 10px 0 12px; color: var(--t1); }
+  .toc-card p { font-size: 13.5px; color: var(--t2); line-height: 1.9; }
+
+  .divider h1 { font-size: 54px; letter-spacing: 12px; margin: 18px 0 20px; color: var(--t1); }
+  .divider .no { font-family: var(--serif); font-size: 20px; color: var(--gold); letter-spacing: 6px; }
+  .divider p { color: var(--t2); font-size: 16px; letter-spacing: 3px; }
+
+  /* ── 数据总览 ────────────────────────────── */
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; width: 100%; max-width: 1180px; margin-bottom: 30px; }
+  .stat {
+    padding: 26px 10px 20px; text-align: center; border-radius: 14px;
+    background: linear-gradient(160deg, rgba(94,163,247,.08), transparent), var(--panel);
+    border: 1px solid var(--hairline);
+  }
+  .stat b { display: block; font-size: 42px; font-weight: 700; color: var(--accent2); font-variant-numeric: tabular-nums; }
+  .stat.gold b { color: var(--gold2); }
+  .stat span { font-size: 13.5px; color: var(--t2); letter-spacing: 2px; }
+
+  /* ── 架构图 ─────────────────────────────── */
+  .arch { display: flex; align-items: stretch; gap: 14px; width: 100%; max-width: 1480px; }
+  .arch .stage { flex: 1; display: flex; flex-direction: column; gap: 10px; }
+  .arch .stage-t { text-align: center; font-size: 14px; color: var(--gold2); letter-spacing: 2px; padding-bottom: 2px; }
+  .arch .node {
+    background: var(--panel); border: 1px solid var(--hairline); border-radius: 10px;
+    padding: 11px 13px; font-size: 13px; color: var(--t3); line-height: 1.55;
+  }
+  .arch .node b { color: var(--t1); display: block; margin-bottom: 2px; font-size: 13.5px; }
+  .arch .node.hot { border-color: rgba(94,163,247,.4); background: linear-gradient(160deg, rgba(94,163,247,.10), transparent), var(--panel); }
+  .arch .node.opt { border-style: dashed; color: var(--t2); }
+  .arch .arrow { align-self: center; color: var(--gold); font-size: 22px; flex: none; padding: 0 1px; }
+
+  /* ── 表格 ────────────────────────────────── */
+  table.tech { border-collapse: collapse; width: 100%; max-width: 1240px; font-size: 14.5px; }
+  table.tech th, table.tech td { padding: 11px 18px; text-align: left; border-bottom: 1px solid var(--hairline); }
+  table.tech th { color: var(--gold2); font-weight: 600; letter-spacing: 2px; font-size: 14px; border-bottom: 1px solid rgba(227,185,94,.35); white-space: nowrap; }
+  table.tech td:first-child { color: var(--t1); white-space: nowrap; font-weight: 600; }
+  table.tech td { color: var(--t3); line-height: 1.65; }
+  table.tech td i { color: var(--accent2); font-style: normal; }
+
+  /* ── 规划卡片 ────────────────────────────── */
+  .plan { display: flex; gap: 26px; width: 100%; max-width: 1480px; align-items: stretch; }
+  .plan-card {
+    flex: 1; border-radius: 16px; padding: 30px 28px;
+    background: var(--panel); border: 1px solid var(--hairline); position: relative; overflow: hidden;
+  }
+  .plan-card::before { content: ""; position: absolute; top: 0; left: 0; right: 0; height: 3px; }
+  .plan-card.p1::before { background: linear-gradient(90deg, var(--green), transparent); }
+  .plan-card.p2::before { background: linear-gradient(90deg, var(--accent), transparent); }
+  .plan-card.p3::before { background: linear-gradient(90deg, var(--gold), transparent); }
+  .plan-card .ph { display: flex; align-items: baseline; gap: 10px; margin-bottom: 18px; }
+  .plan-card .ph h3 { font-family: var(--serif); font-size: 23px; letter-spacing: 3px; color: var(--t1); }
+  .plan-card .ph span { font-size: 12.5px; color: var(--t2); letter-spacing: 1px; }
+  .plan-card ul { list-style: none; display: flex; flex-direction: column; gap: 13px; }
+  .plan-card li { font-size: 14.5px; color: var(--t3); line-height: 1.7; padding-left: 16px; position: relative; }
+  .plan-card li::before { content: ""; position: absolute; left: 0; top: 10px; width: 6px; height: 6px; border-radius: 50%; }
+  .plan-card.p1 li::before { background: var(--green); box-shadow: 0 0 8px var(--green); }
+  .plan-card.p2 li::before { background: var(--accent); box-shadow: 0 0 8px var(--accent); }
+  .plan-card.p3 li::before { background: var(--gold); box-shadow: 0 0 8px var(--gold); }
+  .plan-card li b { color: var(--t1); }
+
+  /* ── 控制 UI ─────────────────────────────── */
+  .dots {
+    position: fixed; right: 18px; top: 50%; transform: translateY(-50%); z-index: 10;
+    display: flex; flex-direction: column; gap: 9px;
+  }
+  .dots i { width: 7px; height: 7px; border-radius: 50%; background: rgba(148,166,197,.3); cursor: pointer; transition: all .25s; }
+  .dots i.on { background: var(--gold); box-shadow: 0 0 8px rgba(227,185,94,.7); transform: scale(1.35); }
+  .hint {
+    position: fixed; bottom: 20px; left: 30px; z-index: 10; font-size: 12px; color: var(--t2); letter-spacing: 1px; opacity: .75;
+  }
+  .hint kbd {
+    font-family: inherit; border: 1px solid rgba(148,166,197,.35); border-radius: 4px;
+    padding: 1px 7px; margin: 0 2px; font-size: 11px; background: rgba(255,255,255,.04);
+  }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 26px; width: 100%; max-width: 1380px; }
+  .kcard {
+    background: var(--panel); border: 1px solid var(--hairline); border-radius: 14px; padding: 20px 24px;
+  }
+  .kcard h4 { font-size: 16.5px; color: var(--gold2); letter-spacing: 2px; margin-bottom: 9px; display: flex; align-items: center; gap: 9px; }
+  .kcard h4::before { content: ""; width: 3px; height: 15px; border-radius: 2px; background: linear-gradient(180deg, var(--gold), var(--accent)); }
+  .kcard p { font-size: 14px; color: var(--t3); line-height: 1.8; }
+  .kcard p i { color: var(--accent2); font-style: normal; }
+</style>
+</head>
+<body>
+<div class="deck" id="deck">
+
+  <!-- 1 封面 -->
+  <section class="slide cover">
+    <img class="emblem" src="img/emblem.png" alt="文化济宁">
+    <h1>济宁市文物保护利用平台</h1>
+    <div class="sub">孔孟之乡 · 运河之都 —— 文物数字化保护与利用一体化解决方案</div>
+    <div class="rule"></div>
+    <div class="meta">
+      系统功能与技术路线介绍<br>
+      2026 年 7 月
+    </div>
+  </section>
+
+  <!-- 2 目录 -->
+  <section class="slide">
+    <div class="brand"><img src="img/emblem.png" alt="">济宁市文物保护利用平台</div>
+    <div class="s-title">目 录</div>
+    <div class="s-sub">CONTENTS</div>
+    <div class="toc">
+      <div class="toc-card">
+        <div class="no">壹</div>
+        <h3>功能简介</h3>
+        <p>地图总览 · 资源概览 · 图斑对比 · 文物巡查 · AI 助手 · 系统管理,六大功能模块全景演示</p>
+      </div>
+      <div class="toc-card">
+        <div class="no">贰</div>
+        <h3>技术路线</h3>
+        <p>单机一体化架构 · 四步数据管线 · 空间数据库 · 前后端技术选型与关键技术实现</p>
+      </div>
+      <div class="toc-card">
+        <div class="no">叁</div>
+        <h3>下步规划</h3>
+        <p>短期夯实质量 · 中期业务深化 · 远期区域推广,平台演进路线图</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 3 第一部分章节页 -->
+  <section class="slide divider">
+    <div class="brand"><img src="img/emblem.png" alt="">济宁市文物保护利用平台</div>
+    <div class="no">第一部分</div>
+    <h1>功能简介</h1>
+    <p>一张图掌握全市文物 · 六大模块覆盖保护利用全流程</p>
+  </section>
+
+  <!-- 4 平台总览 -->
+  <section class="slide">
+    <div class="brand"><img src="img/emblem.png" alt="">济宁市文物保护利用平台</div>
+    <div class="part-tag">功能简介</div>
+    <div class="s-title">平台总览</div>
+    <div class="s-sub">全市不可移动文物"一张图"数字底座 · 单机部署 · 断网可用 · 数据不出本机</div>
+    <div class="stats">
+      <div class="stat gold"><b>1,108</b><span>不可移动文物(处)</span></div>
+      <div class="stat"><b>11,918</b><span>文物影像(张)</span></div>
+      <div class="stat"><b>2,748</b><span>测绘图纸(张)</span></div>
+      <div class="stat"><b>353</b><span>两线范围矢量(处)</span></div>
+    </div>
+    <div style="max-width:1180px; width:100%;">
+      <span class="chip g">地图总览</span><span class="chip g">资源概览</span><span class="chip g">图斑对比</span><span class="chip g">文物巡查</span><span class="chip g">AI 助手</span><span class="chip g">系统管理</span>
+      <span class="chip">六套主题皮肤</span><span class="chip">移动端扫码巡查</span><span class="chip gr">离线瓦片缓存</span><span class="chip gr">一键启动 start.bat</span>
+    </div>
+  </section>
+
+  <!-- 5 地图总览 -->
+  <section class="slide">
+    <div class="brand"><img src="img/emblem.png" alt="">济宁市文物保护利用平台</div>
+    <div class="part-tag">功能简介</div>
+    <div class="s-title">地图总览</div>
+    <div class="s-sub">Cesium 三维地球 · 全市文物空间分布一屏尽览</div>
+    <div class="cols">
+      <div class="col-txt">
+        <ul class="feat">
+          <li><b>智能点位渲染</b>:远视角按保护级别着色,近视角自动切换"级别色 + 类别剪影"徽章,万级点位流畅呈现</li>
+          <li><b>多维筛选</b>:类别 / 级别 / 县区乡镇 / 年代 / 保存状况 / 关键词即筛即显,统计图点击联动地图</li>
+          <li><b>两线范围</b>:保护范围(红)与建控地带(蓝)随缩放自动隐现,选中文物自动叠加</li>
+          <li><b>多源底图</b>:天地图 / 高德在线影像与矢量,离线瓦片一次下载永久可用</li>
+          <li><b>专业坐标</b>:WGS84 / CGCS2000 / 高斯-克吕格实时读数与互转</li>
+        </ul>
+      </div>
+      <div class="col-img">
+        <img class="shot" src="img/map.png" alt="地图总览">
+        <div class="shot-cap">地图总览 · 市域聚焦 + 双侧统计面板</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 6 资源概览 -->
+  <section class="slide">
+    <div class="brand"><img src="img/emblem.png" alt="">济宁市文物保护利用平台</div>
+    <div class="part-tag">功能简介</div>
+    <div class="s-title">资源概览</div>
+    <div class="s-sub">数据大屏 · 家底一目了然</div>
+    <div class="cols">
+      <div class="col-txt">
+        <ul class="feat">
+          <li><b>六项核心指标</b>:文物总量、保护单位、影像、三维模型、普查档案、两线矢量</li>
+          <li><b>多维统计图</b>:保护级别构成、县市区分布、文物类别、保存状况、年代序列</li>
+          <li><b>数据质量评分</b>:空间坐标 / 文字简介 / 影像资料 / 两线覆盖完整度综合打分</li>
+          <li><b>图表即筛选</b>:点击任意图表区块,跳回地图页并自动应用对应筛选</li>
+          <li><b>主题自适应</b>:图表配色随六套主题实时联动,汇报大屏随心切换</li>
+        </ul>
+      </div>
+      <div class="col-img">
+        <img class="shot" src="img/dashboard.png" alt="资源概览">
+        <div class="shot-cap">资源概览大屏 · 数据质量综合评分</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 7 图斑对比 -->
+  <section class="slide">
+    <div class="brand"><img src="img/emblem.png" alt="">济宁市文物保护利用平台</div>
+    <div class="part-tag">功能简介</div>
+    <div class="s-title">图斑对比</div>
+    <div class="s-sub">建设用地 SHP 一键导入 · 文物占压自动核查 —— 服务基本建设考古前置</div>
+    <div class="cols">
+      <div class="col-txt">
+        <ul class="feat">
+          <li><b>SHP 直接导入</b>:拖入自然资源部门提供的用地范围线(.shp/.zip),<i>CGCS2000 高斯-克吕格坐标自动识别反算</i>,无需第三方软件转换</li>
+          <li><b>一键占压查询</b>:R-Tree + 空间求交,秒级判定图斑是否压占<i>文物本体 / 保护范围 / 建控地带</i>,压占面积自动换算亩</li>
+          <li><b>冲突清单定位</b>:按压占面积排序,点击条目地图飞行定位并红色闪烁提示</li>
+          <li><b>批量管理</b>:多图层同时导入、全选批量删除、独立显隐控制</li>
+        </ul>
+      </div>
+      <div class="col-img">
+        <img class="shot" src="img/parcels-live.png" alt="图斑对比实例" style="max-height:40vh">
+        <img class="shot" src="img/parcels.png" alt="图斑对比页面" style="max-height:26vh">
+        <div class="shot-cap">上:嘉祥县用地图斑叠加效果 · 下:图斑对比工作台</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 8 文物巡查 -->
+  <section class="slide">
+    <div class="brand"><img src="img/emblem.png" alt="">济宁市文物保护利用平台</div>
+    <div class="part-tag">功能简介</div>
+    <div class="s-title">文物巡查</div>
+    <div class="s-sub">AI 规划 + 移动打卡 + 智能核验,巡查工作闭环管理</div>
+    <div class="cols">
+      <div class="col-txt">
+        <ul class="feat">
+          <li><b>AI 智能规划</b>:一句话生成巡查方案,如"巡查嘉祥县保存较差的 5 处文物",按保存状况自动排定巡查频次</li>
+          <li><b>真实路径</b>:接入高德驾车路线,里程与耗时精确估算,途经点最近邻排序</li>
+          <li><b>扫码巡查</b>:路线生成二维码,手机扫码免登录打开 H5 巡查页</li>
+          <li><b>到场核验</b>:打卡照片自动提取 EXIF GPS,与文物坐标比对判定是否到场</li>
+          <li><b>AI 照片评估</b>:视觉大模型对比历史照片,自动评估保存状况变化并生成报告</li>
+        </ul>
+      </div>
+      <div class="col-img">
+        <img class="shot" src="img/patrol.png" alt="文物巡查">
+        <div class="shot-cap">巡查规划工作台 · 巡查提醒与 AI 方案生成</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 9 AI 助手与体验 -->
+  <section class="slide">
+    <div class="brand"><img src="img/emblem.png" alt="">济宁市文物保护利用平台</div>
+    <div class="part-tag">功能简介</div>
+    <div class="s-title">AI 助手 · 交互体验</div>
+    <div class="s-sub">大模型深度融合 · 六套主题皮肤 · 现代交互细节</div>
+    <div class="cols">
+      <div class="col-txt">
+        <ul class="feat">
+          <li><b>台账问答</b>:基于全量文物档案的流式问答,"哪些国保单位保存较差?"即问即答</li>
+          <li><b>回答即操作</b>:答案中的文物名、县区、数量均可点击,直接驱动地图筛选与定位</li>
+          <li><b>六套主题</b>:深墨蓝 / 经典亮白 / 藏青政务 / 青碧 / 胭脂红 / <i>琉璃玻璃拟态</i>,一键切换、全站联动</li>
+          <li><b>可拖拽详情</b>:文物详情卡片自由拖动、缩放,位置记忆,查图对照两不误</li>
+          <li><b>全程降级可用</b>:未配置 AI Key 时自动切换规则引擎,核心功能不受影响</li>
+        </ul>
+      </div>
+      <div class="col-img">
+        <img class="shot" src="img/info-glass.png" alt="琉璃主题详情面板" style="max-height:62vh">
+        <div class="shot-cap">琉璃玻璃拟态主题 · 可拖拽文物详情面板</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 10 系统管理 -->
+  <section class="slide">
+    <div class="brand"><img src="img/emblem.png" alt="">济宁市文物保护利用平台</div>
+    <div class="part-tag">功能简介</div>
+    <div class="s-title">系统管理</div>
+    <div class="s-sub">数据管线可视化 · 非技术人员也能维护</div>
+    <div class="cols">
+      <div class="col-txt">
+        <ul class="feat">
+          <li><b>可视化管线</b>:档案提取 → 数据导入 → 边界处理 → 数据库构建,四步流水线网页端一键运行、实时日志</li>
+          <li><b>进度追踪</b>:LLM 档案提取支持断点续传与双通道并行,完成率实时展示</li>
+          <li><b>API 配置热更新</b>:大模型 / 高德 / 天地图 Key 网页端保存即生效,无需重启</li>
+          <li><b>离线地图下载</b>:框选区域批量下载瓦片,支持断网环境使用</li>
+          <li><b>安全防线</b>:清库操作二次口令确认,操作审计全程留痕</li>
+        </ul>
+      </div>
+      <div class="col-img">
+        <img class="shot" src="img/admin.png" alt="系统管理">
+        <div class="shot-cap">系统管理 · 数据管线一键运行</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 11 第二部分章节页 -->
+  <section class="slide divider">
+    <div class="brand"><img src="img/emblem.png" alt="">济宁市文物保护利用平台</div>
+    <div class="no">第二部分</div>
+    <h1>技术路线</h1>
+    <p>单机一体化 · 轻量可靠 · 面向基层文保单位的务实架构</p>
+  </section>
+
+  <!-- 12 总体架构 -->
+  <section class="slide">
+    <div class="brand"><img src="img/emblem.png" alt="">济宁市文物保护利用平台</div>
+    <div class="part-tag">技术路线</div>
+    <div class="s-title">总体架构</div>
+    <div class="s-sub">一个 Python 进程 = API 服务 + 前端托管 + 瓦片代理 · 双击即用、断网可用、数据不出本机</div>
+    <div class="arch">
+      <div class="stage">
+        <div class="stage-t">数据输入</div>
+        <div class="node"><b>四普登记表 docx</b>乡镇归档的普查档案</div>
+        <div class="node"><b>台账 xlsx / 名单</b>市保县保名录</div>
+        <div class="node"><b>行政边界 SHP</b>县 / 乡镇 / 村三级</div>
+        <div class="node"><b>两线范围 GeoJSON</b>测绘成果挂接</div>
+      </div>
+      <div class="arrow">→</div>
+      <div class="stage">
+        <div class="stage-t">数据管线</div>
+        <div class="node hot"><b>step00 档案提取</b>LLM 把 docx 转结构化 Markdown</div>
+        <div class="node"><b>step01 标准化导入</b>坐标转换 · 媒体归位 · 两线挂接</div>
+        <div class="node"><b>step02 边界处理</b>GK 反算 · GCJ 纠偏 → WGS84</div>
+        <div class="node hot"><b>step03 建库</b>SQLite 全量重建(幂等)</div>
+      </div>
+      <div class="arrow">→</div>
+      <div class="stage">
+        <div class="stage-t">数据层</div>
+        <div class="node hot"><b>relics.db</b>R-Tree 空间索引 + FTS5 全文检索</div>
+        <div class="node"><b>patrol.db</b>巡查独立库,重建不丢历史</div>
+        <div class="node"><b>文件资产</b>照片 / 图纸 / 边界 / 瓦片缓存</div>
+      </div>
+      <div class="arrow">→</div>
+      <div class="stage">
+        <div class="stage-t">FastAPI 后端</div>
+        <div class="node hot"><b>7 组路由</b>文物 / 统计 / 问答 / 巡查 / 边界 / 坐标系 / 管理</div>
+        <div class="node"><b>服务层</b>AI · 高德 · 巡查 · EXIF 核验</div>
+        <div class="node"><b>瓦片代理</b>LRU + 磁盘缓存 · 限流去重</div>
+        <div class="node opt"><b>外部 API(可选)</b>SiliconFlow / DeepSeek / 高德 / 天地图</div>
+      </div>
+      <div class="arrow">→</div>
+      <div class="stage">
+        <div class="stage-t">前端呈现</div>
+        <div class="node hot"><b>React 18 + Cesium</b>地图总览 · 图斑对比 · 巡查</div>
+        <div class="node"><b>ECharts 大屏</b>资源概览 · 主题联动</div>
+        <div class="node"><b>移动端 H5</b>扫码免登录巡查打卡</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 13 技术选型 -->
+  <section class="slide">
+    <div class="brand"><img src="img/emblem.png" alt="">济宁市文物保护利用平台</div>
+    <div class="part-tag">技术路线</div>
+    <div class="s-title">技术选型</div>
+    <div class="s-sub">每一项选择都服务于"基层一台电脑就能跑"</div>
+    <table class="tech">
+      <tr><th>层次</th><th>选型</th><th>选型理由</th></tr>
+      <tr><td>存储</td><td>SQLite <i>WAL + R-Tree + FTS5</i></td><td>零运维单文件库;空间索引与中文 trigram 全文检索开箱即用</td></tr>
+      <tr><td>后端</td><td>FastAPI + Uvicorn</td><td>异步支撑瓦片代理与 SSE 流式问答;自动生成 API 文档</td></tr>
+      <tr><td>前端</td><td>React 18 + TypeScript + Vite 5</td><td>组件化拆分六大功能页;构建产物直接由后端托管,单端口部署</td></tr>
+      <tr><td>地图引擎</td><td>Cesium 1.125</td><td>同一引擎覆盖 2.5D 地图与 3D Tiles 三维模型;瓦片走后端代理</td></tr>
+      <tr><td>状态管理</td><td>Zustand 5</td><td>轻量切片式 store,筛选 / 图层 / 巡查 / 图斑各域独立</td></tr>
+      <tr><td>空间分析</td><td>Shapely 2 + pyshp + 自研坐标引擎</td><td>SHP 解析、高斯-克吕格反算、STRtree 空间求交,图斑占压秒级判定</td></tr>
+      <tr><td>AI 集成</td><td>OpenAI 兼容接口 <i>统一入口</i></td><td>档案提取 / 问答 / 巡查规划 / 照片评估共用一套模型配置,均有无 Key 降级</td></tr>
+    </table>
+  </section>
+
+  <!-- 14 关键技术 -->
+  <section class="slide">
+    <div class="brand"><img src="img/emblem.png" alt="">济宁市文物保护利用平台</div>
+    <div class="part-tag">技术路线</div>
+    <div class="s-title">关键技术实现</div>
+    <div class="s-sub">把专业 GIS 能力封装成"零门槛"体验</div>
+    <div class="grid2">
+      <div class="kcard">
+        <h4>LLM 档案数字化流水线</h4>
+        <p>四普 docx 登记表经大模型提取为结构化档案:<i>断点续传</i>、双通道并行(速度翻倍)、产物完整性校验、优雅停止;1108 处文物档案完成率 100%</p>
+      </div>
+      <div class="kcard">
+        <h4>空间检索与占压分析</h4>
+        <p>R-Tree 视口查询支撑地图流畅拖动;图斑对比用 <i>STRtree + 空间求交</i>,1200+ 图斑 × 796 个两线面秒级完成占压判定</p>
+      </div>
+      <div class="kcard">
+        <h4>多坐标系自动换算</h4>
+        <p>自研 CGCS2000 / 高斯-克吕格正反算引擎(全国范围 &lt; 1mm):SHP 导入自动识别 .prj 投影、带号剥离、中央经线推断,<i>测绘成果零转换直接用</i></p>
+      </div>
+      <div class="kcard">
+        <h4>瓦片代理与离线地图</h4>
+        <p>天地图 / 高德瓦片统一代理:内存 LRU + <i>磁盘永久缓存</i>(同区域只耗一次配额)、并发限流、Key 轮转;支持整区域离线下载</p>
+      </div>
+      <div class="kcard">
+        <h4>AI 全链路降级策略</h4>
+        <p>问答 / 规划 / 照片评估每处都有规则引擎兜底:<i>不配 Key 也能用</i>,配了 Key 体验更好;Key 网页端保存即热生效</p>
+      </div>
+      <div class="kcard">
+        <h4>主题化设计系统</h4>
+        <p>CSS 设计令牌 + <i>color-mix 自动派生</i>色板,六套主题(含琉璃玻璃拟态)一处定义全站联动,ECharts 与 Cesium 地球底色运行时跟随</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 15 第三部分章节页 -->
+  <section class="slide divider">
+    <div class="brand"><img src="img/emblem.png" alt="">济宁市文物保护利用平台</div>
+    <div class="no">第三部分</div>
+    <h1>下步规划</h1>
+    <p>夯实基础 · 深化业务 · 面向推广</p>
+  </section>
+
+  <!-- 16 规划 -->
+  <section class="slide">
+    <div class="brand"><img src="img/emblem.png" alt="">济宁市文物保护利用平台</div>
+    <div class="part-tag">下步规划</div>
+    <div class="s-title">演进路线图</div>
+    <div class="s-sub">从"可用"到"好用",从"一市"到"多域"</div>
+    <div class="plan">
+      <div class="plan-card p1">
+        <div class="ph"><h3>短期</h3><span>1 - 3 个月 · 夯实质量</span></div>
+        <ul>
+          <li><b>质量门禁</b>:前端单元测试 + ESLint 接入 CI,与既有后端 pytest 联动</li>
+          <li><b>图斑对比增强</b>:占压核查结果一键导出 Word / PDF 报告,直接用于考古前置审批意见</li>
+          <li><b>性能优化</b>:点位服务端聚簇抽稀,支撑数据量向万级增长</li>
+          <li><b>档案抽检</b>:LLM 提取结果置信度评分,低分档案自动标记人工复核</li>
+        </ul>
+      </div>
+      <div class="plan-card p2">
+        <div class="ph"><h3>中期</h3><span>3 - 12 个月 · 深化业务</span></div>
+        <ul>
+          <li><b>四普成果全量接入</b>:普查新发现文物增量入库,历史版本对比</li>
+          <li><b>多人协同</b>:基于既有审计日志与乐观锁,开放在线编辑与审核工作流</li>
+          <li><b>巡查深化</b>:巡查台账统计分析、逾期预警推送、无人机航拍影像挂接</li>
+          <li><b>变化监测</b>:定期卫星影像叠加比对,两线范围内新增建设自动预警</li>
+        </ul>
+      </div>
+      <div class="plan-card p3">
+        <div class="ph"><h3>远期</h3><span>1 年以上 · 面向推广</span></div>
+        <ul>
+          <li><b>多区县推广</b>:换地区只改配置与数据不动代码,形成可复制的县域方案</li>
+          <li><b>平台互联</b>:与省市文物数据平台对接,数据上报与共享交换</li>
+          <li><b>AI 深化</b>:文物知识库语义检索、保护规划辅助编制、公众展示问答</li>
+          <li><b>活化利用</b>:面向公众的文物地图小程序与研学路线推荐</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- 17 结尾 -->
+  <section class="slide cover">
+    <img class="emblem" src="img/emblem.png" alt="文化济宁">
+    <h1 style="font-size:52px">让文物"活"在数字时代</h1>
+    <div class="rule"></div>
+    <div class="sub" style="letter-spacing:5px">济宁市文物保护利用平台 · 谢谢观看</div>
+    <div class="meta">孔孟之乡 · 运河之都</div>
+  </section>
+
+</div>
+
+<div class="dots" id="dots"></div>
+<div class="hint"><kbd>←</kbd><kbd>→</kbd> 翻页 · <kbd>F</kbd> 全屏 · <kbd>Home</kbd> 回到封面</div>
+
+<script>
+(function () {
+  var slides = Array.prototype.slice.call(document.querySelectorAll(".slide"));
+  var dotsBox = document.getElementById("dots");
+  var cur = 0;
+
+  slides.forEach(function (s, i) {
+    var no = document.createElement("div");
+    no.className = "pageno";
+    no.textContent = (i + 1) + " / " + slides.length;
+    s.appendChild(no);
+    var d = document.createElement("i");
+    d.addEventListener("click", function () { go(i); });
+    dotsBox.appendChild(d);
+  });
+  var dots = Array.prototype.slice.call(dotsBox.children);
+
+  function go(i) {
+    if (i < 0 || i >= slides.length || i === cur && slides[cur].classList.contains("on")) {
+      if (!slides[cur].classList.contains("on")) { /* 初始 */ } else if (i === cur) return;
+    }
+    if (i < 0) i = 0;
+    if (i >= slides.length) i = slides.length - 1;
+    slides[cur].classList.remove("on");
+    dots[cur].classList.remove("on");
+    cur = i;
+    slides[cur].classList.add("on");
+    dots[cur].classList.add("on");
+    location.hash = "s" + (cur + 1);
+  }
+
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "ArrowRight" || e.key === "ArrowDown" || e.key === "PageDown" || e.key === " ") { e.preventDefault(); go(cur + 1); }
+    else if (e.key === "ArrowLeft" || e.key === "ArrowUp" || e.key === "PageUp") { e.preventDefault(); go(cur - 1); }
+    else if (e.key === "Home") go(0);
+    else if (e.key === "End") go(slides.length - 1);
+    else if (e.key === "f" || e.key === "F") {
+      if (document.fullscreenElement) document.exitFullscreen();
+      else document.documentElement.requestFullscreen();
+    }
+  });
+
+  var wheelLock = 0;
+  document.addEventListener("wheel", function (e) {
+    var now = Date.now();
+    if (now - wheelLock < 550) return;
+    wheelLock = now;
+    go(cur + (e.deltaY > 0 ? 1 : -1));
+  }, { passive: true });
+
+  var touchY = null;
+  document.addEventListener("touchstart", function (e) { touchY = e.touches[0].clientY; }, { passive: true });
+  document.addEventListener("touchend", function (e) {
+    if (touchY == null) return;
+    var dy = e.changedTouches[0].clientY - touchY;
+    if (Math.abs(dy) > 42) go(cur + (dy < 0 ? 1 : -1));
+    touchY = null;
+  }, { passive: true });
+
+  var m = location.hash.match(/^#s(\d+)$/);
+  var start = m ? Math.min(Math.max(parseInt(m[1], 10) - 1, 0), slides.length - 1) : 0;
+  slides[start].classList.add("on");
+  dots[start].classList.add("on");
+  cur = start;
+})();
+</script>
+</body>
+</html>
