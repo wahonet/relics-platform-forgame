@@ -16,6 +16,7 @@ import {
 import type { PatrolRoute, PatrolStats } from "../types";
 import { getRouteLayer } from "../map/RouteLayer";
 import { PatrolReportModal } from "./PatrolReportModal";
+import { confirmDialog } from "./ConfirmModal";
 
 type TabKey = "plan" | "routes";
 
@@ -180,7 +181,13 @@ export function PatrolPanel() {
   };
 
   const removeRoute = async (id: number) => {
-    if (!window.confirm("删除这条巡查路线?打卡记录将一并删除。")) return;
+    const ok = await confirmDialog({
+      title: "删除巡查路线",
+      body: "删除这条巡查路线?打卡记录将一并删除。",
+      danger: true,
+      okText: "删除",
+    });
+    if (!ok) return;
     try {
       await deleteRoute(id);
       if (activeRoute?.id === id) {
@@ -188,9 +195,9 @@ export function PatrolPanel() {
         getRouteLayer()?.clearRoute();
       }
       refreshRoutes();
-      showToast("已删除");
+      showToast("已删除", "success");
     } catch {
-      showToast("删除失败");
+      showToast("删除失败", "error");
     }
   };
 
@@ -351,14 +358,14 @@ export function PatrolPanel() {
                         ) : null}
                       </span>
                       <span className="pp-stop-ops">
-                        <button onClick={() => usePatrolStore.getState().moveStop(s.code, -1)}>
-                          ↑
+                        <button title="上移" onClick={() => usePatrolStore.getState().moveStop(s.code, -1)}>
+                          <svg viewBox="0 0 24 24"><path d="M12 8l-6 6 1.4 1.4L12 10.8l4.6 4.6L18 14z" /></svg>
                         </button>
-                        <button onClick={() => usePatrolStore.getState().moveStop(s.code, 1)}>
-                          ↓
+                        <button title="下移" onClick={() => usePatrolStore.getState().moveStop(s.code, 1)}>
+                          <svg viewBox="0 0 24 24"><path d="M12 16l6-6-1.4-1.4L12 13.2 7.4 8.6 6 10z" /></svg>
                         </button>
-                        <button onClick={() => usePatrolStore.getState().removeStop(s.code)}>
-                          ×
+                        <button title="移除" onClick={() => usePatrolStore.getState().removeStop(s.code)}>
+                          <svg viewBox="0 0 24 24"><path d="M19 6.4L17.6 5 12 10.6 6.4 5 5 6.4 10.6 12 5 17.6 6.4 19 12 13.4 17.6 19 19 17.6 13.4 12z" /></svg>
                         </button>
                       </span>
                     </div>
@@ -443,6 +450,11 @@ export function PatrolPanel() {
                       {r.plan_date || "未定日期"} · {r.stop_count} 站 · {fmtKm(r.distance_m)} ·
                       已巡 {r.checked_count}/{r.stop_count}
                     </div>
+                    {r.stop_count > 0 ? (
+                      <div className="pp-route-prog">
+                        <i style={{ width: `${Math.min(100, (r.checked_count / r.stop_count) * 100)}%` }} />
+                      </div>
+                    ) : null}
                   </div>
                 ))}
               </div>

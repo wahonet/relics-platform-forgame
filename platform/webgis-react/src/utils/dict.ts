@@ -32,6 +32,16 @@ export const CATEGORY_MAP: Record<string, CategoryEntry> = {
   "0600": { label: "其他", color: "#8b99ad", icon: null },
 };
 
+/** 保护级别 → 颜色。全平台唯一来源:地图点位/图例/统计图表共用。
+ *  国保=红 省保=橙 市保=蓝 县保=绿 未定级=紫 */
+export const RANK_COLOR: Record<string, string> = {
+  "1": "#e63946",
+  "2": "#f6892e",
+  "3": "#2f81f7",
+  "4": "#2ea043",
+  "5": "#a45bf0",
+};
+
 export const RANK_MAP: Record<string, RankEntry> = {
   "1": { label: "全国重点文物保护单位", short: "国保", size: 3.5, prominent: true },
   "2": { label: "省级文物保护单位", short: "省保", size: 3, prominent: true },
@@ -127,6 +137,15 @@ export const ERA_ORDER = [
 
 export const COND_CLS: Record<string, string> = {
   好: "lv-g", 较好: "lv-f", 一般: "lv-a", 较差: "lv-p", 差: "lv-p",
+};
+
+/** 保存状况 → 颜色(绿→红渐进,语义固定,统计图表共用)。 */
+export const CONDITION_COLOR: Record<string, string> = {
+  好: "#4cc38a",
+  较好: "#7ee0a3",
+  一般: "#d9a62e",
+  较差: "#f0975c",
+  差: "#f16a5e",
 };
 
 export interface DimDef {
@@ -228,7 +247,11 @@ export function buildColorMap(
     if (dim.id === "category_main") {
       map[k] = CATEGORY_MAP[categoryCode(k)]?.color || PALETTE[i % PALETTE.length];
     } else if (dim.id === "heritage_level") {
-      map[k] = ["#f16a5e", "#e3b95e", "#b79bf5", "#5ea3f7", "#8b99ad"][Math.min(i, 4)];
+      // 与地图点位/图例同源:国保红 省保橙 市保蓝 县保绿 未定级紫
+      map[k] = RANK_COLOR[rankCode(k)] || PALETTE[i % PALETTE.length];
+    } else if (dim.id === "condition_level") {
+      // 保存状况按好→差的绿→红渐进,不随出现顺序漂移
+      map[k] = CONDITION_COLOR[k] || PALETTE[i % PALETTE.length];
     } else {
       map[k] = PALETTE[i % PALETTE.length];
     }

@@ -19,6 +19,11 @@ export function Header({ activeTab }: { activeTab: AppTab }) {
 
   return (
     <div className="header">
+      <span className="hdr-emblem" aria-hidden>
+        <svg viewBox="0 0 24 24">
+          <path d="M12 2 3 7v2h18V7l-9-5zm-7 9v7H3v2h18v-2h-2v-7h-2v7h-3v-7h-2v7H9v-7H5z" />
+        </svg>
+      </span>
       <h1>{config?.project?.full_name || "文物保护利用平台"}</h1>
 
       <nav className="hdr-nav">

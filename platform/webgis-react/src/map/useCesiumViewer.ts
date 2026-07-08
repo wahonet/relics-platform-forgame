@@ -15,15 +15,35 @@ function applyIonTokenFromConfig(): void {
   }
 }
 
+/** 地球底色/场景背景取当前主题的 --bg,瓦片未加载区域与页面融为一体。 */
+function applySceneBaseColor(viewer: Cesium.Viewer): void {
+  const bg =
+    getComputedStyle(document.documentElement).getPropertyValue("--bg").trim() || "#0d1117";
+  try {
+    const c = Cesium.Color.fromCssColorString(bg);
+    viewer.scene.globe.baseColor = c;
+    viewer.scene.backgroundColor = c;
+    viewer.scene.requestRender();
+  } catch {
+    /* ignore malformed css value */
+  }
+}
+
 export function useCesiumViewer(containerRef: React.RefObject<HTMLDivElement>) {
   const viewerRef = useRef<Cesium.Viewer | null>(null);
   // 平台配置是异步拉取的:viewer 创建时往往还没拿到 token,
   // 这里再订阅 loaded,配置到达后补设一次。
   const platformLoaded = usePlatformStore((s) => s.loaded);
+  const theme = useUIStore((s) => s.theme);
 
   useEffect(() => {
     applyIonTokenFromConfig();
   }, [platformLoaded]);
+
+  // 主题切换时同步地球底色(data-theme 已先行写入 DOM)
+  useEffect(() => {
+    if (viewerRef.current) applySceneBaseColor(viewerRef.current);
+  }, [theme]);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -50,8 +70,7 @@ export function useCesiumViewer(containerRef: React.RefObject<HTMLDivElement>) {
       mapProjection: new Cesium.WebMercatorProjection(),
     });
 
-    viewer.scene.globe.baseColor = Cesium.Color.fromCssColorString("#0d1117");
-    viewer.scene.backgroundColor = Cesium.Color.fromCssColorString("#0d1117");
+    applySceneBaseColor(viewer);
     viewer.scene.requestRenderMode = true;
     viewer.scene.maximumRenderTimeChange = 0.5;
     // 按已持久化的渲染质量初始化(MSAA / FXAA / resolutionScale / SSE 一并设置)

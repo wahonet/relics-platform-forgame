@@ -29,42 +29,14 @@ export class ErrorBoundary extends React.Component<Props, State> {
   render() {
     if (this.state.err) {
       return (
-        <div
-          style={{
-            position: "absolute",
-            top: 64,
-            right: 16,
-            padding: "10px 14px",
-            background: "rgba(248, 81, 73, 0.12)",
-            border: "1px solid rgba(248, 81, 73, 0.45)",
-            borderRadius: 8,
-            color: "#f85149",
-            fontSize: 12,
-            maxWidth: 420,
-            zIndex: 9000,
-          }}
-        >
-          <div style={{ fontWeight: 600, marginBottom: 4 }}>
+        <div className="err-boundary">
+          <div className="err-boundary-title">
             {this.props.label || "组件"} 渲染出错
           </div>
-          <div style={{ color: "#c9d1d9", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+          <div className="err-boundary-msg">
             {String(this.state.err.message || this.state.err)}
           </div>
-          <button
-            onClick={() => this.setState({ err: null })}
-            style={{
-              marginTop: 8,
-              background: "rgba(255,255,255,.08)",
-              border: "1px solid rgba(255,255,255,.18)",
-              color: "#c9d1d9",
-              borderRadius: 4,
-              padding: "3px 10px",
-              cursor: "pointer",
-              fontSize: 11,
-            }}
-          >
-            重试
-          </button>
+          <button onClick={() => this.setState({ err: null })}>重试</button>
         </div>
       );
     }

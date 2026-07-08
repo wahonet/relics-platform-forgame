@@ -10,6 +10,9 @@ import {
 
 export type RenderQuality = "standard" | "hd" | "ultra";
 
+/** Toast 类型:默认 info(主题色点),success/error/warning 换语义色点。 */
+export type ToastKind = "info" | "success" | "error" | "warning";
+
 /** 主题配色。dark=深墨蓝(默认) light=经典亮白 navy=藏青政务 green=青碧 red=胭脂红 */
 export type ThemeId = "dark" | "light" | "navy" | "green" | "red";
 
@@ -66,7 +69,7 @@ interface UIState {
   /** CRS 检视面板开关。 */
   crsInspectorOpen: boolean;
 
-  toast: { id: number; text: string } | null;
+  toast: { id: number; text: string; kind: ToastKind } | null;
 
   /** 单调递增的"离线覆盖刷新"信号。下载完成后 +1,MapView 监听刷新红框。 */
   offlineCoverageTick: number;
@@ -77,7 +80,7 @@ interface UIState {
   dashModules: Record<string, DashModuleCfg>;
 
   set: (patch: Partial<Omit<UIState, "set" | "showToast" | "bumpOfflineCoverage" | "bumpBoundary" | "setDashModule" | "resetDashModules">>) => void;
-  showToast: (text: string) => void;
+  showToast: (text: string, kind?: ToastKind) => void;
   bumpOfflineCoverage: () => void;
   bumpBoundary: () => void;
   setDashModule: (id: string, patch: Partial<DashModuleCfg>) => void;
@@ -166,9 +169,9 @@ export const useUIStore = create<UIState>((set, get) => ({
     set({ dashModules: def });
     persistDashModules(def);
   },
-  showToast(text) {
+  showToast(text, kind = "info") {
     if (toastT) clearTimeout(toastT);
-    set({ toast: { id: ++toastSeq, text } });
+    set({ toast: { id: ++toastSeq, text, kind } });
     toastT = setTimeout(() => {
       const cur = get().toast;
       if (cur && cur.text === text) set({ toast: null });

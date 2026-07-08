@@ -13,6 +13,7 @@ import { MapLegend } from "./components/MapLegend";
 import { CoordReadoutRestore } from "./components/CoordReadoutRestore";
 import { CrsInspectorPanel } from "./components/CrsInspectorPanel";
 import { Toast } from "./components/Toast";
+import { ConfirmHost } from "./components/ConfirmModal";
 import { Compass } from "./components/Compass";
 import { MapView } from "./map/MapView";
 import DashboardPage from "./pages/DashboardPage";
@@ -127,6 +128,7 @@ function App() {
         </div>
       ) : null}
       <Toast />
+      <ConfirmHost />
     </>
   );
 }

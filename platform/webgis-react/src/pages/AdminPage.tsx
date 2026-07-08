@@ -39,6 +39,7 @@ import {
 } from "../api/boundaries";
 import { CRS_LIST, type CrsId } from "../utils/crs";
 import { useUIStore } from "../stores/uiStore";
+import { confirmDialog } from "../components/ConfirmModal";
 
 const STEP_TITLE: Record<string, string> = {
   "00": "档案提取",
@@ -286,9 +287,9 @@ function TileDownloadSection({ flash }: { flash: (t: string) => void }) {
 
       {estimate ? (
         <div className="adm-hint" style={{ padding: "8px 0" }}>
-          预估: 总 <b style={{ color: "var(--accent2)" }}>{estimate.total}</b> 张 · 已缓存{" "}
-          <b style={{ color: "var(--green)" }}>{estimate.cached}</b> · 待下载{" "}
-          <b style={{ color: "var(--yellow)" }}>{estimate.need}</b>
+          预估: 总 <b className="c-accent-text">{estimate.total}</b> 张 · 已缓存{" "}
+          <b className="c-green-text">{estimate.cached}</b> · 待下载{" "}
+          <b className="c-yellow-text">{estimate.need}</b>
         </div>
       ) : null}
 
@@ -304,7 +305,7 @@ function TileDownloadSection({ flash }: { flash: (t: string) => void }) {
         </div>
       ) : null}
 
-      <div className="adm-actions" style={{ marginLeft: 0, marginTop: 6 }}>
+      <div className="adm-actions start">
         <button className="pp-btn primary" onClick={start} disabled={!bbox || running}>
           {running ? "下载中..." : "开始下载"}
         </button>
@@ -312,7 +313,13 @@ function TileDownloadSection({ flash }: { flash: (t: string) => void }) {
           className="pp-btn"
           disabled={running}
           onClick={async () => {
-            if (!confirm("确定清空所有离线瓦片缓存和下载历史?")) return;
+            const ok = await confirmDialog({
+              title: "清空离线瓦片",
+              body: "确定清空所有离线瓦片缓存和下载历史?",
+              danger: true,
+              okText: "清空",
+            });
+            if (!ok) return;
             await clearCache();
             setHistory([]);
             setEstimate(null);
@@ -515,7 +522,7 @@ function BoundarySection({ flash }: { flash: (t: string) => void }) {
         {countyAdcode ? (
           <div className="tile-row">
             <label>乡镇</label>
-            <label style={{ display: "flex", alignItems: "center", gap: 6, width: "auto", color: "var(--t3)" }}>
+            <label className="adm-inline-check">
               <input
                 type="checkbox"
                 checked={includeTownships}
@@ -538,7 +545,7 @@ function BoundarySection({ flash }: { flash: (t: string) => void }) {
         ) : null}
       </div>
 
-      <div className="adm-actions" style={{ marginLeft: 0, marginTop: 6 }}>
+      <div className="adm-actions start">
         <button className="pp-btn primary" onClick={onDownload} disabled={submitting || !canSubmit}>
           {submitting ? "下载中..." : "开始下载"}
         </button>
@@ -546,7 +553,13 @@ function BoundarySection({ flash }: { flash: (t: string) => void }) {
           className="pp-btn"
           disabled={submitting}
           onClick={async () => {
-            if (!confirm("确定删除已下载的县界与镇界 GeoJSON?")) return;
+            const ok = await confirmDialog({
+              title: "清除边界文件",
+              body: "确定删除已下载的县界与镇界 GeoJSON?",
+              danger: true,
+              okText: "删除",
+            });
+            if (!ok) return;
             try {
               const r = await clearBoundaries(["county", "townships"]);
               log(`已删除: ${r.removed.join(", ") || "(无文件可删)"}`);
@@ -671,7 +684,13 @@ function CacheOverviewSection({ flash }: { flash: (t: string) => void }) {
                   <button
                     className="pp-btn sm danger"
                     onClick={async () => {
-                      if (!confirm(`确定删除「${PROVIDER_LABEL[prov] || prov}」的全部离线瓦片?`)) return;
+                      const ok = await confirmDialog({
+                        title: "删除离线瓦片",
+                        body: `确定删除「${PROVIDER_LABEL[prov] || prov}」的全部离线瓦片?`,
+                        danger: true,
+                        okText: "删除",
+                      });
+                      if (!ok) return;
                       await clearCache([prov]);
                       refresh();
                       useUIStore.getState().bumpOfflineCoverage();
@@ -754,10 +773,12 @@ export default function AdminPage() {
   }, []);
 
   const doStop = async () => {
-    if (!confirm(
-      "停止档案提取?\n\n将在跑完当前在途请求后优雅停止,已完成的进度全部保留。\n"
-      + "停止后可以更换模型,重新运行时自动从断点续传并采用新模型。",
-    )) return;
+    const ok = await confirmDialog({
+      title: "停止档案提取",
+      body: "将在跑完当前在途请求后优雅停止,已完成的进度全部保留。\n停止后可以更换模型,重新运行时自动从断点续传并采用新模型。",
+      okText: "停止",
+    });
+    if (!ok) return;
     setStopping(true);
     try {
       const r = await stopPipeline();
@@ -1314,10 +1335,9 @@ export default function AdminPage() {
                   {aiModels?.source === "api" ? ` · 可选 ${aiModels.models.length} 个` : ""}
                 </span>
               </div>
-              <div style={{ display: "flex", gap: 8, flex: 1, minWidth: 0 }}>
+              <div className="adm-flex-row">
                 <select
-                  className="pp-input"
-                  style={{ flex: 1, minWidth: 0 }}
+                  className="pp-input adm-flex-fill"
                   value={modelSel}
                   onChange={(e) => setModelSel(e.target.value)}
                   disabled={modelSaving || !aiModels?.models?.length}
@@ -1398,10 +1418,9 @@ export default function AdminPage() {
                   {dsModels?.source === "api" ? ` · 可选 ${dsModels.models.length} 个` : ""}
                 </span>
               </div>
-              <div style={{ display: "flex", gap: 8, flex: 1, minWidth: 0 }}>
+              <div className="adm-flex-row">
                 <select
-                  className="pp-input"
-                  style={{ flex: 1, minWidth: 0 }}
+                  className="pp-input adm-flex-fill"
                   value={dsModelSel}
                   onChange={(e) => setDsModelSel(e.target.value)}
                   disabled={dsModelSaving || !dsModels?.models?.length}

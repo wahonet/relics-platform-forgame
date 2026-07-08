@@ -161,19 +161,16 @@ export function SettingsPanel() {
     <>
       <div className="modal-mask" onClick={() => setUI({ settingsPanelOpen: false })} />
       <div className={"settings-panel" + (open ? " open" : "")}>
-        <div
-          className="modal-hdr"
-          style={{ position: "sticky", top: 0, background: "var(--panel-hd)", zIndex: 2 }}
-        >
+        <div className="modal-hdr sp-hd">
           <h3>偏好设置</h3>
           <button onClick={() => setUI({ settingsPanelOpen: false })}>×</button>
         </div>
         <div className="sp-section">
           <h4>主视角 (Home View)</h4>
           <div className="sp-row">
-            <span style={{ flex: "0 0 60px", color: "var(--t2)" }}>地市</span>
+            <span className="sp-lab w60">地市</span>
             <select
-              style={{ flex: 1 }}
+              className="sp-fill"
               value={city}
               onChange={(e) => onCityChange(e.target.value)}
             >
@@ -186,9 +183,9 @@ export function SettingsPanel() {
             </select>
           </div>
           <div className="sp-row">
-            <span style={{ flex: "0 0 60px", color: "var(--t2)" }}>区县</span>
+            <span className="sp-lab w60">区县</span>
             <select
-              style={{ flex: 1 }}
+              className="sp-fill"
               value={county}
               disabled={!city}
               onChange={(e) => onCountyChange(e.target.value)}
@@ -210,7 +207,7 @@ export function SettingsPanel() {
             </button>
           </div>
           {homeView ? (
-            <div style={{ color: "var(--t2)", fontSize: 11, marginTop: 8 }}>
+            <div className="sp-hint">
               当前主视角: {homeView.lng.toFixed(4)}, {homeView.lat.toFixed(4)} (h={Math.round(homeView.h)} m)
             </div>
           ) : null}
@@ -218,7 +215,7 @@ export function SettingsPanel() {
 
         <div className="sp-section">
           <h4>主题配色</h4>
-          <div className="sp-row" style={{ gap: 6, flexWrap: "wrap" }}>
+          <div className="sp-row wrap">
             {THEMES.map((t) => (
               <button
                 key={t.id}
@@ -228,13 +225,7 @@ export function SettingsPanel() {
                   applyTheme(t.id);
                 }}
               >
-                <span
-                  style={{
-                    display: "inline-block", width: 10, height: 10, borderRadius: 2,
-                    background: t.swatch, marginRight: 6, verticalAlign: -1,
-                    border: "1px solid rgba(128,128,128,.4)",
-                  }}
-                />
+                <span className="sp-swatch" style={{ background: t.swatch }} />
                 {t.label}
               </button>
             ))}
@@ -243,7 +234,7 @@ export function SettingsPanel() {
 
         <div className="sp-section">
           <h4>渲染质量</h4>
-          <div className="sp-row" style={{ gap: 6, flexWrap: "wrap" }}>
+          <div className="sp-row wrap">
             {([
               { v: "standard", label: "标清", desc: "DPR=1, 无 MSAA, 性能最佳" },
               { v: "hd", label: "高清", desc: "DPR≤2, FXAA, 平衡画质/性能" },
@@ -259,7 +250,7 @@ export function SettingsPanel() {
               </button>
             ))}
           </div>
-          <div style={{ color: "var(--t2)", fontSize: 11, marginTop: 6 }}>
+          <div className="sp-hint">
             当前: <b style={{ color: "var(--accent)" }}>
               {renderQuality === "standard" ? "标清" : renderQuality === "hd" ? "高清" : "超清"}
             </b>
@@ -275,9 +266,7 @@ export function SettingsPanel() {
         <div className="sp-section">
           <h4>坐标系 (CRS) 显示</h4>
           <div className="sp-row">
-            <label
-              style={{ display: "flex", gap: 6, alignItems: "center", cursor: "pointer", flex: 1 }}
-            >
+            <label className="sp-check">
               <input
                 type="checkbox"
                 checked={coordReadoutVisible}
@@ -291,9 +280,9 @@ export function SettingsPanel() {
           </div>
 
           <div className="sp-row">
-            <span style={{ flex: "0 0 90px", color: "var(--t2)" }}>主显示 CRS</span>
+            <span className="sp-lab">主显示 CRS</span>
             <select
-              style={{ flex: 1 }}
+              className="sp-fill"
               value={displayCrs}
               onChange={(e) => {
                 const v = e.target.value as CrsId;
@@ -310,9 +299,9 @@ export function SettingsPanel() {
           </div>
 
           <div className="sp-row">
-            <span style={{ flex: "0 0 90px", color: "var(--t2)" }}>GK 带宽</span>
+            <span className="sp-lab">GK 带宽</span>
             <select
-              style={{ flex: 1 }}
+              className="sp-fill"
               value={gkZoneWidth}
               onChange={(e) => {
                 const v = (e.target.value === "6" ? 6 : 3) as 3 | 6;
@@ -326,9 +315,9 @@ export function SettingsPanel() {
           </div>
 
           <div className="sp-row">
-            <span style={{ flex: "0 0 90px", color: "var(--t2)" }}>中央子午线</span>
+            <span className="sp-lab">中央子午线</span>
             <select
-              style={{ flex: 1 }}
+              className="sp-fill"
               value={gkCentralMeridian === "auto" ? "auto" : String(gkCentralMeridian)}
               onChange={(e) => {
                 const raw = e.target.value;
@@ -348,7 +337,7 @@ export function SettingsPanel() {
             </select>
           </div>
 
-          <div style={{ color: "var(--t2)", fontSize: 11, marginTop: 6, lineHeight: 1.5 }}>
+          <div className="sp-hint">
             ▸ 鼠标坐标读数在屏幕<b>底部</b>;按读数旁的 <b>"详细"</b> 打开浮动面板看所有 CRS。
             <br />
             ▸ <b>CGCS2000 ≈ WGS84</b>(差异 &lt; 1 m),工程上互转用 identity 近似即可;
@@ -357,8 +346,8 @@ export function SettingsPanel() {
         </div>
 
         <div className="sp-section">
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <h4 style={{ margin: 0 }}>统计面板</h4>
+          <div className="sp-sec-top">
+            <h4>统计面板</h4>
             <button
               className="sp-button"
               onClick={resetDashModules}
@@ -367,7 +356,7 @@ export function SettingsPanel() {
               恢复默认
             </button>
           </div>
-          <div style={{ color: "var(--t2)", fontSize: 11, margin: "6px 0 8px", lineHeight: 1.5 }}>
+          <div className="sp-hint" style={{ marginBottom: 8 }}>
             每个模块可独立选择停靠位置与图表样式。设为「隐藏」即不在面板里出现。
           </div>
           <div className="dash-cfg-table">
@@ -408,7 +397,7 @@ export function SettingsPanel() {
                         ))}
                       </select>
                     ) : (
-                      <span style={{ color: "var(--t2)", fontSize: 11 }}>—</span>
+                      <span className="sp-hint" style={{ marginTop: 0 }}>—</span>
                     )}
                   </div>
                 </div>

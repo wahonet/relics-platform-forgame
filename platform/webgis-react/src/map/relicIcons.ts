@@ -8,14 +8,9 @@
  *   国保=红  省保=橙  市保=蓝  县保=绿  未定级=紫
  */
 
-/** 保护级别 → 颜色(与需求约定一致)。 */
-export const RANK_COLOR: Record<string, string> = {
-  "1": "#e63946", // 国保 红
-  "2": "#f6892e", // 省保 橙
-  "3": "#2f81f7", // 市保 蓝
-  "4": "#2ea043", // 县保 绿
-  "5": "#a45bf0", // 未定级 紫
-};
+/** 保护级别 → 颜色。唯一定义在 utils/dict.ts,这里转发以兼容既有引用。 */
+export { RANK_COLOR } from "../utils/dict";
+import { RANK_COLOR } from "../utils/dict";
 
 /** 徽章模式:级别 → 图标像素尺寸(级别越高越醒目)。 */
 export const RANK_BADGE_SIZE: Record<string, number> = {

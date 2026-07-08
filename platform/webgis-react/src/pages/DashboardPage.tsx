@@ -4,15 +4,14 @@ import ReactECharts from "echarts-for-react";
 import { fetchDashboardStats } from "../api/stats";
 import { fetchPatrolStats } from "../api/patrol";
 import type { DashboardStats, PatrolStats, NameValue } from "../types";
-
-const AXIS = { color: "#8b99ad", fontSize: 11 };
-const SPLIT = { lineStyle: { color: "rgba(148,166,197,.1)" } };
-const TT = {
-  backgroundColor: "rgba(10,15,24,.95)",
-  borderColor: "rgba(94,163,247,.35)",
-  textStyle: { color: "#eaf0f9", fontSize: 12 },
-};
-const PALETTE = ["#5ea3f7", "#4cc38a", "#e3b95e", "#f16a5e", "#b79bf5", "#56d4dd", "#f0975c", "#f778ba"];
+import { useChartTheme, withAlpha } from "../utils/chartTheme";
+import {
+  RANK_COLOR,
+  CONDITION_COLOR,
+  CATEGORY_MAP,
+  categoryCode,
+  rankCode,
+} from "../utils/dict";
 
 const RANK_SHORT: Record<string, string> = {
   全国重点文物保护单位: "国保",
@@ -38,6 +37,13 @@ export default function DashboardPage() {
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [patrol, setPatrol] = useState<PatrolStats | null>(null);
   const [now, setNow] = useState(new Date());
+  const P = useChartTheme();
+  const AXIS = useMemo(() => ({ color: P.axis, fontSize: 11 }), [P]);
+  const SPLIT = useMemo(() => ({ lineStyle: { color: P.split } }), [P]);
+  const TT = useMemo(
+    () => ({ ...P.tooltip, textStyle: { ...P.tooltip.textStyle, fontSize: 12 } }),
+    [P],
+  );
 
   useEffect(() => {
     document.title = "资源概览 — 济宁市文物保护利用平台";
@@ -50,6 +56,8 @@ export default function DashboardPage() {
   const rankOption = useMemo(() => {
     const data = (stats?.by_rank || []).map((d) => ({
       ...d,
+      // 级别配色与地图图例同源(国保红/省保橙/市保蓝/县保绿/未定级紫)
+      color: RANK_COLOR[rankCode(d.name)] || P.accent,
       name: RANK_SHORT[d.name] || d.name,
     }));
     return {
@@ -59,25 +67,22 @@ export default function DashboardPage() {
       yAxis: {
         type: "category",
         data: data.map((d) => d.name).reverse(),
-        axisLabel: { ...AXIS, color: "#c6d0de" },
+        axisLabel: { ...AXIS, color: P.text },
         axisTick: { show: false },
       },
       series: [
         {
           type: "bar",
           data: data
-            .map((d, i) => ({
-              value: d.value,
-              itemStyle: { color: PALETTE[i % PALETTE.length] },
-            }))
+            .map((d) => ({ value: d.value, itemStyle: { color: d.color } }))
             .reverse(),
           barWidth: 14,
           itemStyle: { borderRadius: [0, 4, 4, 0] },
-          label: { show: true, position: "right", color: "#8b99ad", fontSize: 11 },
+          label: { show: true, position: "right", color: P.axis, fontSize: 11 },
         },
       ],
     };
-  }, [stats]);
+  }, [stats, P, AXIS, SPLIT, TT]);
 
   const countyOption = useMemo(() => {
     const data = stats?.by_county || [];
@@ -101,22 +106,22 @@ export default function DashboardPage() {
             color: {
               type: "linear", x: 0, y: 0, x2: 0, y2: 1,
               colorStops: [
-                { offset: 0, color: "#5ea3f7" },
-                { offset: 1, color: "rgba(94,163,247,.22)" },
+                { offset: 0, color: P.accent },
+                { offset: 1, color: withAlpha(P.accent, 0.22) },
               ],
             },
           },
-          label: { show: true, position: "top", color: "#8b99ad", fontSize: 10 },
+          label: { show: true, position: "top", color: P.axis, fontSize: 10 },
         },
       ],
     };
-  }, [stats]);
+  }, [stats, P, AXIS, SPLIT, TT]);
 
-  const pieOption = (data: NameValue[], name: string) => ({
+  const pieOption = (data: NameValue[], name: string, colorOf?: (n: string) => string | undefined) => ({
     tooltip: { trigger: "item", formatter: "{b}: {c} ({d}%)", ...TT },
     legend: {
       bottom: 0,
-      textStyle: { color: "#8b99ad", fontSize: 10 },
+      textStyle: { color: P.axis, fontSize: 10 },
       itemWidth: 10,
       itemHeight: 10,
     },
@@ -128,10 +133,10 @@ export default function DashboardPage() {
         center: ["50%", "44%"],
         data: data.map((d, i) => ({
           ...d,
-          itemStyle: { color: PALETTE[i % PALETTE.length] },
+          itemStyle: { color: colorOf?.(d.name) || P.palette[i % P.palette.length] },
         })),
-        label: { color: "#c6d0de", fontSize: 10, formatter: "{b} {c}" },
-        labelLine: { lineStyle: { color: "rgba(255,255,255,.2)" } },
+        label: { color: P.text, fontSize: 10, formatter: "{b} {c}" },
+        labelLine: { lineStyle: { color: P.labelLine } },
       },
     ],
   });
@@ -154,14 +159,14 @@ export default function DashboardPage() {
           data: data.map((d) => d.value),
           smooth: true,
           symbolSize: 7,
-          lineStyle: { color: "#e3b95e", width: 2.5 },
-          itemStyle: { color: "#e3b95e" },
-          areaStyle: { color: "rgba(227,185,94,.13)" },
-          label: { show: true, position: "top", color: "#8b99ad", fontSize: 10 },
+          lineStyle: { color: P.gold, width: 2.5 },
+          itemStyle: { color: P.gold },
+          areaStyle: { color: withAlpha(P.gold, 0.13) },
+          label: { show: true, position: "top", color: P.axis, fontSize: 10 },
         },
       ],
     };
-  }, [stats]);
+  }, [stats, P, AXIS, SPLIT, TT]);
 
   const gaugeOption = useMemo(
     () => ({
@@ -177,9 +182,9 @@ export default function DashboardPage() {
           progress: {
             show: true,
             width: 12,
-            itemStyle: { color: "#4cc38a" },
+            itemStyle: { color: P.green },
           },
-          axisLine: { lineStyle: { width: 12, color: [[1, "rgba(94,163,247,.12)"]] } },
+          axisLine: { lineStyle: { width: 12, color: [[1, withAlpha(P.accent, 0.12)]] } },
           axisTick: { show: false },
           splitLine: { show: false },
           axisLabel: { show: false },
@@ -187,16 +192,16 @@ export default function DashboardPage() {
           detail: {
             valueAnimation: true,
             formatter: "{value}",
-            color: "#4cc38a",
+            color: P.green,
             fontSize: 34,
             offsetCenter: [0, 0],
           },
-          title: { color: "#8b99ad", fontSize: 12, offsetCenter: [0, "46%"] },
+          title: { color: P.axis, fontSize: 12, offsetCenter: [0, "46%"] },
           data: [{ value: stats?.quality_score ?? 0, name: "数据质量综合分" }],
         },
       ],
     }),
-    [stats],
+    [stats, P],
   );
 
   const s = stats;
@@ -254,7 +259,7 @@ export default function DashboardPage() {
         <div className="bs-card">
           <h3>文物类别</h3>
           <ReactECharts
-            option={pieOption(s?.by_category || [], "类别")}
+            option={pieOption(s?.by_category || [], "类别", (n) => CATEGORY_MAP[categoryCode(n)]?.color)}
             style={{ height: 220 }}
             notMerge
           />
@@ -263,7 +268,7 @@ export default function DashboardPage() {
         <div className="bs-card">
           <h3>保存状况</h3>
           <ReactECharts
-            option={pieOption(s?.by_condition || [], "保存状况")}
+            option={pieOption(s?.by_condition || [], "保存状况", (n) => CONDITION_COLOR[n])}
             style={{ height: 220 }}
             notMerge
           />

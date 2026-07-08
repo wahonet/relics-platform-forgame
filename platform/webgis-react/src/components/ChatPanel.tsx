@@ -16,19 +16,13 @@ interface ChatBubble {
   streaming?: boolean;
 }
 
-function buildGreeting(cityName: string, total: number): string {
-  const totalStr = total > 0 ? `**${total}处**` : "";
-  return (
-    `你好！我是${cityName || "本市"}文物数据 AI 助手，` +
-    `我掌握着全市 ${totalStr} 不可移动文物的台账数据(含嘉祥县全量层档案与三维模型信息)。\n\n` +
-    `试试问我：\n` +
-    `- ${cityName || "本市"}有哪些全国重点文物保护单位？\n` +
-    `- 嘉祥县有哪些文物保存状况较差需要重点巡查？\n` +
-    `- 各县市区文物分布情况如何？\n` +
-    `- 哪些文物有三维模型可以在线查看？\n\n` +
-    `回答中带 📍 的链接可直接在地图上定位查看！`
-  );
-}
+const AI_AVATAR = (
+  <span className="cm-avatar" aria-hidden>
+    <svg viewBox="0 0 24 24">
+      <path d="M12 2l1.9 5.7L19.6 9.6 13.9 11.5 12 17.2 10.1 11.5 4.4 9.6 10.1 7.7 12 2zm6.5 11.5l.95 2.85 2.85.95-2.85.95-.95 2.85-.95-2.85-2.85-.95 2.85-.95.95-2.85z" />
+    </svg>
+  </span>
+);
 
 export function ChatPanel() {
   const open = useUIStore((s) => s.chatPanelOpen);
@@ -40,16 +34,6 @@ export function ChatPanel() {
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
   const messagesRef = useRef<HTMLDivElement>(null);
-  const greeted = useRef(false);
-
-  useEffect(() => {
-    if (open && !greeted.current) {
-      const county = config?.administrative?.county_name || "本市";
-      const total = config?.stats?.relics_total ?? allRelics.length;
-      setMessages([{ role: "assistant", content: buildGreeting(county, total) }]);
-      greeted.current = true;
-    }
-  }, [open, config, allRelics.length]);
 
   useEffect(() => {
     if (messagesRef.current) {
@@ -146,9 +130,9 @@ export function ChatPanel() {
     }
   };
 
-  const send = async () => {
+  const send = async (text?: string) => {
     if (streaming) return;
-    const msg = input.trim();
+    const msg = (text ?? input).trim();
     if (!msg) return;
     setInput("");
     const newMessages: ChatBubble[] = [
@@ -193,11 +177,7 @@ export function ChatPanel() {
     setStreaming(false);
   };
 
-  const clear = () => {
-    const county = config?.administrative?.county_name || "本市";
-    const total = config?.stats?.relics_total ?? allRelics.length;
-    setMessages([{ role: "assistant", content: buildGreeting(county, total) }]);
-  };
+  const clear = () => setMessages([]);
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -208,6 +188,15 @@ export function ChatPanel() {
 
   if (!config?.features?.ai_chat) return null;
 
+  const cityName = config?.administrative?.county_name || "本市";
+  const total = config?.stats?.relics_total ?? allRelics.length;
+  const suggests = [
+    `${cityName}有哪些全国重点文物保护单位?`,
+    "哪些文物保存状况较差需要重点巡查?",
+    "各县市区文物分布情况如何?",
+    "哪些文物有三维模型可以在线查看?",
+  ];
+
   return (
     <div className={"chat-panel" + (open ? " open" : "")}>
       <div className="chat-hdr">
@@ -216,19 +205,43 @@ export function ChatPanel() {
         <button onClick={() => setUI({ chatPanelOpen: false })}>×</button>
       </div>
       <div className="chat-messages" ref={messagesRef} onClick={onMessageClick}>
-        {messages.map((m, i) => (
-          <div key={i} className={"cm cm-" + (m.role === "user" ? "user" : "ai")}>
-            <div
-              className="cm-bubble"
-              dangerouslySetInnerHTML={{
-                __html: m.streaming
-                  ? escapeStreamPreview(m.content || "正在查询文物数据库...") +
-                    '<span class="cm-cursor"></span>'
-                  : renderChatMarkdown(m.content),
-              }}
-            />
+        {messages.length === 0 ? (
+          <div className="chat-empty">
+            <span className="chat-empty-emblem" aria-hidden>
+              <svg viewBox="0 0 24 24">
+                <path d="M12 2l1.9 5.7L19.6 9.6 13.9 11.5 12 17.2 10.1 11.5 4.4 9.6 10.1 7.7 12 2zm6.5 11.5l.95 2.85 2.85.95-2.85.95-.95 2.85-.95-2.85-2.85-.95 2.85-.95.95-2.85z" />
+              </svg>
+            </span>
+            <h4>{cityName}文物数据 AI 助手</h4>
+            <p>
+              基于全市{total > 0 ? ` ${total} 处` : ""}不可移动文物台账问答,
+              <br />
+              回答中的县区、级别、文物名可点击联动地图。
+            </p>
+            <div className="chat-suggests">
+              {suggests.map((q) => (
+                <button key={q} onClick={() => send(q)}>
+                  {q}
+                </button>
+              ))}
+            </div>
           </div>
-        ))}
+        ) : (
+          messages.map((m, i) => (
+            <div key={i} className={"cm cm-" + (m.role === "user" ? "user" : "ai")}>
+              {m.role === "assistant" ? AI_AVATAR : null}
+              <div
+                className="cm-bubble"
+                dangerouslySetInnerHTML={{
+                  __html: m.streaming
+                    ? escapeStreamPreview(m.content || "正在查询文物数据库...") +
+                      '<span class="cm-cursor"></span>'
+                    : renderChatMarkdown(m.content),
+                }}
+              />
+            </div>
+          ))
+        )}
       </div>
       <div className="chat-input">
         <textarea
@@ -238,7 +251,7 @@ export function ChatPanel() {
           onKeyDown={onKeyDown}
           disabled={streaming}
         />
-        <button onClick={send} disabled={streaming || !input.trim()}>
+        <button onClick={() => send()} disabled={streaming || !input.trim()}>
           {streaming ? "..." : "发送"}
         </button>
       </div>

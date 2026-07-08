@@ -26,7 +26,7 @@ export function PatrolReportModal({
     (withAI ? setAiLoading : setLoading)(true);
     fetchReport(routeId, withAI)
       .then(setReport)
-      .catch(() => showToast("报告加载失败"))
+      .catch(() => showToast("报告加载失败", "error"))
       .finally(() => (withAI ? setAiLoading : setLoading)(false));
   };
 
@@ -40,16 +40,16 @@ export function PatrolReportModal({
     try {
       const resp = await assessRecord(recordId);
       if (resp.ok && resp.assessment) {
-        showToast(`AI 评估:${resp.assessment.condition || "完成"}`);
+        showToast(`AI 评估:${resp.assessment.condition || "完成"}`, "success");
         load();
       } else {
-        showToast(resp.detail || "AI 评估不可用(未配置视觉模型 Key)");
+        showToast(resp.detail || "AI 评估不可用(未配置视觉模型 Key)", "warning");
       }
     } catch (e) {
       const msg =
         (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ||
         "AI 评估失败";
-      showToast(msg);
+      showToast(msg, "error");
     } finally {
       setAssessing(null);
     }

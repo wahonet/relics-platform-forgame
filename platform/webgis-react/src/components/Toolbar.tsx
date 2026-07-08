@@ -184,7 +184,8 @@ export function Toolbar() {
             <svg viewBox="0 0 24 24">
               <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" />
             </svg>
-            {baseLabel} ▾
+            {baseLabel}
+            <span className="tb-caret">▾</span>
           </button>
           {baseMenuOpen && (
             <div
@@ -229,7 +230,8 @@ export function Toolbar() {
             <svg viewBox="0 0 24 24">
               <path d="M21 4H3v2h18V4zM3 20h18v-2H3v2zM4 12l4-4 4 4 4-4 4 4v6H4z" />
             </svg>
-            边界 ▾
+            边界
+            <span className="tb-caret">▾</span>
           </button>
           {boundaryMenuOpen && (
             <div
