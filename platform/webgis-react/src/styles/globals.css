@@ -1474,10 +1474,24 @@ body.parcel-mode .map-container { top: var(--hdr); left: calc(400px + var(--floa
 }
 .pcl-layer.active { border-color: var(--accent-bd); background: var(--accent-dim); }
 .pcl-layer-main { display: flex; align-items: center; gap: 9px; }
-.pcl-eye { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; flex: none; }
-.pcl-dot {
-  width: 12px; height: 12px; border-radius: 3px; flex: none;
-  border: 1px solid rgba(255, 255, 255, 0.55);
+.pcl-sel { flex: none; cursor: pointer; }
+/* 图层色块兼显隐开关:点击切换,隐藏时变暗 */
+.pcl-vis {
+  width: 14px; height: 14px; border-radius: 4px; flex: none;
+  border: 1px solid rgba(255, 255, 255, 0.55); cursor: pointer; padding: 0;
+  transition: opacity var(--dur-1), transform var(--dur-1);
+}
+.pcl-vis:hover { transform: scale(1.15); }
+.pcl-vis.off { opacity: 0.22; }
+.pcl-selall {
+  margin-left: auto; display: inline-flex; align-items: center; gap: 5px;
+  font-size: 11px; color: var(--t2); cursor: pointer; font-weight: 400;
+}
+.pcl-batch {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 7px 10px; margin-bottom: 8px;
+  background: var(--red-dim); border: 1px solid var(--red-bd); border-radius: var(--r-md);
+  font-size: 12px; color: var(--t3);
 }
 .pcl-layer-name {
   flex: 1; min-width: 0; font-size: 13px; color: var(--t1); cursor: pointer;
@@ -1489,7 +1503,6 @@ body.parcel-mode .map-container { top: var(--hdr); left: calc(400px + var(--floa
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .pcl-layer-ops { display: flex; gap: 6px; margin-top: 8px; }
-.pcl-summary { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 8px; }
 .pcl-sum-card {
   border: 1px solid var(--bd); border-radius: var(--r-md);
   background: var(--wash);

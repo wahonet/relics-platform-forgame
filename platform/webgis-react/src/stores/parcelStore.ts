@@ -35,6 +35,8 @@ interface ParcelState {
   /** 一键查询全部图层(顺序执行,analyzing 置 "__all__")。 */
   analyzeAll: () => Promise<void>;
   remove: (id: string) => Promise<void>;
+  /** 批量删除:逐个调接口,最后一次性更新状态(避免地图层反复重建)。 */
+  removeMany: (ids: string[]) => Promise<void>;
 }
 
 export const useParcelStore = create<ParcelState>((set, get) => ({
@@ -169,5 +171,33 @@ export const useParcelStore = create<ParcelState>((set, get) => ({
     const analyses = { ...get().analyses };
     delete analyses[id];
     set({ layers, visible, analyses, reloadTick: get().reloadTick + 1 });
+  },
+
+  async removeMany(ids) {
+    if (!ids.length) return;
+    const okIds: string[] = [];
+    let failed = 0;
+    for (const id of ids) {
+      try {
+        await deleteParcelLayer(id);
+        okIds.push(id);
+      } catch {
+        failed += 1;
+      }
+    }
+    if (okIds.length) {
+      const gone = new Set(okIds);
+      const layers = get().layers.filter((l) => !gone.has(l.id));
+      const visible = { ...get().visible };
+      const analyses = { ...get().analyses };
+      okIds.forEach((id) => {
+        delete visible[id];
+        delete analyses[id];
+      });
+      set({ layers, visible, analyses, reloadTick: get().reloadTick + 1 });
+    }
+    const toast = useUIStore.getState().showToast;
+    if (failed) toast(`已删除 ${okIds.length} 个,${failed} 个失败`, "error");
+    else toast(`已删除 ${okIds.length} 个图层`, "success");
   },
 }));
