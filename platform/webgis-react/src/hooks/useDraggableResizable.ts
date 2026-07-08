@@ -110,11 +110,15 @@ export function useDraggableResizable(active: boolean) {
         return next;
       });
     };
+    // 浏览器窗口缩小后,把面板拉回视口内
+    const onWinResize = () => setRect((prev) => clamp(prev));
     window.addEventListener("mousemove", onMove);
     window.addEventListener("mouseup", onUp);
+    window.addEventListener("resize", onWinResize);
     return () => {
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
+      window.removeEventListener("resize", onWinResize);
     };
   }, [active, clamp]);
 

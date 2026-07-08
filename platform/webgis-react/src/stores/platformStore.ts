@@ -15,6 +15,7 @@ export const usePlatformStore = create<PlatformState>((set, get) => ({
   loadError: null,
   async load() {
     if (get().loaded) return;
+    set({ loadError: null });
     try {
       const config = await fetchPlatformConfig();
       set({ config, loaded: true, loadError: null });

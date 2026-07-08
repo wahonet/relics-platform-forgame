@@ -38,6 +38,7 @@ function App() {
   const relicsLoaded = useRelicsStore((s) => s.loaded);
   const relicsLoading = useRelicsStore((s) => s.loading);
   const relicsLoad = useRelicsStore((s) => s.load);
+  const relicsRetry = useRelicsStore((s) => s.retry);
   const loadError = useRelicsStore((s) => s.loadError);
   const [searchParams, setSearchParams] = useSearchParams();
   const location = useLocation();
@@ -123,8 +124,9 @@ function App() {
         </div>
       )}
       {mapVisible && loadError ? (
-        <div className="center-loader" style={{ color: "var(--red)" }}>
-          数据加载失败: {loadError}
+        <div className="center-loader load-error">
+          <span>数据加载失败: {loadError}</span>
+          <button className="pp-btn sm" onClick={relicsRetry}>重试</button>
         </div>
       ) : null}
       <Toast />

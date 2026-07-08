@@ -7,14 +7,6 @@ const MAX_CACHE = 32;
 const DEBOUNCE_MS = 300;
 const COORD_DECIMALS = 5;
 
-function debounce<F extends (...args: unknown[]) => void>(fn: F, ms: number) {
-  let t: ReturnType<typeof setTimeout> | null = null;
-  return function (this: unknown, ...args: Parameters<F>) {
-    if (t) clearTimeout(t);
-    t = setTimeout(() => fn.apply(this, args), ms);
-  };
-}
-
 export class ViewportManager {
   private viewer: Cesium.Viewer;
   private renderer: PointRenderer;
@@ -23,6 +15,8 @@ export class ViewportManager {
   private lastURL: string | null = null;
   private moveEndCallback?: () => void;
   private onUpdated?: (count: number, truncated: boolean) => void;
+  private debounceTimer: ReturnType<typeof setTimeout> | null = null;
+  private stopped = false;
 
   constructor(viewer: Cesium.Viewer, renderer: PointRenderer) {
     this.viewer = viewer;
@@ -31,13 +25,21 @@ export class ViewportManager {
 
   start(onUpdated?: (count: number, truncated: boolean) => void) {
     this.onUpdated = onUpdated;
-    const debounced = debounce(() => this.refresh(), DEBOUNCE_MS);
-    this.moveEndCallback = debounced as unknown as () => void;
+    this.stopped = false;
+    this.moveEndCallback = () => {
+      if (this.debounceTimer) clearTimeout(this.debounceTimer);
+      this.debounceTimer = setTimeout(() => this.refresh(), DEBOUNCE_MS);
+    };
     this.viewer.camera.moveEnd.addEventListener(this.moveEndCallback);
     this.refresh();
   }
 
   stop() {
+    this.stopped = true;
+    if (this.debounceTimer) {
+      clearTimeout(this.debounceTimer);
+      this.debounceTimer = null;
+    }
     // viewer 可能已被父级 hook 的 cleanup 提前销毁,这里要静默兜底,
     // 否则会抛 "Cannot read properties of undefined (reading 'scene')"。
     if (this.moveEndCallback) {
@@ -56,10 +58,6 @@ export class ViewportManager {
     this.filters = { ...filters };
     this.cache.clear();
     this.refresh();
-  }
-
-  clearFilters() {
-    this.setFilters({});
   }
 
   private currentBBox() {
@@ -115,6 +113,7 @@ export class ViewportManager {
   }
 
   async refresh() {
+    if (this.stopped || this.viewer.isDestroyed()) return;
     const bbox = this.currentBBox();
     if (!bbox) return;
     // 后端默认 limit=2000,整市视角会截断一半点位;显式提到上限 5000,
@@ -143,6 +142,8 @@ export class ViewportManager {
 
     try {
       const body = await fetchByBbox(params);
+      // await 期间组件可能已卸载,渲染前再查一次
+      if (this.stopped) return;
       const data = body.data || [];
       this.cache.set(url, data);
       if (this.cache.size > MAX_CACHE) {

@@ -19,6 +19,22 @@ export async function streamChat(
     signal: handlers.signal,
   });
 
+  // fetch 不走 axios 拦截器,401 要在这里自行跳登录。
+  if (resp.status === 401) {
+    handlers.onError?.("登录已过期，请重新登录");
+    if (!location.hash.includes("login")) location.hash = "/login";
+    return;
+  }
+  if (!resp.ok) {
+    let detail = "";
+    try {
+      detail = (await resp.json())?.detail || "";
+    } catch {
+      /* 响应体不是 JSON,忽略 */
+    }
+    handlers.onError?.(detail || `服务返回 ${resp.status}`);
+    return;
+  }
   if (!resp.body) {
     handlers.onError?.("无返回流");
     return;

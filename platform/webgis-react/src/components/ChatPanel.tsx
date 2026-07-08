@@ -160,7 +160,7 @@ export function ChatPanel() {
           });
         },
         onError: (err) => {
-          fullText += `\n[错误] ${err}`;
+          fullText += (fullText ? "\n" : "") + `[错误] ${err}`;
         },
       });
     } catch {

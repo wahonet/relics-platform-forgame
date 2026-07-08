@@ -33,26 +33,32 @@ export function InfoPanel() {
     setIntro("");
     setArchives(null);
     const code = selected.archive_code;
+    // 快速连续切换文物时,旧请求可能后返回并覆盖新数据,
+    // 用 stale 标记丢弃已过期请求的结果。
+    let stale = false;
     setLoadingPhotos(true);
     fetchPhotos(code)
-      .then(setPhotos)
-      .catch(() => setPhotos([]))
-      .finally(() => setLoadingPhotos(false));
+      .then((v) => { if (!stale) setPhotos(v); })
+      .catch(() => { if (!stale) setPhotos([]); })
+      .finally(() => { if (!stale) setLoadingPhotos(false); });
     setLoadingDrawings(true);
     fetchDrawings(code)
-      .then(setDrawings)
-      .catch(() => setDrawings([]))
-      .finally(() => setLoadingDrawings(false));
+      .then((v) => { if (!stale) setDrawings(v); })
+      .catch(() => { if (!stale) setDrawings([]); })
+      .finally(() => { if (!stale) setLoadingDrawings(false); });
     setLoadingIntro(true);
     fetchRelicDetail(code)
-      .then((full) => setIntro(full.intro || ""))
-      .catch(() => setIntro(""))
-      .finally(() => setLoadingIntro(false));
+      .then((full) => { if (!stale) setIntro(full.intro || ""); })
+      .catch(() => { if (!stale) setIntro(""); })
+      .finally(() => { if (!stale) setLoadingIntro(false); });
     if (selected.has_archive_spu || selected.has_archive_fpu) {
       fetchRelicArchives(code)
-        .then(setArchives)
-        .catch(() => setArchives(null));
+        .then((v) => { if (!stale) setArchives(v); })
+        .catch(() => { if (!stale) setArchives(null); });
     }
+    return () => {
+      stale = true;
+    };
   }, [selected?.archive_code, selected?.has_archive_spu, selected?.has_archive_fpu]);
 
   if (!selected) return null;

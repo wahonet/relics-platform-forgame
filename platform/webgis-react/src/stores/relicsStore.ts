@@ -9,6 +9,8 @@ interface RelicsState {
   loading: boolean;
   loadError: string | null;
   load: () => Promise<void>;
+  /** 失败后手动重试(load 在 loadError 存在时不会自动再发,避免重试风暴)。 */
+  retry: () => void;
   upsert: (r: RelicSummary) => void;
 }
 
@@ -19,7 +21,9 @@ export const useRelicsStore = create<RelicsState>((set, get) => ({
   loading: false,
   loadError: null,
   async load() {
-    if (get().loaded || get().loading) return;
+    // loadError 也拦截:失败后 loading 归 false,若不拦截 App 的 effect 会立刻
+    // 再触发 load,形成对后端的无限重试风暴。重试必须走 retry()。
+    if (get().loaded || get().loading || get().loadError) return;
     set({ loading: true });
     try {
       const all = await fetchRelicsList();
@@ -32,6 +36,11 @@ export const useRelicsStore = create<RelicsState>((set, get) => ({
         loading: false,
       });
     }
+  },
+  retry() {
+    if (get().loading) return;
+    set({ loadError: null });
+    void get().load();
   },
   upsert(r: RelicSummary) {
     const { byCode, all } = get();

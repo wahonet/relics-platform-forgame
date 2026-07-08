@@ -17,6 +17,7 @@ export class OfflineCoverageLayer {
   }
 
   async refresh(limit = 50): Promise<number> {
+    if (this.viewer.isDestroyed()) return 0;
     this.clear();
     let items: TileHistoryItem[] = [];
     try {
@@ -25,6 +26,8 @@ export class OfflineCoverageLayer {
     } catch {
       return 0;
     }
+    // await 期间 viewer 可能已被销毁
+    if (this.viewer.isDestroyed()) return 0;
 
     // 按 bbox 去重(同区域多次下载只画一个),保留最近一次的 label。
     const seen = new Map<string, TileHistoryItem>();
@@ -72,6 +75,10 @@ export class OfflineCoverageLayer {
   }
 
   clear(): void {
+    if (this.viewer.isDestroyed()) {
+      this.entities = [];
+      return;
+    }
     this.entities.forEach((e) => {
       try {
         this.viewer.entities.remove(e);

@@ -847,6 +847,11 @@ select option { background: var(--panel-solid); color: var(--t1); }
   position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
   color: var(--t2); font-size: 13px; z-index: 1000; display: flex; align-items: center; gap: 10px;
 }
+.center-loader.load-error {
+  color: var(--red);
+  background: var(--panel); border: 1px solid var(--red-bd); border-radius: var(--r-md);
+  padding: 12px 16px; backdrop-filter: var(--blur); box-shadow: var(--shadow-md);
+}
 .spinner {
   width: 22px; height: 22px; border: 3px solid color-mix(in srgb, var(--accent) 20%, transparent);
   border-top-color: var(--accent); border-radius: 50%; animation: spin 0.9s linear infinite;
@@ -1437,8 +1442,11 @@ select option { background: var(--panel-solid); color: var(--t1); }
   backdrop-filter: var(--blur);
   box-shadow: var(--shadow-lg), inset 0 0 0 1px var(--panel-ring);
 }
-body.patrol-mode .map-container { top: var(--hdr); left: calc(400px + var(--float-gap) * 3); }
+/* 面板 left 10 + 宽 400 + 间隙 10 = 420 */
+body.patrol-mode .map-container { top: var(--hdr); left: calc(400px + var(--float-gap) * 2); }
 body.patrol-mode .patrol-panel { top: calc(var(--hdr) + var(--float-gap)); }
+/* 巡查页无工具条,右侧设置面板同步上移 */
+body.patrol-mode .settings-panel { top: calc(var(--hdr) + var(--float-gap)); }
 .pp-hdr {
   display: flex; align-items: center; gap: 10px; padding: 13px 16px;
   border-bottom: 1px solid var(--hairline);
@@ -2172,74 +2180,8 @@ textarea.pp-input { height: auto; padding: 8px 10px; resize: vertical; }
   color: var(--accent-strong);
 }
 
-/* 悬浮卡片式侧栏/浮层 */
-[data-theme="glass"] .filter-panel {
-  left: 10px;
-  top: calc(var(--hdr) + var(--tbar) + 10px);
-  bottom: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.92);
-  border-radius: var(--r-lg);
-  box-shadow: var(--shadow-lg), 0 0 0 1px rgba(255, 255, 255, 0.5) inset;
-  transform: translateX(calc(-100% - 20px));
-}
-[data-theme="glass"] .filter-panel.open { transform: translateX(0); }
-[data-theme="glass"] .fp-title { border-radius: var(--r-lg) var(--r-lg) 0 0; }
-
-[data-theme="glass"] .dash {
-  top: calc(var(--hdr) + var(--tbar) + 10px);
-  bottom: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.92);
-  border-radius: var(--r-lg);
-  box-shadow: var(--shadow-lg), 0 0 0 1px rgba(255, 255, 255, 0.5) inset;
-}
-[data-theme="glass"] .dash.dock-l {
-  left: 10px; border-left: 1px solid rgba(255, 255, 255, 0.92);
-  border-radius: var(--r-lg);
-}
-[data-theme="glass"] .dash.dock-r {
-  right: 10px; border-right: 1px solid rgba(255, 255, 255, 0.92);
-  border-radius: var(--r-lg);
-}
-[data-theme="glass"] .dash-hdr { border-radius: var(--r-lg) var(--r-lg) 0 0; }
-
-[data-theme="glass"] .chat-panel {
-  top: calc(var(--hdr) + var(--tbar) + 10px);
-  bottom: 10px;
-  right: calc(-460px - 20px);
-  border: 1px solid rgba(255, 255, 255, 0.92);
-  border-radius: var(--r-lg);
-  box-shadow: var(--shadow-lg), 0 0 0 1px rgba(255, 255, 255, 0.5) inset;
-}
-[data-theme="glass"] .chat-panel.open { right: 10px; }
-
-[data-theme="glass"] .settings-panel {
-  top: calc(var(--hdr) + var(--tbar) + 10px);
-  bottom: 10px;
-  right: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.92);
-  border-radius: var(--r-lg);
-  box-shadow: var(--shadow-lg), 0 0 0 1px rgba(255, 255, 255, 0.5) inset;
-  transform: translateX(calc(100% + 20px));
-}
-[data-theme="glass"] .settings-panel.open { transform: translateX(0); }
-
-[data-theme="glass"] .patrol-panel {
-  left: 10px;
-  top: calc(var(--hdr) + var(--tbar) + 10px);
-  bottom: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.92);
-  border-right: 1px solid rgba(255, 255, 255, 0.92);
-  border-radius: var(--r-lg);
-  box-shadow: var(--shadow-lg), 0 0 0 1px rgba(255, 255, 255, 0.5) inset;
-}
-[data-theme="glass"] body.patrol-mode .patrol-panel { top: calc(var(--hdr) + 10px); }
-[data-theme="glass"] body.patrol-mode .map-container { left: 420px; }
-
-[data-theme="glass"] .info-panel {
-  border: 1px solid rgba(255, 255, 255, 0.92);
-  box-shadow: var(--shadow-lg), 0 0 0 1px rgba(255, 255, 255, 0.5) inset;
-}
-[data-theme="glass"] .pi-hdr h2 { color: var(--accent-strong); }
+/* 悬浮卡片形态(位置/圆角/阴影/内描边)已由全局 --float-gap/--panel-ring
+   令牌统一实现,glass 无需再覆盖,避免与全局布局分叉。 */
 
 /* 控件:次级半透明白玻璃,主按钮靛蓝渐变 + 柔光晕 */
 [data-theme="glass"] .fp-btn.secondary,

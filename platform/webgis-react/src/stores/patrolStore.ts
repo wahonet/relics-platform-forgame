@@ -38,7 +38,6 @@ interface PatrolState {
   removeStop: (code: string) => void;
   moveStop: (code: string, dir: -1 | 1) => void;
   clearStops: () => void;
-  setStops: (stops: PatrolStop[]) => void;
   setPreview: (
     polyline: [number, number][] | null,
     meta?: { distance_m: number; duration_s: number; source: string } | null,
@@ -89,9 +88,6 @@ export const usePatrolStore = create<PatrolState>((set, get) => ({
   },
   clearStops() {
     set({ stops: [], previewPolyline: null, previewMeta: null, activeSuggestion: -1 });
-  },
-  setStops(stops) {
-    set({ stops });
   },
   setPreview(polyline, meta = null) {
     set({ previewPolyline: polyline, previewMeta: meta });

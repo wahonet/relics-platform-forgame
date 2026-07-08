@@ -7,7 +7,6 @@ import {
   listRoutes,
   getRoute,
   deleteRoute,
-  fetchPatrolDue,
   fetchPatrolStats,
   fetchPatrolConfig,
   qrUrl,

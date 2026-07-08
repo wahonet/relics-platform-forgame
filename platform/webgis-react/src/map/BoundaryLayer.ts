@@ -225,6 +225,7 @@ export class BoundaryLayer {
   }
 
   async load() {
+    if (this.viewer.isDestroyed()) return;
     try {
       // 这些文件在"纯壳子"状态下会 404,这是预期的。后端 access log 里仍会
       // 显示 404,但前端要静默处理。
@@ -238,6 +239,8 @@ export class BoundaryLayer {
         swallow("/boundaries/townships.geojson"),
         swallow("/boundaries/villages.geojson"),
       ]);
+      // await 期间 viewer 可能已被销毁,再 add entity 会抛错
+      if (this.viewer.isDestroyed()) return;
       if (cityRes.ok) {
         this.addCityMask(await cityRes.json());
       }
@@ -361,6 +364,7 @@ export class BoundaryLayer {
 
   /** 删除所有已渲染的边界 entities,准备重载。 */
   clear(): void {
+    if (this.viewer.isDestroyed()) return;
     const removeItem = (it: BoundaryItem) => {
       try {
         this.viewer.entities.remove(it.fill);
@@ -407,6 +411,8 @@ export class BoundaryLayer {
 
   /** 主题切换:亮白用浅色遮罩,深色主题恢复压暗遮罩。 */
   setMaskTheme(light: boolean): void {
+    // MapView 的异步 .then 回调可能在 viewer 销毁后才执行
+    if (this.viewer.isDestroyed()) return;
     this.maskLight = light;
     if (this.maskEntity?.polygon) {
       const mask = light ? MASK_LIGHT : MASK_DARK;
@@ -425,6 +431,7 @@ export class BoundaryLayer {
     village: boolean;
     villageName: boolean;
   }) {
+    if (this.viewer.isDestroyed()) return;
     this.layers.county.forEach((it) => {
       it.fill.show = opts.county;
       it.line.show = opts.county;
