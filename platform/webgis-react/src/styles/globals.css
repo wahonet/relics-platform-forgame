@@ -1420,6 +1420,98 @@ select option { background: var(--panel-solid); color: var(--t1); }
   padding: 4px 6px; background: var(--accent-dim); border-radius: 4px;
 }
 
+/* ── 图斑对比面板(悬浮玻璃卡片,复用巡查 pp-* 控件) ──────── */
+.parcel-panel {
+  position: absolute;
+  left: var(--float-gap);
+  top: calc(var(--hdr) + var(--tbar) + var(--float-gap));
+  bottom: var(--float-gap);
+  width: 400px;
+  background: var(--panel);
+  border: 1px solid var(--panel-ring);
+  border-radius: var(--r-lg);
+  z-index: 175;
+  display: flex; flex-direction: column;
+  backdrop-filter: var(--blur);
+  box-shadow: var(--shadow-lg), inset 0 0 0 1px var(--panel-ring);
+  animation: slide-in-l 0.25s var(--ease-out);
+}
+@keyframes slide-in-l { from { opacity: 0; transform: translateX(-16px); } to { opacity: 1; transform: translateX(0); } }
+.parcel-panel .pp-hdr {
+  border-radius: var(--r-lg) var(--r-lg) 0 0;
+  background: var(--panel-hd);
+  border-bottom: 1px solid var(--hairline);
+}
+.pcl-tip { font-size: 11px; color: var(--t2); line-height: 1.7; margin-top: 6px; }
+.pcl-count {
+  display: inline-block; min-width: 18px; height: 18px; line-height: 18px;
+  margin-left: 6px; padding: 0 5px; text-align: center;
+  background: var(--accent-dim); color: var(--accent2);
+  border-radius: 999px; font-size: 11px;
+}
+.pcl-layer {
+  border: 1px solid var(--bd); border-radius: var(--r-md);
+  padding: 9px 11px; margin-bottom: 8px;
+  background: var(--wash);
+  transition: border-color var(--dur-1), background var(--dur-1);
+}
+.pcl-layer.active { border-color: var(--accent-bd); background: var(--accent-dim); }
+.pcl-layer-main { display: flex; align-items: center; gap: 9px; }
+.pcl-eye { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; flex: none; }
+.pcl-dot {
+  width: 12px; height: 12px; border-radius: 3px; flex: none;
+  border: 1px solid rgba(255, 255, 255, 0.55);
+}
+.pcl-layer-name {
+  flex: 1; min-width: 0; font-size: 13px; color: var(--t1); cursor: pointer;
+  display: flex; flex-direction: column; gap: 2px;
+}
+.pcl-layer-name:hover { color: var(--accent2); }
+.pcl-layer-name span {
+  font-size: 11px; color: var(--t2);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.pcl-layer-ops { display: flex; gap: 6px; margin-top: 8px; }
+.pcl-summary { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 8px; }
+.pcl-sum-card {
+  border: 1px solid var(--bd); border-radius: var(--r-md);
+  background: var(--wash);
+  padding: 9px 6px; text-align: center;
+  display: flex; flex-direction: column; gap: 2px;
+}
+.pcl-sum-card b { font-size: 20px; color: var(--t1); font-variant-numeric: tabular-nums; }
+.pcl-sum-card span { font-size: 11px; color: var(--t2); }
+.pcl-sum-card.warn { border-color: var(--red-bd); background: var(--red-dim); }
+.pcl-sum-card.warn b { color: var(--red); }
+.pcl-sum-card.ok { border-color: var(--green-bd); background: var(--green-dim); }
+.pcl-sum-card.ok b { color: var(--green); }
+.pcl-conflicts { display: flex; flex-direction: column; gap: 6px; }
+.pcl-conflict {
+  display: flex; align-items: center; gap: 9px;
+  border: 1px solid var(--bd); border-radius: var(--r-md);
+  padding: 8px 10px; cursor: pointer;
+  background: var(--wash);
+  transition: border-color var(--dur-1), background var(--dur-1), transform var(--dur-1);
+}
+.pcl-conflict:hover {
+  border-color: var(--accent-bd); background: var(--accent-dim);
+  transform: translateX(2px);
+}
+.pcl-kind {
+  flex: none; font-size: 10px; padding: 2px 7px; border-radius: 999px; font-weight: 600;
+}
+.pcl-kind.k-body { background: var(--red-dim); color: var(--red); border: 1px solid var(--red-bd); }
+.pcl-kind.k-protection { background: var(--red-dim); color: var(--red); border: 1px solid var(--red-bd); }
+.pcl-kind.k-control { background: var(--accent-dim); color: var(--accent2); border: 1px solid var(--accent-bd); }
+.pcl-kind.k-point { background: var(--yellow-dim); color: var(--yellow); border: 1px solid var(--yellow-bd); }
+.pcl-conflict-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.pcl-conflict-main b { font-size: 12px; color: var(--t1); font-weight: 600; }
+.pcl-conflict-main span {
+  font-size: 11px; color: var(--t2);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.pcl-area { flex: none; font-style: normal; font-size: 11px; color: var(--yellow); font-variant-numeric: tabular-nums; }
+
 /* 保存状况徽章(通用) */
 .cond-好 { color: var(--green); }
 .cond-较好 { color: #7ee0a3; }

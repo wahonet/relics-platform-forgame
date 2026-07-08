@@ -30,7 +30,7 @@ from starlette.middleware.base import BaseHTTPMiddleware  # noqa: E402
 from _common import PROJECT_ROOT, detect_features, get_paths, load_config  # noqa: E402
 import crs as _crs_lib  # noqa: E402
 from data_loader import store  # noqa: E402
-from routers import admin as _admin, boundaries as _boundaries, chat, crs as _crs, patrol, relics, stats  # noqa: E402
+from routers import admin as _admin, boundaries as _boundaries, chat, crs as _crs, parcels as _parcels, patrol, relics, stats  # noqa: E402
 from services import ai_service  # noqa: E402
 from tile_routes import TILE_CACHE_DIR, register_tile_routes  # noqa: E402
 
@@ -246,6 +246,7 @@ app.include_router(patrol.mobile_router)          # /m/r/{token} 与 /api/m/*
 app.include_router(_boundaries.router, prefix="/api")
 app.include_router(_crs.router, prefix="/api")
 app.include_router(_admin.router, prefix="/api")
+app.include_router(_parcels.router, prefix="/api")
 
 register_tile_routes(app, get_config=lambda: _CONFIG)
 

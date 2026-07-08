@@ -3,6 +3,7 @@ import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { Header } from "./components/Header";
 import { Toolbar } from "./components/Toolbar";
 import { FilterPanel } from "./components/FilterPanel";
+import { ParcelPanel } from "./components/ParcelPanel";
 import { Dashboard } from "./components/Dashboard";
 import { InfoPanel } from "./components/InfoPanel";
 import { ChatPanel } from "./components/ChatPanel";
@@ -97,6 +98,7 @@ function App() {
       <div style={{ display: isMap ? "contents" : "none" }}>
         <ErrorBoundary label="Toolbar"><Toolbar /></ErrorBoundary>
         <ErrorBoundary label="FilterPanel"><FilterPanel /></ErrorBoundary>
+        <ErrorBoundary label="ParcelPanel"><ParcelPanel /></ErrorBoundary>
         <ErrorBoundary label="Dashboard"><Dashboard /></ErrorBoundary>
         <ErrorBoundary label="InfoPanel"><InfoPanel /></ErrorBoundary>
         <ErrorBoundary label="ChatPanel"><ChatPanel /></ErrorBoundary>

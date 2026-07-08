@@ -8,6 +8,8 @@ import { BoundaryLayer } from "./BoundaryLayer";
 import { OfflineCoverageLayer } from "./OfflineCoverageLayer";
 import { RouteLayer, setRouteLayer } from "./RouteLayer";
 import { TwoLineLayer } from "./TwoLineLayer";
+import { ParcelLayer, setParcelLayer } from "./ParcelLayer";
+import { useParcelStore } from "../stores/parcelStore";
 import { useUIStore, isLightTheme } from "../stores/uiStore";
 import { useFilterStore } from "../stores/filterStore";
 import { useRelicsStore } from "../stores/relicsStore";
@@ -32,6 +34,7 @@ export function MapView({ onCompassRotate, onScaleUpdate }: MapViewProps) {
   const offlineCoverageRef = useRef<OfflineCoverageLayer | null>(null);
   const routeLayerRef = useRef<RouteLayer | null>(null);
   const twoLineRef = useRef<TwoLineLayer | null>(null);
+  const parcelLayerRef = useRef<ParcelLayer | null>(null);
 
   const baseLayer = useUIStore((s) => s.baseLayer);
   const baseLayerAlpha = useUIStore((s) => s.baseLayerAlpha);
@@ -65,11 +68,28 @@ export function MapView({ onCompassRotate, onScaleUpdate }: MapViewProps) {
   const boundaryReloadTick = useUIStore((s) => s.boundaryReloadTick);
   const theme = useUIStore((s) => s.theme);
   const twoLineVisible = useUIStore((s) => s.twoLineVisible);
+  const parcelReloadTick = useParcelStore((s) => s.reloadTick);
+  const parcelLayerIds = useParcelStore((s) => s.layers);
+  const parcelVisible = useParcelStore((s) => s.visible);
 
   /** 两线范围整层显隐(工具栏「边界」菜单控制)。 */
   useEffect(() => {
     twoLineRef.current?.setVisible(twoLineVisible);
   }, [twoLineVisible]);
+
+  /** 对比图斑:图层增删时增量同步,显隐变化时应用。 */
+  useEffect(() => {
+    const pl = parcelLayerRef.current;
+    if (!pl) return;
+    pl.sync(parcelLayerIds.map((l) => l.id)).then(() => {
+      pl.applyVisibility(useParcelStore.getState().visible);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [parcelReloadTick]);
+
+  useEffect(() => {
+    parcelLayerRef.current?.applyVisibility(parcelVisible);
+  }, [parcelVisible]);
 
   /** 主题切换时更新域外遮罩配色(亮白=浅雾,深色=压暗)。 */
   useEffect(() => {
@@ -85,6 +105,7 @@ export function MapView({ onCompassRotate, onScaleUpdate }: MapViewProps) {
     const offlineCoverage = new OfflineCoverageLayer(viewer);
     const routeLayer = new RouteLayer(viewer);
     const twoLine = new TwoLineLayer(viewer);
+    const parcels = new ParcelLayer(viewer);
 
     pointRendererRef.current = renderer;
     viewportRef.current = viewport;
@@ -93,6 +114,10 @@ export function MapView({ onCompassRotate, onScaleUpdate }: MapViewProps) {
     routeLayerRef.current = routeLayer;
     twoLineRef.current = twoLine;
     setRouteLayer(routeLayer);
+    parcelLayerRef.current = parcels;
+    setParcelLayer(parcels);
+    // 已导入过图斑时(刷新页面后),恢复渲染;refresh 会 bump reloadTick 触发 sync
+    useParcelStore.getState().refresh();
     twoLine.setVisible(useUIStore.getState().twoLineVisible);
     twoLine.load();
 
@@ -262,7 +287,10 @@ export function MapView({ onCompassRotate, onScaleUpdate }: MapViewProps) {
       renderer.destroy();
       routeLayer.destroy();
       twoLine.destroy();
+      parcels.destroy();
       setRouteLayer(null);
+      setParcelLayer(null);
+      parcelLayerRef.current = null;
       try {
         offlineCoverage.clear();
       } catch {
