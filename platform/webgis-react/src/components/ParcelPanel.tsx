@@ -27,7 +27,6 @@ export function ParcelPanel() {
   const importing = useParcelStore((s) => s.importing);
   const analyzing = useParcelStore((s) => s.analyzing);
   const analyses = useParcelStore((s) => s.analyses);
-  const setPanelOpen = useParcelStore((s) => s.setPanelOpen);
   const importFiles = useParcelStore((s) => s.importFiles);
   const toggleVisible = useParcelStore((s) => s.toggleVisible);
   const analyze = useParcelStore((s) => s.analyze);
@@ -100,7 +99,6 @@ export function ParcelPanel() {
       <div className="pp-hdr">
         <h3>图斑对比</h3>
         <span className="pp-hint">SHP · CGCS2000 自动转换</span>
-        <button className="pp-close" onClick={() => setPanelOpen(false)}>×</button>
       </div>
 
       <div className="pp-body">

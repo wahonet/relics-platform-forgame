@@ -1421,11 +1421,11 @@ select option { background: var(--panel-solid); color: var(--t1); }
   padding: 4px 6px; background: var(--accent-dim); border-radius: 4px;
 }
 
-/* ── 图斑对比面板(悬浮玻璃卡片,复用巡查 pp-* 控件) ──────── */
+/* ── 图斑对比页(独立标签页:左侧面板 + 右侧地图,无工具栏) ── */
 .parcel-panel {
   position: absolute;
   left: var(--float-gap);
-  top: calc(var(--hdr) + var(--tbar) + var(--float-gap));
+  top: calc(var(--hdr) + var(--float-gap));
   bottom: var(--float-gap);
   width: 400px;
   background: var(--panel);
@@ -1437,6 +1437,8 @@ select option { background: var(--panel-solid); color: var(--t1); }
   box-shadow: var(--shadow-lg), inset 0 0 0 1px var(--panel-ring);
   animation: slide-in-l 0.25s var(--ease-out);
 }
+/* 面板 left 10 + 宽 400 + 间隙 10 = 420,地图让位 */
+body.parcel-mode .map-container { top: var(--hdr); left: calc(400px + var(--float-gap) * 2); }
 @keyframes slide-in-l { from { opacity: 0; transform: translateX(-16px); } to { opacity: 1; transform: translateX(0); } }
 .parcel-panel .pp-hdr {
   border-radius: var(--r-lg) var(--r-lg) 0 0;

@@ -22,12 +22,14 @@ import AdminPage from "./pages/AdminPage";
 import { usePlatformStore } from "./stores/platformStore";
 import { useRelicsStore } from "./stores/relicsStore";
 import { useUIStore } from "./stores/uiStore";
+import { useParcelStore } from "./stores/parcelStore";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 
-export type AppTab = "map" | "dashboard" | "patrol" | "admin";
+export type AppTab = "map" | "dashboard" | "parcels" | "patrol" | "admin";
 
 function tabFromPath(pathname: string): AppTab {
   if (pathname.startsWith("/dashboard")) return "dashboard";
+  if (pathname.startsWith("/parcels")) return "parcels";
   if (pathname.startsWith("/patrol")) return "patrol";
   if (pathname.startsWith("/admin")) return "admin";
   return "map";
@@ -47,8 +49,9 @@ function App() {
   const tab = tabFromPath(location.pathname);
   const isMap = tab === "map";
   const isPatrol = tab === "patrol";
-  // 地图在总览与巡查两个标签共用同一个 Cesium 实例,仅切换布局
-  const mapVisible = isMap || isPatrol;
+  const isParcels = tab === "parcels";
+  // 地图在总览/巡查/图斑对比三个标签共用同一个 Cesium 实例,仅切换布局
+  const mapVisible = isMap || isPatrol || isParcels;
 
   const [compassRot, setCompassRot] = useState(0);
   const [scale, setScale] = useState("");
@@ -76,6 +79,13 @@ function App() {
     return () => document.body.classList.remove("patrol-mode");
   }, [isPatrol]);
 
+  // 图斑对比页:同巡查页的布局模式,面板由标签驱动常开。
+  useEffect(() => {
+    useParcelStore.getState().setPanelOpen(isParcels);
+    document.body.classList.toggle("parcel-mode", isParcels);
+    return () => document.body.classList.remove("parcel-mode");
+  }, [isParcels]);
+
   const onCompassRotate = useCallback((deg: number) => setCompassRot(deg), []);
   const onScaleUpdate = useCallback((label: string) => setScale(label), []);
 
@@ -91,6 +101,8 @@ function App() {
         <Compass rotation={compassRot} scale={scale} />
         {/* 巡查页左栏(patrolPanelOpen 由标签驱动,面板自身在非巡查页返回 null) */}
         <ErrorBoundary label="PatrolPanel"><PatrolPanel /></ErrorBoundary>
+        {/* 图斑对比页左栏(panelOpen 由标签驱动) */}
+        <ErrorBoundary label="ParcelPanel"><ParcelPanel /></ErrorBoundary>
         <ErrorBoundary label="SettingsPanel"><SettingsPanel /></ErrorBoundary>
       </div>
 
@@ -98,7 +110,6 @@ function App() {
       <div style={{ display: isMap ? "contents" : "none" }}>
         <ErrorBoundary label="Toolbar"><Toolbar /></ErrorBoundary>
         <ErrorBoundary label="FilterPanel"><FilterPanel /></ErrorBoundary>
-        <ErrorBoundary label="ParcelPanel"><ParcelPanel /></ErrorBoundary>
         <ErrorBoundary label="Dashboard"><Dashboard /></ErrorBoundary>
         <ErrorBoundary label="InfoPanel"><InfoPanel /></ErrorBoundary>
         <ErrorBoundary label="ChatPanel"><ChatPanel /></ErrorBoundary>

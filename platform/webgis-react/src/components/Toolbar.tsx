@@ -3,7 +3,6 @@ import { useUIStore } from "../stores/uiStore";
 import { useFilterStore } from "../stores/filterStore";
 import { useRelicsStore } from "../stores/relicsStore";
 import { usePlatformStore } from "../stores/platformStore";
-import { useParcelStore } from "../stores/parcelStore";
 import { flyHomeFn } from "../map/MapView";
 import { getViewer } from "../map/viewerRegistry";
 import { passFilter } from "./FilterPanel";
@@ -35,10 +34,6 @@ export function Toolbar() {
   const toastObj = useUIStore((s) => s.toast);
   const setUI = useUIStore((s) => s.set);
   const showToast = useUIStore((s) => s.showToast);
-
-  const parcelPanelOpen = useParcelStore((s) => s.panelOpen);
-  const setParcelPanelOpen = useParcelStore((s) => s.setPanelOpen);
-  const parcelLayerCount = useParcelStore((s) => s.layers.length);
 
   const search = useFilterStore((s) => s.search);
   const county = useFilterStore((s) => s.county);
@@ -303,20 +298,6 @@ export function Toolbar() {
             </div>
           )}
         </div>
-      </div>
-
-      <div className="tb-group boxed">
-        <button
-          className={"tb" + (parcelPanelOpen ? " on" : "")}
-          onClick={() => setParcelPanelOpen(!parcelPanelOpen)}
-          title="导入 SHP 用地图斑,一键查询是否压占文物本体/两线范围"
-        >
-          <svg viewBox="0 0 24 24">
-            <path d="M4 4h7v7H4V4zm9 0h7v7h-7V4zM4 13h7v7H4v-7zm12.5 0L20 16.5 16.5 20 13 16.5 16.5 13z" />
-          </svg>
-          图斑对比
-          {parcelLayerCount > 0 ? <b>·{parcelLayerCount}</b> : null}
-        </button>
       </div>
 
       <div className="status-summary">

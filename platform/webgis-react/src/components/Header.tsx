@@ -7,6 +7,7 @@ import emblemUrl from "../assets/emblem-wenhua-jining.png";
 const NAV_TABS: { tab: AppTab; label: string; to: string }[] = [
   { tab: "map", label: "地图总览", to: "/" },
   { tab: "dashboard", label: "资源概览", to: "/dashboard" },
+  { tab: "parcels", label: "图斑对比", to: "/parcels" },
   { tab: "patrol", label: "文物巡查", to: "/patrol" },
   { tab: "admin", label: "系统管理", to: "/admin" },
 ];
