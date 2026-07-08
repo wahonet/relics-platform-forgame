@@ -5,6 +5,7 @@ import { fetchRelicArchives } from "../api/stats";
 import type { Drawing, Photo, RelicSummary, RelicArchives } from "../types";
 import { COND_CLS } from "../utils/dict";
 import { Lightbox } from "./Lightbox";
+import { useDraggableResizable } from "../hooks/useDraggableResizable";
 
 type TabKey = "info" | "photo" | "draw" | "intro";
 
@@ -22,6 +23,7 @@ export function InfoPanel() {
   const [lightbox, setLightbox] = useState<{ urls: string[]; captions: string[]; index: number } | null>(
     null,
   );
+  const { panelStyle, onDragStart, onResizeStart } = useDraggableResizable(!!selected);
 
   useEffect(() => {
     if (!selected?.archive_code) return;
@@ -78,8 +80,8 @@ export function InfoPanel() {
 
   return (
     <>
-      <div className="info-panel">
-        <div className="pi-hdr">
+      <div className="info-panel" style={panelStyle}>
+        <div className="pi-hdr" onMouseDown={onDragStart} title="拖动标题栏移动面板">
           <h2>{r.name || "-"}</h2>
           <button className="pi-close" onClick={() => setUI({ selectedRelic: null })}>
             ×
@@ -103,6 +105,7 @@ export function InfoPanel() {
             </button>
           ))}
         </div>
+        <div className="pi-body">
         {tab === "info" && (
           <div className="tc">
             <div className="info-tags">
@@ -242,6 +245,13 @@ export function InfoPanel() {
             )}
           </div>
         )}
+        </div>
+        <div
+          className="pi-resize"
+          onMouseDown={onResizeStart}
+          title="拖动调整大小"
+          aria-hidden
+        />
       </div>
       {lightbox ? (
         <Lightbox
