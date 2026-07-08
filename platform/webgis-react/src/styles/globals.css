@@ -1444,6 +1444,20 @@ select option { background: var(--panel-solid); color: var(--t1); }
   border-bottom: 1px solid var(--hairline);
 }
 .pcl-tip { font-size: 11px; color: var(--t2); line-height: 1.7; margin-top: 6px; }
+.pcl-overview { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px; }
+.pcl-drop {
+  border: 1.5px dashed var(--bd-strong); border-radius: var(--r-md);
+  padding: 16px 12px; text-align: center; cursor: pointer;
+  font-size: 13px; color: var(--t2); background: var(--wash);
+  transition: border-color var(--dur-1), color var(--dur-1), background var(--dur-1);
+  user-select: none;
+}
+.pcl-drop:hover { border-color: var(--accent-bd); color: var(--accent2); }
+.pcl-drop.over {
+  border-color: var(--accent); color: var(--accent2);
+  background: var(--accent-dim);
+}
+.pcl-drop.busy { opacity: 0.6; cursor: default; }
 .pcl-count {
   display: inline-block; min-width: 18px; height: 18px; line-height: 18px;
   margin-left: 6px; padding: 0 5px; text-align: center;

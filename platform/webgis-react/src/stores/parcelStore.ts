@@ -32,6 +32,8 @@ interface ParcelState {
   importFiles: (files: File[]) => Promise<void>;
   toggleVisible: (id: string) => void;
   analyze: (id: string) => Promise<void>;
+  /** 一键查询全部图层(顺序执行,analyzing 置 "__all__")。 */
+  analyzeAll: () => Promise<void>;
   remove: (id: string) => Promise<void>;
 }
 
@@ -76,12 +78,18 @@ export const useParcelStore = create<ParcelState>((set, get) => ({
         reloadTick: get().reloadTick + 1,
       });
       const n = res.layers.reduce((s, l) => s + l.feature_count, 0);
-      useUIStore.getState().showToast(
-        `已导入 ${res.layers.length} 个图层 / ${n} 个图斑`,
-        "success",
-      );
+      // 有警告(如缺 .dbf 无属性)时优先提示警告,否则报成功
       if (res.warnings.length) {
         console.warn("[parcels] import warnings:", res.warnings);
+        useUIStore.getState().showToast(
+          `已导入 ${res.layers.length} 个图层;${res.warnings[0]}`,
+          "warning",
+        );
+      } else {
+        useUIStore.getState().showToast(
+          `已导入 ${res.layers.length} 个图层 / ${n} 个图斑`,
+          "success",
+        );
       }
     } catch (e) {
       const detail =
@@ -116,6 +124,35 @@ export const useParcelStore = create<ParcelState>((set, get) => ({
       useUIStore.getState().showToast("冲突分析失败", "error");
     } finally {
       set({ analyzing: "" });
+    }
+  },
+
+  async analyzeAll() {
+    const { layers } = get();
+    if (get().analyzing || !layers.length) return;
+    set({ analyzing: "__all__" });
+    const analyses = { ...get().analyses };
+    let totalConflicts = 0;
+    let relicsHit = 0;
+    let failed = 0;
+    for (const l of layers) {
+      try {
+        const r = await analyzeParcelLayer(l.id);
+        analyses[l.id] = r;
+        totalConflicts += r.summary.total;
+        relicsHit += r.summary.relics_hit;
+      } catch {
+        failed += 1;
+      }
+    }
+    set({ analyses, analyzing: "" });
+    const toast = useUIStore.getState().showToast;
+    if (failed) {
+      toast(`${failed} 个图层查询失败,其余已完成`, "error");
+    } else if (totalConflicts === 0) {
+      toast("全部图层均未压占文物本体/两线范围", "success");
+    } else {
+      toast(`共发现 ${totalConflicts} 处冲突,涉及 ${relicsHit} 处文物`, "warning");
     }
   },
 

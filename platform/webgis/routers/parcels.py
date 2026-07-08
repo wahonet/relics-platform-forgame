@@ -175,8 +175,11 @@ def _parse_shapefile_group(name: str, group: dict[str, bytes]) -> tuple[dict, li
     warnings: list[str] = []
     if ".shp" not in group:
         raise HTTPException(400, f"{name}: 缺少 .shp 文件")
-    if ".dbf" not in group:
-        raise HTTPException(400, f"{name}: 缺少 .dbf 文件(属性表)")
+    has_dbf = ".dbf" in group
+    if not has_dbf:
+        # 浏览器无法自动带上同文件夹的伴生文件,只拖 .shp 时降级为
+        # 纯几何导入(图斑无属性名),不再报错拦截。
+        warnings.append(f"{name}: 未附带 .dbf 属性表,已仅导入图形(建议连同 .dbf/.prj 一起选择)")
 
     # 坐标系
     crs_kind = "unknown"
@@ -204,7 +207,7 @@ def _parse_shapefile_group(name: str, group: dict[str, bytes]) -> tuple[dict, li
         local_warns: list[str] = []
         with shapefile.Reader(
             shp=io.BytesIO(group[".shp"]),
-            dbf=io.BytesIO(group[".dbf"]),
+            dbf=io.BytesIO(group[".dbf"]) if has_dbf else None,
             shx=io.BytesIO(group[".shx"]) if ".shx" in group else None,
             encoding=enc,
             encodingErrors=errors,
@@ -240,11 +243,19 @@ def _parse_shapefile_group(name: str, group: dict[str, bytes]) -> tuple[dict, li
             if kind == "gk" and cm:
                 desc += f" (CM {cm:g}°)"
 
+            def _iter_shape_props():
+                if has_dbf:
+                    for sr in reader.iterShapeRecords():
+                        yield sr.shape, sr.record.as_dict()
+                else:
+                    for s in reader.iterShapes():
+                        yield s, {}
+
             feats: list[dict] = []
             minx, miny, maxx, maxy = 180.0, 90.0, -180.0, -90.0
             skipped = 0
-            for idx, sr in enumerate(reader.iterShapeRecords()):
-                gi = sr.shape.__geo_interface__
+            for idx, (shp, rec) in enumerate(_iter_shape_props()):
+                gi = shp.__geo_interface__
                 gtype = gi.get("type")
                 if gtype not in ("Polygon", "MultiPolygon"):
                     skipped += 1
@@ -252,7 +263,7 @@ def _parse_shapefile_group(name: str, group: dict[str, bytes]) -> tuple[dict, li
                 coords = _transform_coords(_strip_z(gi.get("coordinates")), tf)
                 props = {
                     k: _json_safe(v)
-                    for k, v in sr.record.as_dict().items()
+                    for k, v in rec.items()
                     if v not in (None, "", b"")
                 }
                 props["_idx"] = idx

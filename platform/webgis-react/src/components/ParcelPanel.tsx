@@ -31,14 +31,25 @@ export function ParcelPanel() {
   const importFiles = useParcelStore((s) => s.importFiles);
   const toggleVisible = useParcelStore((s) => s.toggleVisible);
   const analyze = useParcelStore((s) => s.analyze);
+  const analyzeAll = useParcelStore((s) => s.analyzeAll);
   const remove = useParcelStore((s) => s.remove);
 
   const fileRef = useRef<HTMLInputElement>(null);
   const [activeId, setActiveId] = useState<string>("");
+  const [dragOver, setDragOver] = useState(false);
 
   if (!open) return null;
 
   const activeAnalysis = activeId ? analyses[activeId] : undefined;
+
+  // 顶部总览:导入图斑总数 / 占压冲突总数(需全部图层查询过才有定论)
+  const totalFeatures = layers.reduce((s, l) => s + l.feature_count, 0);
+  const analyzedCount = layers.filter((l) => analyses[l.id]).length;
+  const totalConflicts = layers.reduce(
+    (s, l) => s + (analyses[l.id]?.summary.total ?? 0),
+    0,
+  );
+  const allAnalyzed = layers.length > 0 && analyzedCount === layers.length;
 
   const onPick = async (list: FileList | null) => {
     if (!list?.length) return;
@@ -93,6 +104,38 @@ export function ParcelPanel() {
       </div>
 
       <div className="pp-body">
+        {/* 占压总览(常驻最上方) */}
+        <div className="pp-sec">
+          <div className="pcl-overview">
+            <div className="pcl-sum-card">
+              <b>{totalFeatures}</b>
+              <span>导入图斑</span>
+            </div>
+            <div
+              className={
+                "pcl-sum-card" + (allAnalyzed ? (totalConflicts > 0 ? " warn" : " ok") : "")
+              }
+              title={allAnalyzed ? "" : "尚未查询全部图层"}
+            >
+              <b>{analyzedCount > 0 ? totalConflicts : "—"}</b>
+              <span>占压本体/两线</span>
+            </div>
+          </div>
+          <button
+            className="pp-btn primary block"
+            disabled={!!analyzing || !layers.length}
+            onClick={() => void analyzeAll()}
+            title="对所有已导入图层逐一做占压查询"
+          >
+            {analyzing === "__all__"
+              ? `查询中... (${analyzedCount}/${layers.length})`
+              : "一键查询全部图层"}
+          </button>
+          {analyzedCount > 0 && !allAnalyzed ? (
+            <div className="pcl-tip">已查询 {analyzedCount}/{layers.length} 个图层,结果不完整</div>
+          ) : null}
+        </div>
+
         {/* 导入 */}
         <div className="pp-sec">
           <div className="pp-label">导入用地范围线</div>
@@ -104,16 +147,25 @@ export function ParcelPanel() {
             style={{ display: "none" }}
             onChange={(e) => void onPick(e.target.files)}
           />
-          <button
-            className="pp-btn primary block"
-            disabled={importing}
-            onClick={() => fileRef.current?.click()}
+          <div
+            className={"pcl-drop" + (dragOver ? " over" : "") + (importing ? " busy" : "")}
+            onClick={() => !importing && fileRef.current?.click()}
+            onDragOver={(e) => {
+              e.preventDefault();
+              setDragOver(true);
+            }}
+            onDragLeave={() => setDragOver(false)}
+            onDrop={(e) => {
+              e.preventDefault();
+              setDragOver(false);
+              if (!importing) void onPick(e.dataTransfer.files);
+            }}
           >
-            {importing ? "导入中..." : "选择 SHP 文件 / ZIP 压缩包"}
-          </button>
+            {importing ? "导入中..." : "点击选择或拖入 SHP / ZIP"}
+          </div>
           <div className="pcl-tip">
-            需同时选择同名 .shp / .dbf / .shx / .prj(可多选或打包 zip);
-            支持 CGCS2000 高斯-克吕格投影与经纬度,自动转为 WGS84。
+            建议同名 .shp / .dbf / .prj 一起多选(或打包 zip);只拖 .shp 也能导入,
+            但图斑将没有村名/地类等属性。坐标系 CGCS2000 自动转换。
           </div>
         </div>
 
