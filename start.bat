@@ -4,10 +4,12 @@ chcp 65001 >nul 2>&1
 title Relics Platform
 
 REM ============================================================
-REM  统一启动入口
-REM    start.bat        正常启动:自动装依赖/构建前端,后端托管全部页面
-REM    start.bat build  强制重新构建前端后启动
-REM    start.bat dev    额外再开一个 Vite 热更新窗口(前端开发用)
+REM  Unified launcher (keep this header ASCII-only: cmd re-reads
+REM  the file right after chcp and multibyte bytes here would be
+REM  executed as garbage commands)
+REM    start.bat        normal start: install deps / build / serve
+REM    start.bat build  force rebuild frontend, then start
+REM    start.bat dev    also open a Vite HMR window (frontend dev)
 REM ============================================================
 
 cd /d "%~dp0"
