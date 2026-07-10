@@ -1,0 +1,17 @@
+{
+  "id": "shandong-osm-lite",
+  "name": "山东省离线专题矢量底图",
+  "version": "2026-07-10",
+  "bounds": [114.21037, 33.59779, 122.55498, 39.05078],
+  "layers": [
+    { "id": "rivers", "file": "rivers.json", "geometry": "line" },
+    { "id": "lakes", "file": "lakes.json", "geometry": "polygon" },
+    { "id": "motorway", "file": "motorway.json", "geometry": "line" },
+    { "id": "railway", "file": "railway.json", "geometry": "line" },
+    { "id": "city", "file": "city.geojson", "geometry": "polygon" },
+    { "id": "county", "file": "county.geojson", "geometry": "polygon" }
+  ],
+  "attribution": "© OpenStreetMap contributors",
+  "license": "ODbL 1.0",
+  "notes": "水系和交通数据由 Overpass/OpenStreetMap 数据抽稀生成；行政边界为项目本地边界数据。"
+}

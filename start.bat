@@ -50,7 +50,7 @@ if not exist "config.yaml" (
 )
 
 REM ── 3) Python 依赖 ──────────────────────────────────────────
-%PYTHON% -c "import yaml, fastapi, uvicorn" >nul 2>&1
+%PYTHON% -c "import yaml, fastapi, uvicorn, httpx" >nul 2>&1
 if errorlevel 1 (
     echo [SETUP] Installing Python dependencies...
     %PYTHON% -m pip install -r platform\webgis\requirements.txt

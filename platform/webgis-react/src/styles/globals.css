@@ -497,6 +497,31 @@ select option { background: var(--panel-solid); color: var(--t1); }
 }
 .cesium-viewer-bottom { display: none !important; }
 
+.offline-vector-attribution {
+  position: absolute;
+  right: 10px;
+  bottom: 8px;
+  z-index: 125;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 9px;
+  border: 1px solid rgba(77, 85, 96, 0.22);
+  border-radius: 4px;
+  background: rgba(251, 250, 246, 0.9);
+  color: #59636e;
+  font-size: 11px;
+  line-height: 1;
+  box-shadow: 0 2px 8px rgba(20, 30, 40, 0.12);
+  pointer-events: none;
+}
+.offline-vector-attribution a {
+  color: #315f86;
+  text-decoration: none;
+  pointer-events: auto;
+}
+.offline-vector-attribution a:hover { text-decoration: underline; }
+
 /* 标签页内容容器(资源概览/数据目录/系统管理,位于全局 Header 之下) */
 .page-host {
   position: absolute; top: var(--hdr); left: 0; right: 0; bottom: 0;
@@ -661,6 +686,90 @@ select option { background: var(--panel-solid); color: var(--t1); }
 .dash-sec h4::before {
   content: ''; width: 3px; height: 12px; border-radius: 2px; flex-shrink: 0;
   background: linear-gradient(180deg, var(--gold), var(--accent));
+}
+
+/* 右侧栏天气预报：7 日切换 + 当天逐小时预报 */
+.weather-panel { padding-bottom: 12px; }
+.weather-heading {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  margin-bottom: 7px;
+}
+.weather-heading h4 { margin: 0; cursor: default; }
+.weather-heading h4:hover { background: transparent; }
+.weather-heading > span { color: var(--t2); font-size: 10px; white-space: nowrap; }
+.weather-day-nav {
+  display: grid; grid-template-columns: 25px minmax(0, 1fr) 25px;
+  align-items: stretch; gap: 5px;
+}
+.weather-day-nav > button {
+  border: 1px solid var(--bd); border-radius: var(--r-sm); background: var(--wash);
+  color: var(--t2); font-size: 21px; cursor: pointer;
+  transition: color var(--dur-1), border-color var(--dur-1), background var(--dur-1);
+}
+.weather-day-nav > button:hover:not(:disabled) {
+  color: var(--accent2); border-color: var(--accent-bd); background: var(--accent-dim);
+}
+.weather-day-nav > button:disabled { opacity: 0.28; cursor: default; }
+.weather-day-main {
+  min-width: 0; min-height: 54px; display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) auto; align-items: center; gap: 7px;
+  padding: 6px 8px; border: 1px solid var(--bd); border-radius: var(--r-sm);
+  background: linear-gradient(145deg, color-mix(in srgb, var(--accent) 9%, transparent), var(--wash));
+}
+.weather-main-icon { font-size: 27px; line-height: 1; filter: saturate(0.85); }
+.weather-day-main > div { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.weather-day-main b { color: var(--t1); font-size: 11px; white-space: nowrap; }
+.weather-day-main em { color: var(--t2); font-size: 10px; font-style: normal; }
+.weather-day-main strong { color: var(--accent2); font-size: 19px; white-space: nowrap; }
+.weather-day-main strong small { color: var(--t2); font-size: 11px; font-weight: 500; }
+.weather-week { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 3px; margin-top: 6px; }
+.weather-week button {
+  min-width: 0; height: 57px; display: flex; flex-direction: column; align-items: center;
+  justify-content: center; gap: 1px; padding: 3px 1px; border: 1px solid transparent;
+  border-radius: var(--r-sm); background: transparent; color: var(--t2); cursor: pointer;
+}
+.weather-week button:hover { background: var(--hover-bg); color: var(--t1); }
+.weather-week button.on { background: var(--accent-dim); border-color: var(--accent-bd); color: var(--accent2); }
+.weather-week span { max-width: 100%; overflow: hidden; font-size: 9px; white-space: nowrap; }
+.weather-week b { font-size: 17px; line-height: 1.15; font-weight: 400; }
+.weather-week em { color: inherit; font-size: 9px; font-style: normal; }
+.weather-metrics {
+  display: flex; justify-content: space-between; gap: 6px; margin-top: 6px;
+  padding: 5px 7px; border-radius: var(--r-sm); background: var(--wash);
+  color: var(--t2); font-size: 9px; font-variant-numeric: tabular-nums;
+}
+.weather-risk {
+  display: flex; flex-direction: column; gap: 2px; margin-top: 6px; padding: 6px 8px;
+  border: 1px solid var(--gold-bd); border-radius: var(--r-sm); background: var(--gold-dim);
+  color: var(--t2); font-size: 9px; line-height: 1.45;
+}
+.weather-risk b { color: var(--gold2); font-size: 10px; }
+.weather-risk.alert { border-color: color-mix(in srgb, var(--red) 45%, transparent); background: var(--red-dim); }
+.weather-risk.alert b { color: var(--red); }
+.weather-hour-title { margin: 8px 0 4px; color: var(--t3); font-size: 10px; font-weight: 600; }
+.weather-hourly { display: flex; gap: 4px; overflow-x: auto; padding: 1px 0 5px; scrollbar-width: thin; }
+.weather-hour {
+  flex: 0 0 47px; display: flex; flex-direction: column; align-items: center; gap: 1px;
+  padding: 5px 3px; border: 1px solid var(--hairline); border-radius: var(--r-sm); background: var(--wash);
+}
+.weather-hour span, .weather-hour small { color: var(--t2); font-size: 9px; }
+.weather-hour b { font-size: 16px; line-height: 1.15; font-weight: 400; }
+.weather-hour em { color: var(--t1); font-size: 10px; font-style: normal; font-weight: 600; }
+.weather-hour-empty { width: 100%; padding: 10px 0; color: var(--t2); font-size: 10px; text-align: center; }
+.weather-source {
+  display: flex; justify-content: space-between; gap: 6px; margin-top: 3px;
+  color: var(--t2); font-size: 8px; line-height: 1.35;
+}
+.weather-source a { color: var(--accent2); text-decoration: none; text-align: right; }
+.weather-source a:hover { text-decoration: underline; }
+.weather-loading, .weather-error {
+  min-height: 76px; display: flex; align-items: center; justify-content: center; gap: 8px;
+  color: var(--t2); font-size: 11px; text-align: center;
+}
+.weather-error { flex-direction: column; }
+.weather-error button {
+  height: 25px; padding: 0 11px; border: 1px solid var(--accent-bd); border-radius: var(--r-sm);
+  background: var(--accent-dim); color: var(--accent2); cursor: pointer;
 }
 
 /* ── 详情面板 ────────────────────────────────────────────── */
@@ -2181,6 +2290,7 @@ textarea.pp-input { height: auto; padding: 8px 10px; resize: vertical; }
 .adm-key-meta em { font-style: normal; font-size: 11px; color: var(--t2); line-height: 1.5; }
 .adm-key-st { font-size: 11px; color: var(--t2); line-height: 1.5; }
 .adm-key-st.on { color: var(--green); }
+.adm-key-inputs { display: flex; flex-direction: column; gap: 7px; }
 .adm-save-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 12px; }
 .adm-form-grid { display: flex; flex-direction: column; gap: 2px; max-width: 640px; }
 .adm-form-grid .tile-row label:first-child { width: 64px; flex-shrink: 0; }

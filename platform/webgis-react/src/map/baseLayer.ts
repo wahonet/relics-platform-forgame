@@ -41,7 +41,8 @@ export function applyBaseLayer(
   } catch {
     /* ignore */
   }
-  if (type === "none") {
+  // 真矢量底图由 OfflineVectorBasemapLayer 绘制，不走图片瓦片 provider。
+  if (type === "none" || type === "offline_vector") {
     viewer.scene.requestRender();
     return;
   }

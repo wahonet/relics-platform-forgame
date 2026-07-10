@@ -213,7 +213,7 @@ function TileDownloadSection({ flash }: { flash: (t: string) => void }) {
       <div className="adm-sec-hdr">
         <h2>离线地图下载</h2>
         <span className="adm-hint">
-          下载后地图页选择「离线影像 / 离线矢量」即可脱网浏览
+          下载后选择「离线瓦片影像 / 离线 OSM 瓦片」；「离线专题矢量」已随程序内置
         </span>
       </div>
 
@@ -721,7 +721,17 @@ export default function AdminPage() {
   const [pipeline, setPipeline] = useState<PipelineStatus | null>(null);
   const [task, setTask] = useState<AdminTask>({ status: "idle" });
   const [config, setConfig] = useState<ApiConfigStatus | null>(null);
-  const [form, setForm] = useState({ sf: "", sfUrl: "", ds: "", dsUrl: "", amap: "", ion: "", tdt: "" });
+  const [form, setForm] = useState({
+    sf: "",
+    sfUrl: "",
+    ds: "",
+    dsUrl: "",
+    amap: "",
+    ion: "",
+    tdt: "",
+    weatherUrl: "",
+    weatherKey: "",
+  });
   const [dualExtract, setDualExtract] = useState(
     () => localStorage.getItem("dualExtract") === "1",
   );
@@ -958,7 +968,17 @@ export default function AdminPage() {
   };
 
   const save = async () => {
-    const anyFilled = [form.sf, form.sfUrl, form.ds, form.dsUrl, form.amap, form.ion, form.tdt]
+    const anyFilled = [
+      form.sf,
+      form.sfUrl,
+      form.ds,
+      form.dsUrl,
+      form.amap,
+      form.ion,
+      form.tdt,
+      form.weatherUrl,
+      form.weatherKey,
+    ]
       .some((v) => v.trim());
     if (!anyFilled) {
       flash("请至少填写一项后再保存(留空表示不修改)");
@@ -974,9 +994,21 @@ export default function AdminPage() {
         amap_web_key: form.amap.trim() || undefined,
         cesium_ion_token: form.ion.trim() || undefined,
         tianditu_key: form.tdt.trim() || undefined,
+        weather_base_url: form.weatherUrl.trim() || undefined,
+        weather_api_key: form.weatherKey.trim() || undefined,
       });
       flash(res.message || "已保存");
-      setForm({ sf: "", sfUrl: "", ds: "", dsUrl: "", amap: "", ion: "", tdt: "" });
+      setForm({
+        sf: "",
+        sfUrl: "",
+        ds: "",
+        dsUrl: "",
+        amap: "",
+        ion: "",
+        tdt: "",
+        weatherUrl: "",
+        weatherKey: "",
+      });
       refreshConfig();
       refreshModels(); // 新填了 Key 后模型列表可能变为可拉取
     } catch (e) {
@@ -1280,7 +1312,7 @@ export default function AdminPage() {
         <div className="adm-sec-hdr">
           <h2>外部 API 配置</h2>
           <span className="adm-hint">
-            保存写入 config.yaml,AI 与高德即时生效;留空的项不会被修改
+            保存写入 config.yaml，AI、高德与天气配置即时生效；留空的项不会被修改
           </span>
         </div>
 
@@ -1511,6 +1543,45 @@ export default function AdminPage() {
               onChange={(e) => setForm({ ...form, tdt: e.target.value })}
             />
           </div>
+          </div>
+        </div>
+
+        {/* ── 天气服务 ── */}
+        <div className="adm-key-group">
+          <div className="adm-key-group-title">
+            天气服务
+            <em>地图总览未来 7 日与逐小时预报</em>
+          </div>
+          <div className="adm-keys">
+            <div className="adm-key-row">
+              <div className="adm-key-meta">
+                <b>Open-Meteo 兼容 API</b>
+                <em>默认公共接口免 Key；商用订阅可替换专用地址并填写 Key</em>
+                <span className={"adm-key-st" + (config?.weather?.configured ? " on" : "")}>
+                  {config?.weather?.configured
+                    ? `已配置 ${config.weather.provider}${config.weather.key_configured ? ` · ${config.weather.masked}` : " · 免 Key"}`
+                    : "未配置"}
+                </span>
+              </div>
+              <div className="adm-key-inputs">
+                <input
+                  className="pp-input"
+                  type="url"
+                  aria-label="天气 API 地址"
+                  placeholder={config?.weather?.base_url || "https://api.open-meteo.com/v1/forecast"}
+                  value={form.weatherUrl}
+                  onChange={(e) => setForm({ ...form, weatherUrl: e.target.value })}
+                />
+                <input
+                  className="pp-input"
+                  type="password"
+                  aria-label="天气 API Key"
+                  placeholder="天气 API Key（公共接口可留空，不修改现有配置）"
+                  value={form.weatherKey}
+                  onChange={(e) => setForm({ ...form, weatherKey: e.target.value })}
+                />
+              </div>
+            </div>
           </div>
         </div>
 

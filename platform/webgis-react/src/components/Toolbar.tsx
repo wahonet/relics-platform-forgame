@@ -14,8 +14,9 @@ const BASE_OPTIONS: { value: BaseLayerType; label: string }[] = [
   { value: "tianditu_vec", label: "在线矢量 (天地图)" },
   { value: "gaode_sat", label: "在线影像 (高德)" },
   { value: "gaode_vec", label: "在线矢量 (高德)" },
-  { value: "arcgis_sat", label: "离线影像" },
-  { value: "osm", label: "离线矢量" },
+  { value: "offline_vector", label: "离线专题矢量" },
+  { value: "arcgis_sat", label: "离线瓦片影像" },
+  { value: "osm", label: "离线 OSM 瓦片" },
   { value: "none", label: "无底图" },
 ];
 

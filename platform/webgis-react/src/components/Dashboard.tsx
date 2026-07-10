@@ -12,6 +12,7 @@ import {
   type DashChartType,
   type DashModuleCfg,
 } from "./dashboardModules";
+import { WeatherForecast } from "./WeatherForecast";
 
 function countDim(relics: RelicSummary[], dim: DimDef) {
   const counts: Record<string, number> = {};
@@ -303,12 +304,11 @@ export function Dashboard() {
           {leftIds.map((id) => renderModule(id, dashModules[id]))}
         </div>
       )}
-      {rightIds.length > 0 && (
-        <div className="dash dock-r">
-          <div className="dash-hdr">综合统计{scopeTabs}</div>
-          {rightIds.map((id) => renderModule(id, dashModules[id]))}
-        </div>
-      )}
+      <div className="dash dock-r">
+        <div className="dash-hdr">综合统计{scopeTabs}</div>
+        {rightIds.map((id) => renderModule(id, dashModules[id]))}
+        <WeatherForecast />
+      </div>
     </>
   );
 }

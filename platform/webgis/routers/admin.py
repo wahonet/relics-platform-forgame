@@ -27,7 +27,7 @@ from starlette.concurrency import run_in_threadpool
 
 from _common import CONFIG_PATH, PROJECT_ROOT, detect_features, get_paths, load_config
 import run_pipeline as _pipeline
-from services import ai_service, amap_service
+from services import ai_service, amap_service, weather_service
 
 router = APIRouter(prefix="/admin", tags=["系统管理"])
 
@@ -555,6 +555,7 @@ async def get_api_config():
     amap = api.get("amap") or {}
     ion = api.get("cesium_ion") or {}
     tdt = api.get("tianditu") or {}
+    weather = api.get("weather") or {}
     return {
         "siliconflow": {
             "configured": _configured(sf.get("key", "")),
@@ -582,10 +583,18 @@ async def get_api_config():
             "configured": _configured(tdt.get("key", "")),
             "masked": _mask(tdt.get("key", "")),
         },
+        "weather": {
+            "configured": weather_service.configured(cfg),
+            "provider": weather.get("provider", "") or weather_service.DEFAULT_PROVIDER,
+            "base_url": weather.get("base_url", "") or weather_service.DEFAULT_BASE_URL,
+            "key_configured": _configured(weather.get("key", "")),
+            "masked": _mask(weather.get("key", "")),
+        },
         "config_path": str(CONFIG_PATH),
         "runtime": {
             "ai_ready": ai_service.ready(),
             "amap_ready": amap_service.has_key(),
+            "weather_ready": weather_service.configured(cfg),
         },
     }
 
@@ -667,6 +676,8 @@ class ConfigBody(BaseModel):
     amap_web_key: Optional[str] = None
     cesium_ion_token: Optional[str] = None
     tianditu_key: Optional[str] = None
+    weather_base_url: Optional[str] = None
+    weather_api_key: Optional[str] = None
     default_model: Optional[str] = None
     extract_concurrency: Optional[int] = None  # step00 档案提取并发数 1-8
 
@@ -740,6 +751,9 @@ async def save_api_config(body: ConfigBody):
     if not CONFIG_PATH.exists():
         raise HTTPException(404, f"未找到 {CONFIG_PATH},请先复制 config.example.yaml")
 
+    if body.weather_base_url and not weather_service.valid_base_url(body.weather_base_url.strip()):
+        raise HTTPException(400, "天气 API 仅支持 Open-Meteo 官方 HTTPS 地址")
+
     text = CONFIG_PATH.read_text(encoding="utf-8")
     updates = [
         ("siliconflow", "key", body.siliconflow_key),
@@ -753,11 +767,15 @@ async def save_api_config(body: ConfigBody):
         ("amap", "web_key", body.amap_web_key),
         ("cesium_ion", "token", body.cesium_ion_token),
         ("tianditu", "key", body.tianditu_key),
+        ("weather", "base_url", body.weather_base_url),
+        ("weather", "key", body.weather_api_key),
     ]
     changed = False
     for section, key, value in updates:
         if value is None or not value.strip():
             continue  # 留空表示不修改
+        if "\r" in value or "\n" in value:
+            raise HTTPException(400, "配置值不能包含换行符")
         try:
             text = _replace_yaml_scalar(text, section, key, value.strip())
             changed = True
@@ -779,10 +797,11 @@ async def save_api_config(body: ConfigBody):
 
     CONFIG_PATH.write_text(text, encoding="utf-8")
 
-    # 热更新:AI 客户端与高德 key 立即生效,无需重启
+    # 热更新:AI、高德与天气配置立即生效,无需重启
     cfg = load_config()
     ai_service.init(cfg)
     amap_service.init(((cfg.get("api") or {}).get("amap") or {}).get("web_key", ""))
+    weather_service.clear_cache()
     if _on_config_saved:
         try:
             _on_config_saved(cfg)
@@ -792,6 +811,10 @@ async def save_api_config(body: ConfigBody):
     return {
         "ok": True,
         "changed": True,
-        "runtime": {"ai_ready": ai_service.ready(), "amap_ready": amap_service.has_key()},
+        "runtime": {
+            "ai_ready": ai_service.ready(),
+            "amap_ready": amap_service.has_key(),
+            "weather_ready": weather_service.configured(cfg),
+        },
         "message": "已保存并生效(Cesium Ion token 需刷新页面)",
     }
