@@ -35,10 +35,13 @@ export async function fetchPatrolDue(params?: {
 
 // 单日巡查上限 30 处:用户要求更多时按 30 截断
 export async function planPatrol(text: string, maxStops = 30): Promise<PlanResponse> {
-  const { data } = await apiClient.post<PlanResponse>("/api/patrol/plan", {
-    text,
-    max_stops: maxStops,
-  });
+  // LLM 解析 + 地理编码 + 驾车路径串行,全链路常超 1 分钟,
+  // 默认 30s 超时会让规划必然失败,这里单独放宽。
+  const { data } = await apiClient.post<PlanResponse>(
+    "/api/patrol/plan",
+    { text, max_stops: maxStops },
+    { timeout: 180000 },
+  );
   return data;
 }
 

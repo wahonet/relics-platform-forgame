@@ -14,6 +14,7 @@ data/output/photos/
 data/output/drawings/
 data/output/boundaries/
 data/output/patrol/
+data/output/parcels/
 data/output/tile_cache/
 data/output/logs/
 data/output/dem/
@@ -45,3 +46,13 @@ platform/webgis-react/dist/
 Thumbs.db
 .DS_Store
 desktop.ini
+
+# Local competition-document sources and generated captures.
+# These can contain machine paths, operational details, or temporary access URLs.
+docs/presentation/*.docx
+docs/presentation/*.pptx
+docs/presentation/shots/
+docs/presentation/_build.py
+docs/presentation/_inspect_*.py
+docs/presentation/_shots*.py
+icon/文化济宁.jpeg
