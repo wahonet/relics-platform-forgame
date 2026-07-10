@@ -90,6 +90,7 @@ export interface ChatMessage {
 export type BaseLayerType =
   | "arcgis_sat"
   | "osm"
+  | "offline_vector"
   | "gaode_anno"
   | "gaode_sat"
   | "gaode_vec"

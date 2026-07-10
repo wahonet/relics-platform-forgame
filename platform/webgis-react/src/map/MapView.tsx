@@ -6,6 +6,8 @@ import { PointRenderer } from "./PointRenderer";
 import { ViewportManager } from "./ViewportManager";
 import { BoundaryLayer } from "./BoundaryLayer";
 import { OfflineCoverageLayer } from "./OfflineCoverageLayer";
+import { OfflineVectorBasemapLayer } from "./OfflineVectorBasemapLayer";
+import { CountyNavigationController } from "./CountyNavigationController";
 import { RouteLayer, setRouteLayer } from "./RouteLayer";
 import { TwoLineLayer } from "./TwoLineLayer";
 import { ParcelLayer, setParcelLayer } from "./ParcelLayer";
@@ -24,6 +26,8 @@ interface MapViewProps {
   onScaleUpdate?: (label: string) => void;
 }
 
+let clearCountyNavigationHistory: (() => void) | null = null;
+
 export function MapView({ onCompassRotate, onScaleUpdate }: MapViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewerRef = useCesiumViewer(containerRef);
@@ -32,6 +36,8 @@ export function MapView({ onCompassRotate, onScaleUpdate }: MapViewProps) {
   const viewportRef = useRef<ViewportManager | null>(null);
   const boundaryRef = useRef<BoundaryLayer | null>(null);
   const offlineCoverageRef = useRef<OfflineCoverageLayer | null>(null);
+  const offlineVectorRef = useRef<OfflineVectorBasemapLayer | null>(null);
+  const countyNavigationRef = useRef<CountyNavigationController | null>(null);
   const routeLayerRef = useRef<RouteLayer | null>(null);
   const twoLineRef = useRef<TwoLineLayer | null>(null);
   const parcelLayerRef = useRef<ParcelLayer | null>(null);
@@ -103,6 +109,23 @@ export function MapView({ onCompassRotate, onScaleUpdate }: MapViewProps) {
     const viewport = new ViewportManager(viewer, renderer);
     const boundary = new BoundaryLayer(viewer);
     const offlineCoverage = new OfflineCoverageLayer(viewer);
+    const offlineVector = new OfflineVectorBasemapLayer(viewer);
+    const countyNavigation = new CountyNavigationController(viewer, offlineVector, {
+      canNavigate: () => {
+        const patrol = usePatrolStore.getState();
+        return !patrol.picking && !patrol.pickingStart;
+      },
+      onEnter: (county) => {
+        useUIStore
+          .getState()
+          .showToast(`已进入 ${county} · 单击右键返回上一视角`);
+      },
+      onBack: (county) => {
+        useUIStore
+          .getState()
+          .showToast(county ? `已返回 ${county} 视角` : "已返回上一视角");
+      },
+    });
     const routeLayer = new RouteLayer(viewer);
     const twoLine = new TwoLineLayer(viewer);
     const parcels = new ParcelLayer(viewer);
@@ -111,11 +134,20 @@ export function MapView({ onCompassRotate, onScaleUpdate }: MapViewProps) {
     viewportRef.current = viewport;
     boundaryRef.current = boundary;
     offlineCoverageRef.current = offlineCoverage;
+    offlineVectorRef.current = offlineVector;
+    countyNavigationRef.current = countyNavigation;
     routeLayerRef.current = routeLayer;
     twoLineRef.current = twoLine;
     setRouteLayer(routeLayer);
     parcelLayerRef.current = parcels;
     setParcelLayer(parcels);
+    const resetCountyNavigation = () => countyNavigation.clearHistory();
+    clearCountyNavigationHistory = resetCountyNavigation;
+
+    offlineVector.setAlpha(useUIStore.getState().baseLayerAlpha);
+    const vectorBasemapActive = useUIStore.getState().baseLayer === "offline_vector";
+    offlineVector.setVisible(vectorBasemapActive);
+    countyNavigation.setEnabled(vectorBasemapActive);
     // 已导入过图斑时(刷新页面后),恢复渲染;refresh 会 bump reloadTick 触发 sync
     useParcelStore.getState().refresh();
     twoLine.setVisible(useUIStore.getState().twoLineVisible);
@@ -221,6 +253,7 @@ export function MapView({ onCompassRotate, onScaleUpdate }: MapViewProps) {
         lat: +Cesium.Math.toDegrees(c.latitude).toFixed(8),
         name: "自定义起点",
       });
+      countyNavigation.suppressNextDoubleClick();
       ps.setPickingStart(false);
       useUIStore.getState().showToast("出发起点已设置");
     }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
@@ -282,6 +315,11 @@ export function MapView({ onCompassRotate, onScaleUpdate }: MapViewProps) {
       } catch {
         /* ignore */
       }
+      countyNavigation.destroy();
+      offlineVector.destroy();
+      if (clearCountyNavigationHistory === resetCountyNavigation) {
+        clearCountyNavigationHistory = null;
+      }
       useMouseCoordStore.getState().set(null, null, null);
       viewport.stop();
       renderer.destroy();
@@ -300,6 +338,8 @@ export function MapView({ onCompassRotate, onScaleUpdate }: MapViewProps) {
       viewportRef.current = null;
       boundaryRef.current = null;
       offlineCoverageRef.current = null;
+      offlineVectorRef.current = null;
+      countyNavigationRef.current = null;
       routeLayerRef.current = null;
       twoLineRef.current = null;
     };
@@ -309,8 +349,20 @@ export function MapView({ onCompassRotate, onScaleUpdate }: MapViewProps) {
     const viewer = viewerRef.current;
     if (!viewer) return;
     applyBaseLayer(viewer, baseLayer, baseLayerAlpha);
+    const vectorBasemap = offlineVectorRef.current;
+    vectorBasemap?.setVisible(baseLayer === "offline_vector");
+    vectorBasemap?.setAlpha(baseLayerAlpha);
+    countyNavigationRef.current?.setEnabled(baseLayer === "offline_vector");
+    if (baseLayer === "offline_vector") {
+      vectorBasemap?.load().catch((error) => {
+        console.warn("[OfflineVectorBasemap] 加载失败:", error);
+        if (useUIStore.getState().baseLayer === "offline_vector") {
+          useUIStore.getState().showToast("离线专题矢量底图加载失败");
+        }
+      });
+    }
 
-    // 切到"离线影像 / 离线矢量"时,把已下载区域的 bbox 用红框标识在地图上,
+    // 切到"离线瓦片影像 / 离线 OSM 瓦片"时,把已下载区域的 bbox 用红框标识在地图上,
     // 让用户一眼看到能滑过去的区域;切到其它底图时清掉。
     const cov = offlineCoverageRef.current;
     if (!cov) return;
@@ -330,6 +382,7 @@ export function MapView({ onCompassRotate, onScaleUpdate }: MapViewProps) {
     const viewer = viewerRef.current;
     if (!viewer) return;
     setBaseLayerAlpha(viewer, baseLayerAlpha);
+    offlineVectorRef.current?.setAlpha(baseLayerAlpha);
   }, [viewerRef, baseLayerAlpha]);
 
   useEffect(() => {
@@ -449,7 +502,23 @@ export function MapView({ onCompassRotate, onScaleUpdate }: MapViewProps) {
     homeAppliedRef.current = true;
   }, [viewerRef, homeView, platformLoaded]);
 
-  return <div ref={containerRef} className="map-container" />;
+  return (
+    <>
+      <div ref={containerRef} className="map-container" />
+      {baseLayer === "offline_vector" ? (
+        <div className="offline-vector-attribution">
+          <span>双击县区进入 · 单击右键返回</span>
+          <a
+            href="https://www.openstreetmap.org/copyright"
+            target="_blank"
+            rel="noreferrer"
+          >
+            © OpenStreetMap contributors
+          </a>
+        </div>
+      ) : null}
+    </>
+  );
 }
 
 /**
@@ -475,6 +544,7 @@ function configHomeDestination(): Cesium.Cartesian3 | Cesium.Rectangle | null {
 
 export function flyHomeFn(viewer: Cesium.Viewer | null): void {
   if (!viewer) return;
+  clearCountyNavigationHistory?.();
   const home = useHomeViewStore.getState().view;
   const dest = home
     ? Cesium.Cartesian3.fromDegrees(home.lng, home.lat, home.h)

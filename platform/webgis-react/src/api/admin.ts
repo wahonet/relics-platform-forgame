@@ -74,8 +74,15 @@ export interface ApiConfigStatus {
   amap: ApiKeyEntry;
   cesium_ion: ApiKeyEntry;
   tianditu?: ApiKeyEntry;
+  weather?: {
+    configured: boolean;
+    provider: string;
+    base_url: string;
+    key_configured: boolean;
+    masked: string;
+  };
   config_path: string;
-  runtime: { ai_ready: boolean; amap_ready: boolean };
+  runtime: { ai_ready: boolean; amap_ready: boolean; weather_ready?: boolean };
 }
 
 export async function fetchPipelineStatus(): Promise<PipelineStatus> {
@@ -159,6 +166,8 @@ export async function saveApiConfig(body: {
   amap_web_key?: string;
   cesium_ion_token?: string;
   tianditu_key?: string;
+  weather_base_url?: string;
+  weather_api_key?: string;
   default_model?: string;
   extract_concurrency?: number;
 }) {
@@ -167,6 +176,6 @@ export async function saveApiConfig(body: {
     ok: boolean;
     changed: boolean;
     message: string;
-    runtime?: { ai_ready: boolean; amap_ready: boolean };
+    runtime?: { ai_ready: boolean; amap_ready: boolean; weather_ready?: boolean };
   };
 }

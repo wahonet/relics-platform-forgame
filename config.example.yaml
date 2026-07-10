@@ -130,6 +130,15 @@ api:
   tianditu:
     key: "${TIANDITU_KEY}"
 
+  # Open-Meteo 天气预报（默认免费接口无需 Key；商用订阅可填写专用地址与 Key）
+  weather:
+    provider: "Open-Meteo"
+    base_url: "https://api.open-meteo.com/v1/forecast"
+    key: "${OPEN_METEO_API_KEY}"
+    cache_minutes: 15
+    stale_hours: 24
+    timeout_seconds: 12
+
   # Cesium Ion（在线高精度地形、可选）
   cesium_ion:
     token: "${CESIUM_ION_TOKEN}"

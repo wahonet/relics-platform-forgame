@@ -3,7 +3,7 @@ import { fetchHistory, type TileHistoryItem } from "../api/tiles";
 
 /**
  * 离线瓦片覆盖区域可视化:把 `/api/tiles/history` 里每条 `done` 状态的下载记录的
- * bbox 在 Cesium 上画一个红色矩形 outline,便于在"离线影像"模式下直观看到
+ * bbox 在 Cesium 上画一个红色矩形 outline,便于在"离线瓦片影像"模式下直观看到
  * 哪些区域已经下载、可以滑过去查看。
  *
  * 切走离线底图时调用 `clear()` 移除全部 entities。
