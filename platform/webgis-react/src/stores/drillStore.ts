@@ -12,6 +12,7 @@ import * as Cesium from "cesium";
 import { create } from "zustand";
 import { useFilterStore } from "./filterStore";
 import { useRelicsStore } from "./relicsStore";
+import { sameTownship } from "../utils/township";
 import { getViewer } from "../map/viewerRegistry";
 import {
   ensureBaseRegions,
@@ -74,18 +75,13 @@ function flyToRegion(region: Region | null): void {
   });
 }
 
-/** 镇名归一(台账里偶带数字前缀,标准边界不带)。 */
-function normalizeTownship(name: string): string {
-  return (name || "").replace(/^\d+/, "").trim();
-}
-
 function computeVillageCodes(county: string, township: string, village: string): Set<string> {
   const all = useRelicsStore.getState().all;
   const inTownship = all
     .filter(
       (r) =>
         (r.county || "") === county &&
-        normalizeTownship(r.township || "") === normalizeTownship(township),
+        sameTownship(r.township || "", township),
     )
     .map((r) => ({
       code: r.archive_code,

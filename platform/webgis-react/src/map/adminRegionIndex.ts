@@ -11,6 +11,7 @@
  * 村(6500+ 面,~15MB)只在进入县/镇级视图后才懒加载。
  */
 import { create } from "zustand";
+import { sameTownship } from "../utils/township";
 
 type Coordinate = [number, number];
 type Ring = Coordinate[];
@@ -271,16 +272,30 @@ export function getCounty(name: string): Region | null {
 }
 
 export function getTownship(county: string, name: string): Region | null {
-  return (townshipsByCounty.get(county) || []).find((r) => r.name === name) || null;
+  const list = townshipsByCounty.get(county) || [];
+  // 精确名优先;再按词干容错新旧名(台账[卧龙山街道] ↔ 边界[卧龙山镇])
+  return (
+    list.find((r) => r.name === name) ||
+    list.find((r) => sameTownship(r.name, name)) ||
+    null
+  );
 }
 
 export function getVillage(county: string, township: string, name: string): Region | null {
-  return (villagesByTownship.get(townshipKey(county, township)) || [])
-    .find((r) => r.name === name) || null;
+  return getVillagesOf(county, township).find((r) => r.name === name) || null;
 }
 
 export function getVillagesOf(county: string, township: string): Region[] {
-  return villagesByTownship.get(townshipKey(county, township)) || [];
+  const exact = villagesByTownship.get(townshipKey(county, township));
+  if (exact?.length) return exact;
+  // 村界按边界镇名分组;镇名是台账写法时按词干找同一镇
+  for (const [key, list] of villagesByTownship) {
+    const sep = key.indexOf("|");
+    if (key.slice(0, sep) === county && sameTownship(key.slice(sep + 1), township)) {
+      return list;
+    }
+  }
+  return [];
 }
 
 /**

@@ -11,6 +11,7 @@ import {
   useRegionIndexStore,
 } from "../map/adminRegionIndex";
 import { DIMS, dimValue, dimValues, buildColorMap, DEF_COLOR, PALETTE } from "../utils/dict";
+import { sameTownship, mergeTownshipVariants } from "../utils/township";
 import type { DimDef } from "../utils/dict";
 import { useChartTheme, type ChartTheme } from "../utils/chartTheme";
 import type { RelicSummary } from "../types";
@@ -159,11 +160,6 @@ function ChartCard({ title, dimId, type, relics, colorMap, onClickItem }: ChartC
   );
 }
 
-/** 镇名归一(台账偶带数字前缀,标准边界不带)。 */
-function normalizeTownship(name: string): string {
-  return (name || "").replace(/^\d+/, "").trim();
-}
-
 /** pie/bar/vbar 三种分布图 option(RegionDrillCard 用,数据已分组好)。 */
 function buildDistOption(
   type: DashChartType,
@@ -291,13 +287,12 @@ function RegionDrillCard({ type, relics, colorMap }: RegionDrillCardProps) {
     if (!township) {
       return {
         title: `${county} · 乡镇分布`,
-        data: count(inCounty, (r) => normalizeTownship(r.township || "")),
+        // 词干合并新旧写法(卧龙山街道/卧龙山镇 记同一镇),取最常见写法展示
+        data: mergeTownshipVariants(inCounty.map((r) => r.township || "")),
         onClickName: (name: string) => drillTo({ county, township: name }, fly),
       };
     }
-    const inTownship = inCounty.filter(
-      (r) => normalizeTownship(r.township || "") === normalizeTownship(township),
-    );
+    const inTownship = inCounty.filter((r) => sameTownship(r.township || "", township));
     if (!villagesReady) {
       return { title: `${township} · 村级分布`, data: [], onClickName: () => undefined };
     }
@@ -473,11 +468,9 @@ export function Dashboard() {
 
   /** 再叠加行政区筛选(县/镇/村下钻),供摘要卡与常规统计图。 */
   const relicsFiltered = useMemo(() => {
-    const twDim = DIMS.find((d) => d.id === "township");
     return relicsBase.filter((r) => {
       if (county && (r.county || "") !== county) return false;
-      if (township && twDim && dimValue(r as Record<string, unknown>, twDim) !== township)
-        return false;
+      if (township && !sameTownship(r.township || "", township)) return false;
       if (villageCodes && !villageCodes.has(r.archive_code)) return false;
       return true;
     });

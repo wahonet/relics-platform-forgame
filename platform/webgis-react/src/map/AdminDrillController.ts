@@ -11,6 +11,7 @@
 import * as Cesium from "cesium";
 import { useUIStore } from "../stores/uiStore";
 import { useDrillStore } from "../stores/drillStore";
+import { sameTownship } from "../utils/township";
 import {
   ensureBaseRegions,
   ensureVillageRegions,
@@ -146,7 +147,8 @@ export class AdminDrillController {
       return;
     }
     if (!chain.township) return;
-    if (!drill.township || chain.township.name !== drill.township) {
+    // 词干比对:图表下钻写入的是台账镇名(如 卧龙山街道),边界是旧名(卧龙山镇)
+    if (!drill.township || !sameTownship(chain.township.name, drill.township)) {
       this.lastDrillAt = performance.now();
       drill.drillTo({ county: chain.county.name, township: chain.township.name });
       this.toast(`已进入 ${chain.township.name} · 双击村继续,右键返回`);

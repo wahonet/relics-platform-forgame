@@ -5,6 +5,7 @@ import { useUIStore } from "../stores/uiStore";
 import { useDrillStore } from "../stores/drillStore";
 import { usePlatformStore } from "../stores/platformStore";
 import { DIMS, dimValue, buildColorMap } from "../utils/dict";
+import { sameTownship, mergeTownshipVariants } from "../utils/township";
 import { fetchRelicDetail } from "../api/relics";
 import type { RelicScope, RelicSummary } from "../types";
 import { useCatalogScopeStore } from "../stores/catalogScopeStore";
@@ -39,7 +40,8 @@ export function passFilter(
   )
     return false;
   if (f.county && (r.county || "") !== f.county) return false;
-  if (f.township && (r.township || "") !== f.township) return false;
+  // 词干比对:容忍新旧镇名(卧龙山街道↔卧龙山镇)与数字前缀差异
+  if (f.township && !sameTownship(r.township || "", f.township)) return false;
   if (f.villageCodes && !f.villageCodes.has(r.archive_code)) return false;
   if (f.level && lvDim && dimValue(r as Record<string, unknown>, lvDim) !== f.level) return false;
   if (f.cond && r.condition_level !== f.cond) return false;
@@ -82,15 +84,21 @@ export function FilterPanel() {
     return [...new Set(scopedRelics.map((r) => r.county).filter(Boolean) as string[])].sort();
   }, [scopedRelics, config]);
 
-  // 乡镇仅在选定县区后展示(全市乡镇太多)。
+  // 乡镇仅在选定县区后展示(全市乡镇太多);新旧写法按词干合并成一项。
   const towns = useMemo(() => {
     if (!county) return [];
-    const set = new Set<string>();
-    scopedRelics.forEach((r) => {
-      if (r.county === county && r.township) set.add(r.township);
-    });
-    return [...set].sort();
+    return mergeTownshipVariants(
+      scopedRelics.filter((r) => r.county === county).map((r) => r.township || ""),
+    )
+      .map((t) => t.name)
+      .sort();
   }, [scopedRelics, county]);
+
+  // 地图下钻写入的可能是边界侧旧名(如 卧龙山镇),映射到下拉里的展示名
+  const townValue = useMemo(() => {
+    if (!township) return "";
+    return towns.find((t) => sameTownship(t, township)) || township;
+  }, [towns, township]);
 
   const levels = useMemo(() => {
     const set = new Set<string>();
@@ -221,7 +229,7 @@ export function FilterPanel() {
           <div className="fp-label">乡镇</div>
           <select
             className="fp-select"
-            value={township}
+            value={townValue}
             onChange={(e) => {
               setPartial({ township: e.target.value });
               useDrillStore.getState().syncFromFilter(county, e.target.value);

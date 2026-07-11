@@ -40,7 +40,7 @@ async def relics_by_bbox(
     category: str | None = Query(None, description="国标大类 0100..0600，逗号分隔支持多选"),
     rank: str | None = Query(None, description="保护级别 1..5，逗号分隔支持多选"),
     county: str | None = Query(None, description="县市区"),
-    township: str | None = Query(None),
+    township: str | None = Query(None, description="乡镇,逗号分隔支持多选(新旧镇名并存时前端展开)"),
     tier: str | None = Query(None, description="数据层级 city/full"),
     scope: str = Query(SCOPE_PROTECTED, description="protected=文保单位 all=全部文物"),
     condition: str | None = Query(None, description="保存状况 好/较好/一般/较差/差"),

@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { categoryCode, rankCode, DIMS, dimValue, TIER_MAP } from "../utils/dict";
+import { sameTownship } from "../utils/township";
 import { useRelicsStore } from "./relicsStore";
 import { useCatalogScopeStore } from "./catalogScopeStore";
 import {
@@ -36,6 +37,21 @@ function tierFromLabel(label: string): string {
   return label;
 }
 
+/**
+ * 镇名 → 台账原始写法集合(逗号分隔,后端做 IN 匹配)。
+ * 下钻传入的可能是边界侧旧名(卧龙山镇),台账里也可能新旧写法并存
+ * (李营街道/李营镇),按词干全部展开,保证后端精确匹配不漏。
+ */
+function expandTownship(county: string, township: string): string {
+  const variants = new Set<string>();
+  useRelicsStore.getState().all.forEach((r) => {
+    if (county && (r.county || "") !== county) return;
+    const t = r.township || "";
+    if (t && sameTownship(t, township)) variants.add(t);
+  });
+  return variants.size ? [...variants].join(",") : township;
+}
+
 export const useFilterStore = create<FilterState>((set, get) => ({
   search: "",
   county: "",
@@ -66,8 +82,8 @@ export const useFilterStore = create<FilterState>((set, get) => ({
     if (ranks.size) out.rank = [...ranks].join(",");
     if (f.county) out.county = f.county;
     else if (f.statFilters.county) out.county = f.statFilters.county;
-    if (f.township) out.township = f.township;
-    else if (f.statFilters.township) out.township = f.statFilters.township;
+    const town = f.township || f.statFilters.township;
+    if (town) out.township = expandTownship(out.county || "", town);
     if (f.tier) out.tier = f.tier;
     else if (f.statFilters.tier) out.tier = tierFromLabel(f.statFilters.tier);
     if (f.cond) out.condition = f.cond;

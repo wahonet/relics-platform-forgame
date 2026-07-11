@@ -446,8 +446,11 @@ class DataStore:
             sql.append("  AND r.county = ?")
             params.append(county)
         if township:
-            sql.append("  AND r.township = ?")
-            params.append(township)
+            # 逗号分隔多选:撤镇设街道等新旧名并存时,前端会展开成多个写法
+            tw = [v.strip() for v in str(township).split(",") if v.strip()]
+            if tw:
+                sql.append(f"  AND r.township IN ({','.join('?' for _ in tw)})")
+                params.extend(tw)
         if tier:
             sql.append("  AND r.tier = ?")
             params.append(str(tier))
@@ -506,6 +509,7 @@ class DataStore:
 
         rank_set = {str(v) for v in ranks} if ranks else None
         cat_set = {str(v) for v in categories} if categories else None
+        town_set = {v.strip() for v in str(township).split(",") if v.strip()} if township else None
         out = []
         for r in self.relics:
             if not relic_in_scope(r, scope):
@@ -528,7 +532,7 @@ class DataStore:
                 continue
             if county and r.get("county") != county:
                 continue
-            if township and r.get("township") != township:
+            if town_set and (r.get("township") or "") not in town_set:
                 continue
             if tier and (r.get("tier") or "city") != tier:
                 continue

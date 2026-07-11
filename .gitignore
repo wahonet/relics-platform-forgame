@@ -45,6 +45,7 @@ platform/webgis-react/dist/
 # Editors and OS
 .vscode/
 .idea/
+.codex/
 Thumbs.db
 .DS_Store
 desktop.ini
