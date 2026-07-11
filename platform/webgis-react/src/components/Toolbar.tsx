@@ -139,8 +139,12 @@ export function Toolbar() {
 
   const [baseMenuOpen, setBaseMenuOpen] = useState(false);
   const [boundaryMenuOpen, setBoundaryMenuOpen] = useState(false);
+  const [fnMenuOpen, setFnMenuOpen] = useState(false);
   const baseMenuRef = useRef<HTMLDivElement>(null);
   const boundaryMenuRef = useRef<HTMLDivElement>(null);
+  const fnMenuRef = useRef<HTMLDivElement>(null);
+  const fnActiveCount =
+    (timelineActive ? 1 : 0) + (healthMode ? 1 : 0) + (heatMode ? 1 : 0);
 
   const tiandituEnabled = usePlatformStore((s) => !!s.config?.features?.tianditu);
   const baseOptions = useMemo(
@@ -159,6 +163,9 @@ export function Toolbar() {
       }
       if (boundaryMenuRef.current && !boundaryMenuRef.current.contains(t)) {
         setBoundaryMenuOpen(false);
+      }
+      if (fnMenuRef.current && !fnMenuRef.current.contains(t)) {
+        setFnMenuOpen(false);
       }
     };
     document.addEventListener("mousedown", handler);
@@ -195,9 +202,6 @@ export function Toolbar() {
           onClick={() => setUI({ filterPanelOpen: !filterPanelOpen })}
           title="筛选面板"
         >
-          <svg viewBox="0 0 24 24">
-            <path d="M3 4h18v2L13 16v6h-2v-6L3 6V4z" />
-          </svg>
           筛选
           {filteredCount > 0 && filteredCount < allCount ? <b>·{filteredCount}</b> : null}
         </button>
@@ -209,9 +213,6 @@ export function Toolbar() {
             className={"tb" + (baseMenuOpen ? " on" : "")}
             onClick={() => setBaseMenuOpen((v) => !v)}
           >
-            <svg viewBox="0 0 24 24">
-              <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" />
-            </svg>
             {baseLabel}
             <span className="tb-caret">▾</span>
           </button>
@@ -255,9 +256,6 @@ export function Toolbar() {
             className={"tb" + (boundaryMenuOpen ? " on" : "")}
             onClick={() => setBoundaryMenuOpen((v) => !v)}
           >
-            <svg viewBox="0 0 24 24">
-              <path d="M21 4H3v2h18V4zM3 20h18v-2H3v2zM4 12l4-4 4 4 4-4 4 4v6H4z" />
-            </svg>
             边界
             <span className="tb-caret">▾</span>
           </button>
@@ -332,36 +330,54 @@ export function Toolbar() {
       </div>
 
       <div className="tb-group boxed">
-        <button
-          className={"tb" + (timelineActive ? " on" : "")}
-          onClick={() => useTimelineStore.getState().toggle()}
-          title="年代时间轴:按朝代逐档点亮文物分布"
-        >
-          <svg viewBox="0 0 24 24">
-            <path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm0 18a8 8 0 1 1 8-8 8 8 0 0 1-8 8zm.5-13H11v6l5.2 3.1.8-1.3-4.5-2.7z" />
-          </svg>
-          时间轴
-        </button>
-        <button
-          className={"tb" + (healthMode ? " on" : "")}
-          onClick={() => setUI({ healthMode: !healthMode })}
-          title="健康度一张图:按保存状况/巡查/天气综合评分红黄绿着色"
-        >
-          <svg viewBox="0 0 24 24">
-            <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" />
-          </svg>
-          健康度
-        </button>
-        <button
-          className={"tb" + (heatMode ? " on" : "")}
-          onClick={() => setUI({ heatMode: !heatMode })}
-          title="文物密度热力图(跟随筛选与年代时间轴)"
-        >
-          <svg viewBox="0 0 24 24">
-            <path d="M13.5 0.67s0.74 2.65 0.74 4.8c0 2.06-1.35 3.73-3.41 3.73-2.07 0-3.63-1.67-3.63-3.73l0.03-0.36C5.21 7.51 4 10.62 4 14c0 4.42 3.58 8 8 8s8-3.58 8-8C20 8.61 17.41 3.8 13.5 0.67zM11.71 19c-1.78 0-3.22-1.4-3.22-3.14 0-1.62 1.05-2.76 2.81-3.12 1.77-0.36 3.6-1.21 4.62-2.58 0.39 1.29 0.59 2.65 0.59 4.04 0 2.65-2.15 4.8-4.8 4.8z" />
-          </svg>
-          热力图
-        </button>
+        <div ref={fnMenuRef} style={{ position: "relative" }}>
+          <button
+            className={"tb" + (fnMenuOpen || fnActiveCount > 0 ? " on" : "")}
+            onClick={() => setFnMenuOpen((v) => !v)}
+            title="专题功能:年代时间轴 / 健康度 / 密度热力图"
+          >
+            功能
+            {fnActiveCount > 0 ? <b>·{fnActiveCount}</b> : null}
+            <span className="tb-caret">▾</span>
+          </button>
+          {fnMenuOpen && (
+            <div
+              className="dropdown-menu open"
+              style={{ left: 0, top: "calc(100% + 4px)" }}
+            >
+              <div
+                className={"dropdown-item" + (timelineActive ? " on" : "")}
+                title="年代时间轴:按朝代逐档点亮文物分布"
+                onClick={() => {
+                  useTimelineStore.getState().toggle();
+                  setFnMenuOpen(false);
+                }}
+              >
+                时间轴{timelineActive ? " ✓" : ""}
+              </div>
+              <div
+                className={"dropdown-item" + (healthMode ? " on" : "")}
+                title="健康度一张图:按保存状况/巡查/天气综合评分红黄绿着色"
+                onClick={() => {
+                  setUI({ healthMode: !healthMode });
+                  setFnMenuOpen(false);
+                }}
+              >
+                健康度{healthMode ? " ✓" : ""}
+              </div>
+              <div
+                className={"dropdown-item" + (heatMode ? " on" : "")}
+                title="文物密度热力图(跟随筛选与年代时间轴)"
+                onClick={() => {
+                  setUI({ heatMode: !heatMode });
+                  setFnMenuOpen(false);
+                }}
+              >
+                热力图{heatMode ? " ✓" : ""}
+              </div>
+            </div>
+          )}
+        </div>
       </div>
 
       <div className="status-summary">

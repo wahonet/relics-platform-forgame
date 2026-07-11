@@ -35,6 +35,8 @@ export interface RelicSummary {
   photo_count?: number;
   drawing_count?: number;
   intro?: string;
+  /** 附属文物(顿号分隔,如“重修桥记(碑刻)、石牌坊(建构筑物)”) */
+  attachments?: string;
   last_patrol_at?: number | null;
   [key: string]: unknown;
 }

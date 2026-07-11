@@ -21,9 +21,10 @@ import {
   type DashModuleCfg,
 } from "./dashboardModules";
 import { WeatherForecast } from "./WeatherForecast";
-import { RelicScopeToggle } from "./RelicScopeToggle";
+import { applyRelicScope } from "./RelicScopeToggle";
 import { useCatalogScopeStore } from "../stores/catalogScopeStore";
 import { isProtectedRelic } from "../utils/relicScope";
+import type { RelicScope } from "../types";
 
 function countDim(relics: RelicSummary[], dim: DimDef) {
   const counts: Record<string, number> = {};
@@ -391,19 +392,33 @@ function RegionDrillCard({ type, relics, colorMap }: RegionDrillCardProps) {
 interface SummaryCardsProps {
   totalRecords: number;
   designated: number;
+  scope: RelicScope;
 }
 
-function SummaryCards({ totalRecords, designated }: SummaryCardsProps) {
+/** 摘要卡片兼作口径切换:点「文物总数」= 全部文物,点「文物保护单位」= 文保口径。 */
+function SummaryCards({ totalRecords, designated, scope }: SummaryCardsProps) {
   return (
     <div className="dash-cards">
-      <div className="dc">
+      <button
+        type="button"
+        className={"dc" + (scope === "all" ? " sel" : "")}
+        aria-pressed={scope === "all"}
+        title="切换为“全部文物”数据口径"
+        onClick={() => applyRelicScope("all")}
+      >
         <div className="n">{totalRecords}</div>
         <div className="l">文物总数</div>
-      </div>
-      <div className="dc y">
+      </button>
+      <button
+        type="button"
+        className={"dc y" + (scope === "protected" ? " sel" : "")}
+        aria-pressed={scope === "protected"}
+        title="切换为“文物保护单位”数据口径"
+        onClick={() => applyRelicScope("protected")}
+      >
         <div className="n">{designated}</div>
         <div className="l">文物保护单位</div>
-      </div>
+      </button>
     </div>
   );
 }
@@ -500,7 +515,12 @@ export function Dashboard() {
   const renderModule = (moduleId: string, cfg: DashModuleCfg) => {
     if (moduleId === "summary") {
       return (
-        <SummaryCards key="summary" totalRecords={totalRecords} designated={designated} />
+        <SummaryCards
+          key="summary"
+          totalRecords={totalRecords}
+          designated={designated}
+          scope={scope}
+        />
       );
     }
     const meta = DASH_MODULES.find((m) => m.id === moduleId);
@@ -540,18 +560,16 @@ export function Dashboard() {
     else if (cfg.dock === "right") rightIds.push(m.id);
   });
 
-  const scopeTabs = <RelicScopeToggle />;
-
   return (
     <>
       {leftIds.length > 0 && (
         <div className="dash dock-l">
-          <div className="dash-hdr">综合统计{scopeTabs}</div>
+          <div className="dash-hdr">综合统计</div>
           {leftIds.map((id) => renderModule(id, dashModules[id]))}
         </div>
       )}
       <div className="dash dock-r">
-        <div className="dash-hdr">综合统计{scopeTabs}</div>
+        <div className="dash-hdr">综合统计</div>
         {rightIds.map((id) => renderModule(id, dashModules[id]))}
         {weatherPanelVisible ? <WeatherForecast /> : null}
       </div>

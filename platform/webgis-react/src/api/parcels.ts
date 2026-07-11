@@ -84,7 +84,7 @@ export async function fetchParcelGeojson(layerId: string): Promise<ParcelFeature
 
 export async function analyzeParcelLayer(
   layerId: string,
-  scope: RelicScope = "protected",
+  scope: RelicScope = "all",
 ): Promise<ParcelAnalysis> {
   const { data } = await apiClient.post<ParcelAnalysis>(
     `/api/parcels/layers/${layerId}/analyze`,
@@ -96,7 +96,7 @@ export async function analyzeParcelLayer(
 
 export async function fetchParcelAnalysis(
   layerId: string,
-  scope: RelicScope = "protected",
+  scope: RelicScope = "all",
 ): Promise<ParcelAnalysis | null> {
   try {
     const { data } = await apiClient.get<ParcelAnalysis>(

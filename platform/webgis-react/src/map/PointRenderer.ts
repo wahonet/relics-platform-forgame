@@ -108,14 +108,6 @@ export class PointRenderer {
     this.rebuild();
   }
 
-  /** 整体显隐(热力图模式下隐藏点位,保留数据)。 */
-  setVisible(visible: boolean) {
-    this.dots.show = visible;
-    this.badges.show = visible;
-    this.labels.show = visible;
-    if (!this.viewer.isDestroyed()) this.viewer.scene.requestRender();
-  }
-
   private dotColor(r: BboxRelic): string {
     if (this.healthMode) {
       return this.healthColors.get(r.code) || "#8b99ad";
@@ -205,6 +197,8 @@ export class PointRenderer {
             height: size,
             verticalOrigin: Cesium.VerticalOrigin.CENTER,
             horizontalOrigin: Cesium.HorizontalOrigin.CENTER,
+            // 文物点永远压在热力面/高亮体块等半透明图层之上
+            disableDepthTestDistance: Number.POSITIVE_INFINITY,
             id: pickId,
           });
         } else {
@@ -214,6 +208,7 @@ export class PointRenderer {
             pixelSize: (rankSize(r.rank) || 3) + (this.healthMode ? 1 : 0),
             outlineColor: Cesium.Color.fromCssColorString("rgba(13,17,23,0.85)"),
             outlineWidth: 1,
+            disableDepthTestDistance: Number.POSITIVE_INFINITY,
             id: pickId,
           });
         }
@@ -228,6 +223,7 @@ export class PointRenderer {
           horizontalOrigin: Cesium.HorizontalOrigin.LEFT,
           pixelOffset: new Cesium.Cartesian2(labelOffset, 0),
           show: showLabel,
+          disableDepthTestDistance: Number.POSITIVE_INFINITY,
           distanceDisplayCondition: new Cesium.DistanceDisplayCondition(
             0,
             rankLabelMaxDistance(r.rank),

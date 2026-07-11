@@ -38,6 +38,64 @@ export function ChatPanel() {
   const [streaming, setStreaming] = useState(false);
   const messagesRef = useRef<HTMLDivElement>(null);
 
+  // 拖动:按住标题栏移动面板。dragPos 为空时用默认 CSS 布局(右侧滑入)。
+  const panelRef = useRef<HTMLDivElement>(null);
+  const [dragPos, setDragPos] = useState<{ x: number; y: number; h: number } | null>(null);
+  const dragRef = useRef<{
+    startX: number; startY: number;
+    origX: number; origY: number;
+    w: number; h: number; pw: number; ph: number;
+  } | null>(null);
+
+  const onHdrPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if ((e.target as HTMLElement).closest("button")) return;
+    const panel = panelRef.current;
+    if (!panel) return;
+    const parentRect = (panel.offsetParent as HTMLElement | null)?.getBoundingClientRect();
+    const rect = panel.getBoundingClientRect();
+    dragRef.current = {
+      startX: e.clientX,
+      startY: e.clientY,
+      origX: rect.left - (parentRect?.left ?? 0),
+      origY: rect.top - (parentRect?.top ?? 0),
+      w: rect.width,
+      h: rect.height,
+      pw: parentRect?.width ?? window.innerWidth,
+      ph: parentRect?.height ?? window.innerHeight,
+    };
+    e.currentTarget.setPointerCapture(e.pointerId);
+  };
+
+  const onHdrPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    const d = dragRef.current;
+    if (!d) return;
+    const x = Math.min(Math.max(d.origX + e.clientX - d.startX, 8 - d.w * 0.5), d.pw - d.w * 0.5);
+    const y = Math.min(Math.max(d.origY + e.clientY - d.startY, 0), d.ph - 48);
+    setDragPos({ x, y, h: d.h });
+  };
+
+  const onHdrPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    dragRef.current = null;
+    try {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    } catch {
+      /* ignore */
+    }
+  };
+
+  // 拖动后面板改为 left/top 定位,默认的 right 滑出动画失效,改用 display 显隐。
+  const dragStyle: React.CSSProperties | undefined = dragPos
+    ? {
+        left: dragPos.x,
+        top: dragPos.y,
+        right: "auto",
+        bottom: "auto",
+        height: dragPos.h,
+        transition: "none",
+        display: open ? "flex" : "none",
+      }
+    : undefined;
+
   useEffect(() => {
     if (messagesRef.current) {
       messagesRef.current.scrollTop = messagesRef.current.scrollHeight;
@@ -216,8 +274,18 @@ export function ChatPanel() {
   ];
 
   return (
-    <div className={"chat-panel" + (open ? " open" : "")}>
-      <div className="chat-hdr">
+    <div
+      ref={panelRef}
+      className={"chat-panel" + (open ? " open" : "")}
+      style={dragStyle}
+    >
+      <div
+        className="chat-hdr"
+        title="按住标题栏可拖动面板"
+        onPointerDown={onHdrPointerDown}
+        onPointerMove={onHdrPointerMove}
+        onPointerUp={onHdrPointerUp}
+      >
         <h3>AI 知识库问答</h3>
         <button onClick={clear}>清空</button>
         <button onClick={() => setUI({ chatPanelOpen: false })}>×</button>

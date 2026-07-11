@@ -76,6 +76,7 @@ CREATE TABLE relics (
     photo_count  INTEGER DEFAULT 0,
     drawing_count INTEGER DEFAULT 0,
     brief        TEXT,                         -- 简介（长文本，by-bbox 不查）
+    attachments  TEXT,                         -- 附属文物（顿号分隔，如“重修桥记(碑刻)、石牌坊”）
     extra_json   TEXT,                         -- 其余字段（保护范围、建控地带、权属等）
     status       INTEGER DEFAULT 1,            -- 1=正常 0=草稿 -1=下架
     version      INTEGER DEFAULT 1,            -- 乐观锁
@@ -104,7 +105,7 @@ CREATE TABLE relics_rtree_map (
 
 -- 全文搜索:trigram tokenizer(SQLite >= 3.34),对中文子串友好。
 CREATE VIRTUAL TABLE relics_fts USING fts5(
-    code, name, brief, era, county, township, village,
+    code, name, brief, era, county, township, village, attachments,
     tokenize = "trigram"
 );
 
@@ -184,7 +185,7 @@ _MAIN_FIELDS = {
     "center_lng", "center_lat", "center_alt", "county", "township", "village", "address",
     "era", "era_stats", "tier", "condition_level",
     "has_3d", "has_archive_spu", "has_archive_fpu", "has_boundary",
-    "photo_count", "drawing_count", "intro",
+    "photo_count", "drawing_count", "intro", "attachments",
 }
 
 
@@ -238,6 +239,7 @@ def _insert_relics(conn: sqlite3.Connection, relics: list[dict],
         era_stats = r.get("era_stats") or ""
         address = r.get("address") or ""
         brief = r.get("intro") or ""
+        attachments = r.get("attachments") or ""
         tier = r.get("tier") if r.get("tier") in ("city", "full") else "city"
         condition = r.get("condition_level") or ""
 
@@ -262,14 +264,14 @@ def _insert_relics(conn: sqlite3.Connection, relics: list[dict],
                 tier, condition,
                 has_3d, has_archive_spu, has_archive_fpu, has_photo, has_boundary,
                 photo_count, drawing_count,
-                brief, extra_json, status, version, created_at, updated_at
+                brief, attachments, extra_json, status, version, created_at, updated_at
             ) VALUES (
                 ?, ?, ?, ?, ?,
                 ?, ?, ?, ?, ?, ?, ?, ?, ?,
                 ?, ?,
                 ?, ?, ?, ?, ?,
                 ?, ?,
-                ?, ?, 1, 1, ?, ?
+                ?, ?, ?, 1, 1, ?, ?
             )
             """,
             (
@@ -278,7 +280,7 @@ def _insert_relics(conn: sqlite3.Connection, relics: list[dict],
                 tier, condition,
                 has_3d, has_spu, has_fpu, has_photo, has_boundary,
                 photo_count, drawing_count,
-                brief, extra_json, now, now,
+                brief, attachments, extra_json, now, now,
             ),
         )
 
@@ -295,10 +297,10 @@ def _insert_relics(conn: sqlite3.Connection, relics: list[dict],
         )
         cur.execute(
             """
-            INSERT INTO relics_fts (rowid, code, name, brief, era, county, township, village)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO relics_fts (rowid, code, name, brief, era, county, township, village, attachments)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (idx, code, name, brief, era, county, township, village),
+            (idx, code, name, brief, era, county, township, village, attachments),
         )
 
         inserted += 1

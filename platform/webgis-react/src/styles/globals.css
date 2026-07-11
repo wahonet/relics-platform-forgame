@@ -864,11 +864,13 @@ body.parcel-mode .drill-bar { display: none; }
 }
 .relic-scope-toggle.compact button { padding: 5px 8px; font-size: 11px; }
 .dash-cards { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; padding: 12px 14px; }
+/* 摘要卡片兼作数据口径切换按钮:选中卡高亮描边 + 打勾角标 */
 .dc {
+  font: inherit; cursor: pointer; position: relative;
   background: linear-gradient(160deg, color-mix(in srgb, var(--accent) 7%, transparent), var(--wash));
   border-radius: var(--r-md); padding: 12px 10px; text-align: center;
   border: 1px solid var(--bd);
-  transition: border-color var(--dur-2), transform var(--dur-2);
+  transition: border-color var(--dur-2), transform var(--dur-2), box-shadow var(--dur-2);
 }
 .dc:hover { border-color: var(--accent-bd); transform: translateY(-1px); }
 .dc .n { font-size: 23px; font-weight: 700; color: var(--accent2); line-height: 1.2; font-variant-numeric: tabular-nums; }
@@ -876,6 +878,32 @@ body.parcel-mode .drill-bar { display: none; }
 .dc.y { background: linear-gradient(160deg, var(--gold-dim), var(--wash)); border-color: var(--gold-bd); }
 .dc.y:hover { border-color: var(--gold-bd); }
 .dc.y .n { color: var(--gold2); }
+.dc.sel {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent) inset,
+    0 0 14px color-mix(in srgb, var(--accent) 25%, transparent);
+}
+.dc.y.sel {
+  border-color: var(--gold);
+  box-shadow: 0 0 0 1px var(--gold) inset,
+    0 0 14px color-mix(in srgb, var(--gold) 25%, transparent);
+}
+.dc.sel::after {
+  content: "✓"; position: absolute; top: 4px; right: 7px;
+  font-size: 11px; font-weight: 700; color: var(--accent2);
+}
+.dc.y.sel::after { color: var(--gold2); }
+/* 亮底主题下浅色强调数字在白底上看不清,统一换深色 */
+[data-theme="light"] .dc .n,
+[data-theme="glass"] .dc .n,
+[data-theme="light"] .dc.sel::after,
+[data-theme="glass"] .dc.sel::after { color: var(--accent-strong); }
+[data-theme="light"] .dc.y .n,
+[data-theme="glass"] .dc.y .n,
+[data-theme="light"] .dc.y.sel::after,
+[data-theme="glass"] .dc.y.sel::after {
+  color: color-mix(in srgb, var(--gold) 72%, #4a3208);
+}
 .dash-sec { padding: 10px 14px; border-top: 1px solid var(--hairline); }
 .dash-sec h4 {
   font-size: 12px; color: var(--t3); font-weight: 600; margin: 0 0 6px;
@@ -1264,6 +1292,7 @@ body.parcel-mode .drill-bar { display: none; }
   display: flex; align-items: center; gap: 10px;
   border-radius: var(--r-lg) var(--r-lg) 0 0;
   background: var(--panel-hd);
+  cursor: move; touch-action: none; user-select: none;
 }
 .chat-hdr h3 { font-size: 14px; color: var(--t1); font-weight: 600; flex: 1; letter-spacing: 1px; }
 .chat-hdr select {

@@ -383,15 +383,14 @@ export function MapView({ onCompassRotate, onScaleUpdate }: MapViewProps) {
     renderer.setHealthMode(true, colors);
   }, [healthMode, weatherForecast, allRelics]);
 
-  /** 文物密度热力图:与当前筛选/时间轴/下钻同源,开启时隐藏点位。 */
+  /** 文物密度热力图:与当前筛选/时间轴/下钻同源。
+   * 热力面抬升渲染,压住边界/两线/图斑等图层;文物点关闭深度测试保持置顶。 */
   const heatMode = useUIStore((s) => s.heatMode);
   useEffect(() => {
     const heatmap = heatmapRef.current;
-    const renderer = pointRendererRef.current;
-    if (!heatmap || !renderer) return;
+    if (!heatmap) return;
     if (!heatMode) {
       heatmap.clear();
-      renderer.setVisible(true);
       return;
     }
     const filter = useFilterStore.getState();
@@ -416,7 +415,6 @@ export function MapView({ onCompassRotate, onScaleUpdate }: MapViewProps) {
       if (!passFilter(r, fstate, lvDim)) return;
       points.push([r.center_lng, r.center_lat]);
     });
-    renderer.setVisible(false);
     heatmap.update(points);
   }, [
     heatMode,

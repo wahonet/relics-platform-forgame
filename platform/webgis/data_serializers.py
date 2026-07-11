@@ -31,6 +31,8 @@ def row_to_legacy(row: Any, extra: dict | None) -> dict:
         "photo_count": row["photo_count"] or 0,
         "drawing_count": row["drawing_count"] or 0,
         "intro": row["brief"] or "",
+        # 旧库无 attachments 列,兼容返回空串
+        "attachments": (row["attachments"] if "attachments" in row.keys() else "") or "",
         "_cat_code": row["category"],
         "_rank_code": row["rank"],
         "_version": row["version"] if "version" in row.keys() else 1,

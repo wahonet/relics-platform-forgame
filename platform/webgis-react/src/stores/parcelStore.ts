@@ -8,7 +8,6 @@ import {
   type ParcelLayerMeta,
 } from "../api/parcels";
 import { useUIStore } from "./uiStore";
-import { useCatalogScopeStore } from "./catalogScopeStore";
 
 /**
  * 对比图斑状态:图层列表 / 显隐 / 分析结果。
@@ -113,10 +112,8 @@ export const useParcelStore = create<ParcelState>((set, get) => ({
     if (get().analyzing) return;
     set({ analyzing: id });
     try {
-      const result = await analyzeParcelLayer(
-        id,
-        useCatalogScopeStore.getState().scope,
-      );
+      // 压占核查必须覆盖全部文物点(含未定级),不跟随目录口径开关
+      const result = await analyzeParcelLayer(id, "all");
       set({ analyses: { ...get().analyses, [id]: result } });
       const s = result.summary;
       if (s.total === 0) {
@@ -139,13 +136,13 @@ export const useParcelStore = create<ParcelState>((set, get) => ({
     if (get().analyzing || !layers.length) return;
     set({ analyzing: "__all__" });
     const analyses = { ...get().analyses };
-    const scope = useCatalogScopeStore.getState().scope;
     let totalConflicts = 0;
     let relicsHit = 0;
     let failed = 0;
     for (const l of layers) {
       try {
-        const r = await analyzeParcelLayer(l.id, scope);
+        // 同 analyze:始终按全部文物口径核查
+        const r = await analyzeParcelLayer(l.id, "all");
         analyses[l.id] = r;
         totalConflicts += r.summary.total;
         relicsHit += r.summary.relics_hit;

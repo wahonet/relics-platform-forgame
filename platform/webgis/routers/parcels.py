@@ -41,7 +41,7 @@ from _common import get_paths, load_config  # noqa: E402
 from crs import gk_inverse  # noqa: E402
 
 from data_loader import store  # noqa: E402
-from relic_scope import SCOPE_PROTECTED, normalize_relic_scope  # noqa: E402
+from relic_scope import SCOPE_ALL, normalize_relic_scope  # noqa: E402
 
 router = APIRouter(prefix="/parcels", tags=["图斑对比"])
 
@@ -389,7 +389,8 @@ def _m2_per_deg2(lat: float) -> float:
     return 111_132.954 * 111_319.490 * math.cos(math.radians(lat))
 
 
-def _analyze_sync(layer_id: str, scope: str = SCOPE_PROTECTED) -> dict:
+# 压占核查默认覆盖全部文物点(含未定级),不只文保单位
+def _analyze_sync(layer_id: str, scope: str = SCOPE_ALL) -> dict:
     from shapely.geometry import Point, shape as shp_shape
     from shapely.strtree import STRtree
     from shapely.validation import make_valid
@@ -419,19 +420,21 @@ def _analyze_sync(layer_id: str, scope: str = SCOPE_PROTECTED) -> dict:
         if g is None or g.is_empty:
             continue
         props = f.get("properties") or {}
-        if str(props.get("archive_code") or "") not in scoped_codes:
-            continue
         fidx = int(props.get("_idx", i))
         label = str(props.get("_label") or f"要素 #{fidx + 1}")
         parcel_geoms.append(g)
         parcel_meta.append((fidx, label))
 
-    # 文物两线/本体面(启动时已随 store 加载,WGS84)
+    # 文物两线/本体面(启动时已随 store 加载,WGS84)。
+    # 口径过滤加在这里(文物侧),导入的土地图斑没有 archive_code,不能过滤图斑。
     relic_polys: list[dict] = []
     for f in (store.geojson_polygons or {}).get("features") or []:
         props = f.get("properties") or {}
         kind = props.get("kind") or ""
         if kind not in ("protection", "control", "body"):
+            continue
+        code = str(props.get("archive_code") or "")
+        if code and code not in scoped_codes:
             continue
         g = _valid(f.get("geometry"))
         if g is None or g.is_empty:
@@ -560,7 +563,7 @@ async def layer_geojson(layer_id: str):
 @router.get("/layers/{layer_id}/analysis")
 async def layer_analysis(
     layer_id: str,
-    scope: str = Query(SCOPE_PROTECTED, description="protected=文保单位 all=全部文物"),
+    scope: str = Query(SCOPE_ALL, description="protected=文保单位 all=全部文物"),
 ):
     canonical_scope = _scope_or_422(scope)
     p = _analysis_path(layer_id, canonical_scope)
@@ -572,7 +575,7 @@ async def layer_analysis(
 @router.post("/layers/{layer_id}/analyze")
 async def analyze_layer(
     layer_id: str,
-    scope: str = Query(SCOPE_PROTECTED, description="protected=文保单位 all=全部文物"),
+    scope: str = Query(SCOPE_ALL, description="protected=文保单位 all=全部文物"),
 ):
     if not re.fullmatch(r"[0-9a-f]{8}", layer_id):
         raise HTTPException(404, "图层不存在")

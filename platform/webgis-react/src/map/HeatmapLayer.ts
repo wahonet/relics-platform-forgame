@@ -20,6 +20,13 @@ const CANVAS_SIZE = 640;
 const RADIUS = 26;
 /** 单点强度(累积透明度),点越密叠加越亮。 */
 const INTENSITY = 0.16;
+/**
+ * 热力面抬升高度(米)。贴地矩形属于地面分类图层,会被边界线/图斑等
+ * 其他贴地要素盖住;抬到少量高度后按普通半透明面渲染,即可位于
+ * 除文物点(关闭深度测试,始终置顶)以外的所有图层之上。
+ * 30m 在市县尺度视角下与贴地在视觉上无差别。
+ */
+const LIFT_M = 30;
 
 /** 色带:透明 → 蓝 → 青 → 绿 → 黄 → 红。 */
 function buildGradient(): Uint8ClampedArray {
@@ -120,6 +127,7 @@ export class HeatmapLayer {
         coordinates: Cesium.Rectangle.fromDegrees(
           bounds.west, bounds.south, bounds.east, bounds.north,
         ),
+        height: LIFT_M,
         material: new Cesium.ImageMaterialProperty({
           image: this.canvas.toDataURL(),
           transparent: true,

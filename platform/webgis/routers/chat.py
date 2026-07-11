@@ -2,10 +2,13 @@
 
 启动时分别预烘焙“文保单位 / 全部文物”统计上下文；每次请求再按
 当前 scope 做轻量关键词评分,追加 Top-K 相关文物详情。
+问题中出现河流/湖泊名时,另做水系空间检索(点到水系几何的距离),
+支持「泗河上的桥类文物有哪些」这类沿线问题。
 """
 from __future__ import annotations
 
 import json
+import math
 import re
 import sys
 from collections import Counter
@@ -76,6 +79,9 @@ def _build_system_prompt(scope: str = SCOPE_PROTECTED) -> str:
 - 级别缩写：国=全国重点文保单位，省=省级，市=市级，县=县级，未=尚未核定
 - 现状：保存状况（好/较好/一般/较差/差）
 - 三维：是否已完成三维数字化建模（是/否）
+- 附属文物：登记表「文物构成」中的附属项(如碑刻、牌坊、古树),名称后括号是其类别。
+  用户按类别问文物时(如"牌坊类文物"),除主体类别外也要检查附属文物栏,
+  并明确区分"本体即牌坊"与"附属文物中含牌坊"两类情况
 
 ## 地图联动标记（非常重要！）
 你的回答会渲染在一个带有地图的平台中。请在回答中积极使用以下标记，让用户可以点击查看地图：
@@ -153,7 +159,7 @@ def _build_full_context(scope: str = SCOPE_PROTECTED) -> str:
             + "当前数据量较大，完整清单未注入模型；系统会按本次问题追加最相关记录。"
         )
 
-    header = "编号|名称|年代|类别|级别|现状|乡镇|三维"
+    header = "编号|名称|年代|类别|级别|现状|乡镇|三维|附属文物"
     sections = []
     for cnty in sorted(cnty_groups.keys()):
         group = cnty_groups[cnty]
@@ -170,6 +176,7 @@ def _build_full_context(scope: str = SCOPE_PROTECTED) -> str:
                 str(r.get("condition_level", "")),
                 str(r.get("township", "")),
                 "是" if r.get("has_3d") else "否",
+                str(r.get("attachments", "") or "无"),
             ]))
         sections.append("\n".join(lines))
 
@@ -203,7 +210,8 @@ def _find_relevant_intros(
             if kw in ql and kw in era:
                 sc += 8
 
-        cat = f"{r.get('category_main', '')} {r.get('category_sub', '')}"
+        # 附属文物一并参与类别关键词匹配("牌坊类文物,包括附属文物"这类问题)
+        cat = f"{r.get('category_main', '')} {r.get('category_sub', '')} {r.get('attachments', '')}"
         for kw in ["民居", "寺", "祠", "桥", "墓", "碑", "塔", "城", "古建", "遗址",
                    "石窟", "井", "庙", "石刻", "画像", "阁", "庵", "坊"]:
             if kw in ql and kw in cat:
@@ -250,11 +258,239 @@ def _find_relevant_intros(
             f"县区：{r.get('county', '')} | 乡镇：{re.sub(r'^[0-9]+', '', r.get('township', '') or '')} | "
             f"级别：{r.get('heritage_level', '')} | 现状：{r.get('condition_level', '')}\n"
             f"地址：{r.get('address', '')}\n"
+            f"附属文物：{r.get('attachments', '') or '无'}\n"
             f"保护范围：{r.get('protection_scope', '') or '—'}\n"
             f"建控地带：{r.get('control_zone', '') or '—'}\n"
             f"简介：{intro}"
         )
     return "\n\n---\n\n".join(parts) if parts else ""
+
+
+# ── 附属文物检索 ─────────────────────────────────────────────
+# 问题按类别问("牌坊类文物,包括附属文物")时,主类别之外还要查附属栏;
+# all 口径不注入完整清单,必须靠这里把附属命中的记录喂给模型。
+_ATT_KEYWORDS = [
+    "牌坊", "石刻", "画像", "碑", "桥", "塔", "井", "庙", "殿", "楼",
+    "亭", "阁", "坊", "古树", "钟", "鼓", "俑", "石狮", "供案",
+]
+_ATT_MAX_HITS = 60
+
+
+def _find_attachment_context(query: str, scope: str) -> str:
+    """检索附属文物栏,返回命中清单(空串表示与本问题无关)。"""
+    kws = [kw for kw in _ATT_KEYWORDS if kw in query]
+    # 长词优先:命中"牌坊"就不再单算"坊"
+    kept: list[str] = []
+    for kw in sorted(kws, key=len, reverse=True):
+        if not any(kw in k for k in kept):
+            kept.append(kw)
+    ask_attachment = "附属" in query
+    if not kept and not ask_attachment:
+        return ""
+
+    hits: list[dict] = []
+    for r in store.scoped_relics(scope):
+        att = str(r.get("attachments") or "")
+        if not att:
+            continue
+        if kept and not any(kw in att for kw in kept):
+            continue
+        hits.append(r)
+    if not hits:
+        return ""
+
+    shown = hits[:_ATT_MAX_HITS]
+    title = "、".join(kept) if kept else "全部"
+    lines = [
+        f"### 附属文物栏命中「{title}」的文物(共 {len(hits)} 处"
+        + (f",下表列出前 {len(shown)} 处)" if len(hits) > len(shown) else ")"),
+        "编号|名称|类别|级别|县区|附属文物",
+    ]
+    for r in shown:
+        lines.append("|".join([
+            str(r.get("archive_code", "")),
+            str(r.get("name", "")),
+            str(r.get("category_main", "")),
+            _short_level(str(r.get("heritage_level", ""))),
+            str(r.get("county", "")),
+            str(r.get("attachments", "")),
+        ]))
+    return (
+        "## 附属文物检索\n"
+        "以下文物的「附属文物」栏含相关内容。它们的主体类别可能不同,"
+        "回答时请注明是附属文物命中。\n\n" + "\n".join(lines)
+    )
+
+
+# ── 水系空间检索(泗河上的桥类文物 这类沿线问题) ──────────────
+_WATER_DIR = Path(__file__).resolve().parents[1] / "static" / "vector_basemap"
+# 沿线判定半径:水系轮廓是制图级简化线,留出容差
+_WATER_NEAR_M = 1500.0
+_WATER_MAX_HITS = 40
+_water_index: list[dict] | None = None
+
+
+def _load_water_index() -> list[dict]:
+    """离线矢量底图的河流(线)/湖泊水库(面),惰性加载并缓存。"""
+    global _water_index
+    if _water_index is not None:
+        return _water_index
+    out: list[dict] = []
+    for fname, kind in (("rivers.json", "河"), ("lakes.json", "湖")):
+        try:
+            data = json.loads((_WATER_DIR / fname).read_text(encoding="utf-8"))
+        except Exception:  # noqa: BLE001
+            continue
+        for item in data.get("items") or []:
+            name = str(item.get("name") or "").strip()
+            pts = item.get("pts") or []
+            if len(name) < 2 or len(pts) < 2:
+                continue
+            xs = [p[0] for p in pts]
+            ys = [p[1] for p in pts]
+            out.append({
+                "name": name,
+                "kind": kind,
+                "pts": pts,
+                "bbox": (min(xs), min(ys), max(xs), max(ys)),
+            })
+    _water_index = out
+    return out
+
+
+def _water_names_in_query(query: str, names: set[str]) -> list[str]:
+    """问题中出现的水系名。排除"泗河街道"这类行政区/道路语境的误命中。"""
+    admin_suffixes = ("街道", "镇", "乡", "村", "社区", "路", "小区")
+    matched = []
+    for name in names:
+        idx = query.find(name)
+        hit = False
+        while idx != -1:
+            tail = query[idx + len(name):]
+            if not tail.startswith(admin_suffixes):
+                hit = True
+                break
+            idx = query.find(name, idx + 1)
+        if hit:
+            matched.append(name)
+    # 命中"小泗河"时不再单独算其中的"泗河"
+    matched.sort(key=len, reverse=True)
+    kept: list[str] = []
+    for n in matched:
+        if not any(n in k for k in kept):
+            kept.append(n)
+    return kept
+
+
+def _point_in_ring(px: float, py: float, pts: list) -> bool:
+    inside = False
+    j = len(pts) - 1
+    for i in range(len(pts)):
+        xi, yi = pts[i][0], pts[i][1]
+        xj, yj = pts[j][0], pts[j][1]
+        if (yi > py) != (yj > py):
+            x_cross = (xj - xi) * (py - yi) / ((yj - yi) or 1e-12) + xi
+            if px < x_cross:
+                inside = not inside
+        j = i
+    return inside
+
+
+def _dist_to_path_m(lng: float, lat: float, pts: list, kx: float, ky: float) -> float:
+    """点到折线的最小距离(等距圆柱近似,米)。"""
+    px, py = lng * kx, lat * ky
+    best = float("inf")
+    for i in range(len(pts) - 1):
+        x1, y1 = pts[i][0] * kx, pts[i][1] * ky
+        x2, y2 = pts[i + 1][0] * kx, pts[i + 1][1] * ky
+        dx, dy = x2 - x1, y2 - y1
+        seg2 = dx * dx + dy * dy
+        t = 0.0 if seg2 == 0 else max(0.0, min(1.0, ((px - x1) * dx + (py - y1) * dy) / seg2))
+        d = math.hypot(px - (x1 + t * dx), py - (y1 + t * dy))
+        if d < best:
+            best = d
+    return best
+
+
+def _find_water_context(query: str, scope: str) -> str:
+    """问题涉及河流/湖泊时,检索沿线(1.5km 内)文物,拼成上下文表格。"""
+    waters = _load_water_index()
+    if not waters:
+        return ""
+    names = _water_names_in_query(query, {w["name"] for w in waters})
+    if not names:
+        return ""
+
+    relics = store.scoped_relics(scope)
+    pad_deg = _WATER_NEAR_M / 100_000  # ~1.5km 的经纬度粗略缓冲
+    sections = []
+    for name in names[:3]:
+        geoms = [w for w in waters if w["name"] == name]
+        kind = geoms[0]["kind"]
+        boxes = [
+            (b[0] - pad_deg, b[1] - pad_deg, b[2] + pad_deg, b[3] + pad_deg)
+            for b in (g["bbox"] for g in geoms)
+        ]
+        hits: list[tuple[float, dict]] = []
+        for r in relics:
+            lng, lat = r.get("center_lng"), r.get("center_lat")
+            if lng is None or lat is None:
+                continue
+            lng, lat = float(lng), float(lat)
+            best = float("inf")
+            for g, b in zip(geoms, boxes):
+                if not (b[0] <= lng <= b[2] and b[1] <= lat <= b[3]):
+                    continue
+                mid_lat = (b[1] + b[3]) / 2
+                kx = 111_320.0 * math.cos(math.radians(mid_lat))
+                ky = 110_540.0
+                if kind == "湖" and _point_in_ring(lng, lat, g["pts"]):
+                    best = 0.0
+                    break
+                d = _dist_to_path_m(lng, lat, g["pts"], kx, ky)
+                if d < best:
+                    best = d
+            if best <= _WATER_NEAR_M:
+                hits.append((best, r))
+        hits.sort(key=lambda x: x[0])
+        label = "沿线" if kind == "河" else "周边"
+        if not hits:
+            sections.append(f"### {name}\n{label} {int(_WATER_NEAR_M)} 米内未检索到文物。")
+            continue
+        # 桥/闸/坝等涉水设施是这类问题的核心,即使距离排序靠后也保证入选
+        selected = hits[:_WATER_MAX_HITS]
+        chosen = {id(r) for _, r in selected}
+        water_related = re.compile(r"[桥闸坝涵渡堤]")
+        for d, r in hits[_WATER_MAX_HITS:]:
+            if water_related.search(str(r.get("name", ""))) and id(r) not in chosen:
+                selected.append((d, r))
+        selected.sort(key=lambda x: x[0])
+        lines = [
+            f"### {name} {label} {int(_WATER_NEAR_M)} 米内的文物(按距离升序,共 {len(hits)} 处"
+            + (f",下表列出最近 {_WATER_MAX_HITS} 处及全部桥闸坝类设施)" if len(hits) > len(selected) or len(selected) > _WATER_MAX_HITS else ")"),
+            "编号|名称|类别|级别|现状|距离|县区|乡镇",
+        ]
+        for d, r in selected:
+            dist_text = "水域内" if d == 0 else f"约{max(10, int(round(d / 10) * 10))}米"
+            lines.append("|".join([
+                str(r.get("archive_code", "")),
+                str(r.get("name", "")),
+                str(r.get("category_main", "")),
+                _short_level(str(r.get("heritage_level", ""))),
+                str(r.get("condition_level", "")),
+                dist_text,
+                str(r.get("county", "")),
+                re.sub(r"^\d+", "", str(r.get("township", "") or "")),
+            ]))
+        sections.append("\n".join(lines))
+
+    return (
+        "## 水系空间检索\n"
+        "以下由系统按文物中心点到水系几何的距离计算得出。"
+        "水系轮廓为制图级简化线,距离是近似值;请结合类别/名称判断文物与水系的实际关系"
+        "(如「桥涵」「闸」「渡口」多为跨河/临河设施)。\n\n"
+        + "\n\n".join(sections)
+    )
 
 
 def init_chat() -> None:
@@ -311,8 +547,14 @@ async def chat(req: ChatRequest):
         top_k=_top_k_relics,
         scope=scope,
     )
+    water_detail = _find_water_context(req.message, scope)
+    attachment_detail = _find_attachment_context(req.message, scope)
 
     system_content = _build_system_prompt(scope) + "\n\n" + _scope_contexts.get(scope, "")
+    if water_detail:
+        system_content += "\n\n" + water_detail
+    if attachment_detail:
+        system_content += "\n\n" + attachment_detail
     if detail:
         system_content += "\n\n## 与本次提问最相关的文物详情\n" + detail
 
@@ -358,7 +600,7 @@ async def chat_test():
     return {
         "ready": ai_service.ready(),
         "relics_count": len(store.relics),
-        "context_chars": len(_full_context),
+        "context_chars": {k: len(v) for k, v in _scope_contexts.items()},
         "default_model": _default_model,
         "project": _project_full_name,
     }

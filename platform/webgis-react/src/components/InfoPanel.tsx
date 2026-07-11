@@ -210,6 +210,7 @@ export function InfoPanel() {
               label="保存状况"
               valueNode={<span className={ccls}>{r.condition_level || "-"}</span>}
             />
+            {r.attachments ? <Row label="附属文物" value={r.attachments} /> : null}
             <Row label="照片" value={`${r.photo_count || 0} 张`} />
             <Row label="图纸" value={`${r.drawing_count || 0} 张`} />
             {r.has_boundary ? (

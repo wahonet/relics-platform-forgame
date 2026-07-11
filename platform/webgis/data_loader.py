@@ -333,7 +333,7 @@ class DataStore:
             "center_lat", "center_lng", "center_alt",
             "has_boundary", "area", "condition_level", "tier",
             "ownership_type", "has_3d", "model_3d_path",
-            "photo_count", "drawing_count",
+            "photo_count", "drawing_count", "attachments",
             "has_archive_spu", "has_archive_fpu", "last_patrol_at",
         ]
         result = []
@@ -701,7 +701,7 @@ class DataStore:
         "era", "era_stats", "tier", "condition",
         "has_3d", "has_archive_spu", "has_archive_fpu", "has_photo",
         "has_boundary", "photo_count", "drawing_count",
-        "brief", "extra_json", "status",
+        "brief", "attachments", "extra_json", "status",
     }
 
     def _row_to_dict(self, row: sqlite3.Row) -> dict:
@@ -753,18 +753,15 @@ class DataStore:
 
     def _fts_upsert(self, conn: sqlite3.Connection, row: dict) -> None:
         conn.execute("DELETE FROM relics_fts WHERE code = ?", (row["code"],))
+        cols = ["code", "name", "brief", "era", "county", "township", "village"]
+        # attachments 列是后加的,旧库的 FTS 表可能没有
+        fts_cols = {r[1] for r in conn.execute("PRAGMA table_info(relics_fts)")}
+        if "attachments" in fts_cols:
+            cols.append("attachments")
         conn.execute(
-            "INSERT INTO relics_fts (code, name, brief, era, county, township, village) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (
-                row.get("code", ""),
-                row.get("name", ""),
-                row.get("brief") or "",
-                row.get("era") or "",
-                row.get("county") or "",
-                row.get("township") or "",
-                row.get("village") or "",
-            ),
+            f"INSERT INTO relics_fts ({', '.join(cols)}) "
+            f"VALUES ({', '.join('?' for _ in cols)})",
+            tuple(row.get(c) or "" for c in cols),
         )
 
     def create_relic(self, payload: dict, *, actor: str = "") -> dict:
@@ -835,6 +832,7 @@ class DataStore:
                 "county": payload.get("county"),
                 "township": payload.get("township"),
                 "village": payload.get("village"),
+                "attachments": payload.get("attachments"),
             })
             row = conn.execute("SELECT * FROM relics WHERE id = ?", (relic_id,)).fetchone()
             after = self._row_to_dict(row)
@@ -894,12 +892,13 @@ class DataStore:
             row = conn.execute("SELECT * FROM relics WHERE code = ?", (code,)).fetchone()
             if ("lng" in patch) or ("lat" in patch):
                 self._rtree_upsert(conn, row["id"], row["lng"], row["lat"])
-            if any(k in patch for k in ("name", "brief", "era", "county", "township", "village")):
+            if any(k in patch for k in ("name", "brief", "era", "county", "township", "village", "attachments")):
                 self._fts_upsert(conn, {
                     "code": row["code"], "name": row["name"],
                     "brief": row["brief"], "era": row["era"],
                     "county": row["county"],
                     "township": row["township"], "village": row["village"],
+                    "attachments": row["attachments"] if "attachments" in row.keys() else "",
                 })
             after = self._row_to_dict(row)
             self._write_audit(conn, actor=actor, action="update", code=code,

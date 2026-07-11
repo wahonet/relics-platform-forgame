@@ -9,7 +9,7 @@
  * 由「系统管理 → 设置」的开关和当前是否在地图页共同决定启用。
  */
 import * as Cesium from "cesium";
-import { useUIStore } from "../stores/uiStore";
+import { useUIStore, isLightTheme } from "../stores/uiStore";
 import { useDrillStore } from "../stores/drillStore";
 import { sameTownship } from "../utils/township";
 import {
@@ -29,7 +29,11 @@ interface PickedRelic {
 
 type PositionedAction = (event: { position: Cesium.Cartesian2 }) => void;
 
-const HIGHLIGHT_COLOR = "#f0cc65";
+// 青色高亮:与县界金色、两线红/蓝、镇村灰色虚线都区分开
+const HIGHLIGHT_COLOR = "#35e0ff";
+// 区域外压暗遮罩(镂空感的关键):区域内保持原亮度,周边压暗
+const HIGHLIGHT_MASK_DARK = { css: "#04101e", alpha: 0.42 };
+const HIGHLIGHT_MASK_LIGHT = { css: "#eef3f8", alpha: 0.5 };
 
 export class AdminDrillController {
   private viewer: Cesium.Viewer;
@@ -182,7 +186,13 @@ export class AdminDrillController {
     this.toast(`已从 ${from} 返回 ${target}`);
   }
 
-  /** 当前下钻区域的金色描边(区域为空则清除)。 */
+  /**
+   * 当前下钻区域的"悬浮抬升"高亮:
+   *   - 区域外整体压暗(区域本身镂空,保持原亮度)
+   *   - 区域轮廓抬升到空中的发光描边
+   *   - 地面到描边之间的半透明侧壁,形成"这一级浮在其他层之上"的体积感
+   * 描边不再贴地,避免被县界金线盖住(县级此前看不到高亮的原因)。
+   */
   private updateHighlight(county: string, township: string, village: string): void {
     if (this.viewer.isDestroyed()) return;
     this.highlightEntities.forEach((entity) => {
@@ -199,23 +209,62 @@ export class AdminDrillController {
     else if (township) region = getTownship(county, township);
     else if (county) region = getCounty(county);
     if (region) {
+      // 抬升高度随区域尺寸走:县约 1.2km、镇约 300m、村约 100m,
+      // 与各级镜头高度成比例,视觉上悬浮幅度一致
+      const spanDeg = Math.max(
+        region.bounds.east - region.bounds.west,
+        region.bounds.north - region.bounds.south,
+      );
+      const lift = Math.min(1400, Math.max(90, spanDeg * 111_000 * 0.018));
+      const glowColor = Cesium.Color.fromCssColorString(HIGHLIGHT_COLOR);
+      const holes: Cesium.PolygonHierarchy[] = [];
+
       region.polygons.forEach((polygon) => {
         const outer = polygon[0];
         if (!outer || outer.length < 3) return;
-        const positions = outer.map(([plng, plat]) => Cesium.Cartesian3.fromDegrees(plng, plat));
-        positions.push(positions[0]);
+        holes.push(new Cesium.PolygonHierarchy(
+          outer.map(([plng, plat]) => Cesium.Cartesian3.fromDegrees(plng, plat)),
+        ));
+        const raised = outer.map(
+          ([plng, plat]) => Cesium.Cartesian3.fromDegrees(plng, plat, lift),
+        );
+        raised.push(raised[0]);
         this.highlightEntities.push(this.viewer.entities.add({
           polyline: {
-            positions,
-            width: 4,
+            positions: raised,
+            width: 4.5,
             material: new Cesium.PolylineGlowMaterialProperty({
-              glowPower: 0.18,
-              color: Cesium.Color.fromCssColorString(HIGHLIGHT_COLOR).withAlpha(0.85),
+              glowPower: 0.22,
+              color: glowColor.withAlpha(0.9),
             }),
-            clampToGround: true,
+          },
+        }));
+        this.highlightEntities.push(this.viewer.entities.add({
+          wall: {
+            positions: raised,
+            minimumHeights: raised.map(() => 0),
+            maximumHeights: raised.map(() => lift),
+            material: glowColor.withAlpha(0.12),
           },
         }));
       });
+
+      if (holes.length) {
+        const mask = isLightTheme(useUIStore.getState().theme)
+          ? HIGHLIGHT_MASK_LIGHT
+          : HIGHLIGHT_MASK_DARK;
+        const outerRect = [
+          [60, 0], [150, 0], [150, 65], [60, 65],
+        ].map(([plng, plat]) => Cesium.Cartesian3.fromDegrees(plng, plat));
+        this.highlightEntities.push(this.viewer.entities.add({
+          polygon: {
+            hierarchy: new Cesium.PolygonHierarchy(outerRect, holes),
+            material: Cesium.Color.fromCssColorString(mask.css).withAlpha(mask.alpha),
+            // 略高于市域遮罩(高度 0),避免两块半透明面同面闪烁
+            height: 2,
+          },
+        }));
+      }
     }
     this.viewer.scene.requestRender();
   }

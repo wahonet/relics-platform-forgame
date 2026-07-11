@@ -135,6 +135,30 @@ def parse_coordinates(md: str) -> dict:
     return result
 
 
+def parse_attachments(md: str) -> str:
+    """解析「文物构成 → 附属文物」表,返回顿号分隔的附属项名称串。
+
+    名称列通常自带类别注记,如“修西桥记(碑刻)”“石牌坊(其他)”;
+    没有附属文物时表格只有一行（无）,返回空串。
+    """
+    section = get_section_text(md, "文物构成")
+    if not section:
+        return ""
+    m = re.search(r"### 附属文物\s*\n(.*)", section, re.DOTALL)
+    if not m:
+        return ""
+    items: list[str] = []
+    for cells in _table_rows(m.group(1)):
+        if not cells or cells[0] in ("序号",):
+            continue
+        # 列序:序号|分组|名称或类别|面积或数量
+        name = cells[2].strip() if len(cells) > 2 else ""
+        if not name or name in _EMPTY_VALUES:
+            continue
+        items.append(name)
+    return "、".join(items)
+
+
 def parse_media_lists(md: str) -> tuple[list[dict], list[dict]]:
     """解析「图纸清单」「照片清单」,返回 (drawings, photos) 元数据列表。"""
     drawings: list[dict] = []
@@ -254,6 +278,7 @@ def parse_archive_md(md_path: Path, group_name: str = "") -> dict:
         "is_open": get_field(content, ow, "开放状况"),
         "usage": get_field(content, ow, "使用用途"),
         "condition_level": get_field(content, ps, "现状评估"),
+        "attachments": parse_attachments(content),
         "prot_measures": get_field(content, ps, "已完成保护措施"),
         "risk_factors": get_field(content, ps, "主要影响因素"),
         "audit_result": get_field(content, "审核信息", "审核意见"),

@@ -134,9 +134,11 @@ export const useUIStore = create<UIState>((set, get) => ({
   bndCountyName: true,
   bndTownship: true,
   bndTownshipName: true,
-  bndVillage: false,
-  bndVillageName: false,
-  twoLineVisible: true,
+  // 村界/村名默认开:数据按相机高度懒加载,只有放大到近景才请求与渲染
+  bndVillage: true,
+  bndVillageName: true,
+  // 两线范围默认关,需要时在「边界」菜单里手动打开
+  twoLineVisible: false,
 
   symbolMode: false,
   hdMode: localStorage.getItem("hdMode") === "1",

@@ -93,7 +93,8 @@ const VILLAGE_MAX_HEIGHT = 45_000;
 const COUNTY_NAME_MIN_HEIGHT = 25_000;
 const COUNTY_NAME_MAX_HEIGHT = 500_000;
 const TOWNSHIP_NAME_MAX_HEIGHT = 100_000;
-const VILLAGE_NAME_MAX_HEIGHT = 18_000;
+// 下钻进镇级视图时相机约 20~35km,阈值需覆盖到,否则村名只有贴地才出现
+const VILLAGE_NAME_MAX_HEIGHT = 32_000;
 const PRIMITIVE_BATCH_SIZE = 350;
 
 // 域外遮罩配色：深色主题压暗聚焦，亮白主题使用浅雾。
