@@ -1,6 +1,12 @@
 import { create } from "zustand";
 import { categoryCode, rankCode, DIMS, dimValue, TIER_MAP } from "../utils/dict";
 import { useRelicsStore } from "./relicsStore";
+import { useCatalogScopeStore } from "./catalogScopeStore";
+import {
+  useTimelineStore,
+  timelineShowsAll,
+  timelineEras,
+} from "./timelineStore";
 import type { BackendFilters } from "../types";
 
 interface FilterState {
@@ -42,7 +48,9 @@ export const useFilterStore = create<FilterState>((set, get) => ({
   statFilters: {},
   toBackend(allCatNames) {
     const f = get();
-    const out: BackendFilters = {};
+    const out: BackendFilters = {
+      scope: useCatalogScopeStore.getState().scope,
+    };
     const catCodes = new Set<string>();
     if (f.activeCats.size > 0 && f.activeCats.size < allCatNames.size) {
       f.activeCats.forEach((n) => catCodes.add(categoryCode(n)));
@@ -81,6 +89,22 @@ export const useFilterStore = create<FilterState>((set, get) => ({
     }
     if (f.threeD === "1") out.has_3d = true;
     else if (f.threeD === "0") out.has_3d = false;
+    // 年代时间轴模式:只看"选中档及更早"的年代(覆盖单选的年代统计筛选)
+    const timeline = useTimelineStore.getState();
+    if (timeline.active && !timelineShowsAll(timeline.index)) {
+      const eraDim = DIMS.find((d) => d.id === "era");
+      if (eraDim) {
+        const allowed = new Set(timelineEras(timeline.index));
+        const raws = new Set<string>();
+        for (const r of useRelicsStore.getState().all) {
+          if (allowed.has(dimValue(r as unknown as Record<string, unknown>, eraDim))) {
+            raws.add((r.era_stats as string) || "__empty__");
+          }
+        }
+        // 无匹配时传一个不存在的值,让后端返回空集而不是全量
+        out.era = raws.size ? [...raws].join(",") : "__timeline_none__";
+      }
+    }
     const kw = f.search.trim();
     if (kw) out.q = kw;
     return out;

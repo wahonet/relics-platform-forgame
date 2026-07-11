@@ -38,7 +38,9 @@ import {
   type TownshipSource,
 } from "../api/boundaries";
 import { CRS_LIST, type CrsId } from "../utils/crs";
+import { fetchTtsConfig, previewTts, type TtsConfig } from "../api/tts";
 import { useUIStore } from "../stores/uiStore";
+import { useDrillStore } from "../stores/drillStore";
 import { confirmDialog } from "../components/ConfirmModal";
 
 const STEP_TITLE: Record<string, string> = {
@@ -709,13 +711,309 @@ function CacheOverviewSection({ flash }: { flash: (t: string) => void }) {
   );
 }
 
-type AdminTabId = "pipeline" | "api" | "map";
+type AdminTabId = "pipeline" | "api" | "map" | "settings";
 
 const ADMIN_TABS: { id: AdminTabId; label: string }[] = [
   { id: "pipeline", label: "数据管线" },
   { id: "api", label: "API 配置" },
   { id: "map", label: "离线地图下载" },
+  { id: "settings", label: "设置" },
 ];
+
+/** ── 设置(本机功能开关,存 localStorage) ─────────────────── */
+interface SettingToggleProps {
+  label: string;
+  desc: string;
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+}
+
+function SettingToggle({ label, desc, checked, onChange }: SettingToggleProps) {
+  return (
+    <label className="adm-set-row">
+      <div className="adm-set-text">
+        <b>{label}</b>
+        <em>{desc}</em>
+      </div>
+      <input
+        type="checkbox"
+        role="switch"
+        checked={checked}
+        onChange={(e) => onChange(e.target.checked)}
+      />
+      <span className="adm-set-switch" aria-hidden="true" />
+    </label>
+  );
+}
+
+/** CosyVoice2 预置音色(SiliconFlow 官方音色描述)。 */
+const TTS_VOICES: { id: string; label: string }[] = [
+  { id: "anna", label: "Anna · 沉稳女声" },
+  { id: "bella", label: "Bella · 激情女声" },
+  { id: "claire", label: "Claire · 温柔女声" },
+  { id: "diana", label: "Diana · 欢快女声" },
+  { id: "alex", label: "Alex · 沉稳男声" },
+  { id: "benjamin", label: "Benjamin · 低沉男声" },
+  { id: "charles", label: "Charles · 磁性男声" },
+  { id: "david", label: "David · 欢快男声" },
+];
+
+const TTS_SPEEDS: { value: number; label: string }[] = [
+  { value: 0.8, label: "较慢 (0.8×)" },
+  { value: 0.9, label: "稍慢 (0.9×)" },
+  { value: 1, label: "标准 (1.0×)" },
+  { value: 1.2, label: "较快 (1.2×)" },
+  { value: 1.4, label: "快 (1.4×)" },
+];
+
+const TTS_SCOPES: { value: "full" | "brief" | "intro"; label: string }[] = [
+  { value: "full", label: "完整讲解(基础信息 + 简介)" },
+  { value: "brief", label: "仅基础信息(名称/级别/年代等)" },
+  { value: "intro", label: "名称 + 简介全文" },
+];
+
+function SettingsSection({ flash }: { flash: (t: string) => void }) {
+  const weatherFxEnabled = useUIStore((s) => s.weatherFxEnabled);
+  const weatherPanelVisible = useUIStore((s) => s.weatherPanelVisible);
+  const drillEnabled = useUIStore((s) => s.drillEnabled);
+  const chartFlyEnabled = useUIStore((s) => s.chartFlyEnabled);
+  const ttsVoiceZh = useUIStore((s) => s.ttsVoiceZh);
+  const ttsVoiceEn = useUIStore((s) => s.ttsVoiceEn);
+  const ttsSpeed = useUIStore((s) => s.ttsSpeed);
+  const ttsScope = useUIStore((s) => s.ttsScope);
+  const setUI = useUIStore((s) => s.set);
+  const [ttsCfg, setTtsCfg] = useState<TtsConfig | null>(null);
+  const [previewing, setPreviewing] = useState<"zh" | "en" | "">("");
+  const previewAudioRef = useRef<HTMLAudioElement | null>(null);
+
+  useEffect(() => {
+    fetchTtsConfig().then(setTtsCfg).catch(() => undefined);
+    return () => {
+      previewAudioRef.current?.pause();
+      previewAudioRef.current = null;
+    };
+  }, []);
+
+  const setTts = (
+    patch: Partial<{ ttsVoiceZh: string; ttsVoiceEn: string; ttsSpeed: number; ttsScope: "full" | "brief" | "intro" }>,
+  ) => {
+    try {
+      if (patch.ttsVoiceZh != null) localStorage.setItem("ttsVoiceZh", patch.ttsVoiceZh);
+      if (patch.ttsVoiceEn != null) localStorage.setItem("ttsVoiceEn", patch.ttsVoiceEn);
+      if (patch.ttsSpeed != null) localStorage.setItem("ttsSpeed", String(patch.ttsSpeed));
+      if (patch.ttsScope != null) localStorage.setItem("ttsScope", patch.ttsScope);
+    } catch {
+      /* ignore */
+    }
+    setUI(patch);
+  };
+
+  const doPreview = async (lang: "zh" | "en") => {
+    if (previewing) {
+      previewAudioRef.current?.pause();
+      previewAudioRef.current = null;
+      setPreviewing("");
+      return;
+    }
+    setPreviewing(lang);
+    try {
+      const blob = await previewTts({
+        lang,
+        voice: lang === "zh" ? ttsVoiceZh : ttsVoiceEn,
+        speed: ttsSpeed,
+      });
+      const audio = new Audio(URL.createObjectURL(blob));
+      previewAudioRef.current = audio;
+      audio.onended = () => {
+        if (previewAudioRef.current === audio) {
+          previewAudioRef.current = null;
+          setPreviewing("");
+        }
+      };
+      await audio.play();
+    } catch {
+      flash("试听失败,请确认已配置 SiliconFlow Key");
+      setPreviewing("");
+    }
+  };
+
+  const apply = (
+    key: "weatherFxEnabled" | "weatherPanelVisible" | "drillEnabled" | "chartFlyEnabled",
+    storageKey: string,
+    checked: boolean,
+    onText: string,
+    offText: string,
+  ) => {
+    try {
+      localStorage.setItem(storageKey, checked ? "1" : "0");
+    } catch {
+      /* ignore */
+    }
+    setUI({ [key]: checked });
+    flash(checked ? onText : offText);
+  };
+
+  return (
+    <>
+      <div className="adm-sec">
+        <div className="adm-sec-hdr">
+          <h2>地图交互</h2>
+        </div>
+        <div className="adm-set-list">
+          <SettingToggle
+            label="双击逐级下钻"
+            desc="双击县区进入县区、再双击镇街/村逐级深入,自动筛选区域内文物;右键逐级返回"
+            checked={drillEnabled}
+            onChange={(checked) => {
+              apply("drillEnabled", "adminDrill", checked, "双击下钻已开启", "双击下钻已关闭");
+              if (!checked) useDrillStore.getState().reset({ fly: false });
+            }}
+          />
+          <SettingToggle
+            label="统计图联动镜头"
+            desc="点击右侧「县区分布」统计图下钻时,镜头同步飞到对应区域"
+            checked={chartFlyEnabled}
+            onChange={(checked) =>
+              apply("chartFlyEnabled", "chartFly", checked, "统计图镜头联动已开启", "统计图镜头联动已关闭")
+            }
+          />
+        </div>
+      </div>
+
+      <div className="adm-sec">
+        <div className="adm-sec-hdr">
+          <h2>天气显示</h2>
+        </div>
+        <div className="adm-set-list">
+          <SettingToggle
+            label="地图天气氛围效果"
+            desc="当天有雨/雪/阴天时,地图上叠加一层极淡的天气效果(晴天无效果)"
+            checked={weatherFxEnabled}
+            onChange={(checked) =>
+              apply("weatherFxEnabled", "weatherFx", checked, "天气氛围效果已开启", "天气氛围效果已关闭")
+            }
+          />
+          <SettingToggle
+            label="天气预报面板"
+            desc="右侧统计栏底部的未来 7 天天气预报(含文物防护提示)"
+            checked={weatherPanelVisible}
+            onChange={(checked) =>
+              apply("weatherPanelVisible", "weatherPanel", checked, "天气预报面板已显示", "天气预报面板已隐藏")
+            }
+          />
+        </div>
+      </div>
+
+      <div className="adm-sec">
+        <div className="adm-sec-hdr">
+          <h2>语音讲解</h2>
+          <span className="adm-hint">
+            {ttsCfg?.ready
+              ? "AI 情感语音已就绪"
+              : "未配置 SiliconFlow Key,中文回退浏览器本地朗读"}
+          </span>
+        </div>
+        <div className="adm-set-list">
+          <div className="adm-set-field">
+            <div className="adm-set-text">
+              <b>中文讲解音色</b>
+              <em>点击详情面板喇叭按钮时使用的中文播音音色</em>
+            </div>
+            <select
+              className="pp-input"
+              value={ttsVoiceZh}
+              onChange={(e) => {
+                setTts({ ttsVoiceZh: e.target.value });
+                flash("中文音色已更新");
+              }}
+            >
+              {TTS_VOICES.map((v) => (
+                <option key={v.id} value={v.id}>{v.label}</option>
+              ))}
+            </select>
+            <button
+              className="pp-btn sm"
+              disabled={previewing === "en"}
+              onClick={() => void doPreview("zh")}
+            >
+              {previewing === "zh" ? "■ 停止" : "试听"}
+            </button>
+          </div>
+          <div className="adm-set-field">
+            <div className="adm-set-text">
+              <b>英文讲解音色</b>
+              <em>英文解说词播音音色;文物名称、地名保留中文原音</em>
+            </div>
+            <select
+              className="pp-input"
+              value={ttsVoiceEn}
+              onChange={(e) => {
+                setTts({ ttsVoiceEn: e.target.value });
+                flash("英文音色已更新");
+              }}
+            >
+              {TTS_VOICES.map((v) => (
+                <option key={v.id} value={v.id}>{v.label}</option>
+              ))}
+            </select>
+            <button
+              className="pp-btn sm"
+              disabled={previewing === "zh"}
+              onClick={() => void doPreview("en")}
+            >
+              {previewing === "en" ? "■ 停止" : "试听"}
+            </button>
+          </div>
+          <div className="adm-set-field">
+            <div className="adm-set-text">
+              <b>语速</b>
+              <em>中英文讲解共用</em>
+            </div>
+            <select
+              className="pp-input"
+              value={String(ttsSpeed)}
+              onChange={(e) => {
+                setTts({ ttsSpeed: Number(e.target.value) });
+                flash("语速已更新");
+              }}
+            >
+              {TTS_SPEEDS.map((s) => (
+                <option key={s.value} value={String(s.value)}>{s.label}</option>
+              ))}
+            </select>
+          </div>
+          <div className="adm-set-field">
+            <div className="adm-set-text">
+              <b>朗读范围</b>
+              <em>控制导览词包含的内容,更改后新生成的讲解生效</em>
+            </div>
+            <select
+              className="pp-input"
+              value={ttsScope}
+              onChange={(e) => {
+                setTts({ ttsScope: e.target.value as "full" | "brief" | "intro" });
+                flash("朗读范围已更新");
+              }}
+            >
+              {TTS_SCOPES.map((s) => (
+                <option key={s.value} value={s.value}>{s.label}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+        <p className="adm-hint" style={{ marginTop: 10 }}>
+          语音合成模型:{ttsCfg?.tts_model || "FunAudioLLM/CosyVoice2-0.5B"}(SiliconFlow 情感语音);
+          英文解说词由文本大模型 {ttsCfg?.translate_model || "—"} 生成,文物名称与地名保留中文发音。
+          同一文物的讲解按音色/语速/范围缓存,重复播放不消耗额度。
+        </p>
+      </div>
+
+      <p className="adm-hint">
+        以上设置保存在本机浏览器;主题配色、渲染质量、主视角等个性化选项在地图页右上角「偏好设置」中调整。
+      </p>
+    </>
+  );
+}
 
 export default function AdminPage() {
   const [pipeline, setPipeline] = useState<PipelineStatus | null>(null);
@@ -1599,6 +1897,11 @@ export default function AdminPage() {
         <TileDownloadSection flash={flash} />
         <CacheOverviewSection flash={flash} />
         <BoundarySection flash={flash} />
+      </div>
+
+      {/* ── 设置(地图交互 / 天气显示等本机功能开关) ── */}
+      <div style={{ display: activeTab === "settings" ? "contents" : "none" }}>
+        <SettingsSection flash={flash} />
       </div>
         </div>
       </div>

@@ -1,0 +1,71 @@
+{
+  "schema_version": 1,
+  "dataset_version": "2026-07-10-arcgis-v2",
+  "crs": "EPSG:4326",
+  "source": "ArcGIS standard boundary shapefiles supplied by the project owner",
+  "source_files": {
+    "city": "济宁市边界.shp",
+    "county": "济宁市各县边界.shp",
+    "townships": "济宁市镇街边界.shp",
+    "villages": "济宁市各村边界.shp"
+  },
+  "village_simplification_m": 2.0,
+  "layers": {
+    "city": {
+      "file": "city.geojson",
+      "encoding": "utf-8",
+      "feature_count": 1,
+      "geometry_type": "MultiPolygon",
+      "bbox": [
+        115.864807,
+        34.445446,
+        117.587788,
+        35.981527
+      ],
+      "sha256": "98315a394c97c009c86d634c028308a81fc91fde8f8b63731d7c038fbaff3786",
+      "content_sha256": "98315a394c97c009c86d634c028308a81fc91fde8f8b63731d7c038fbaff3786"
+    },
+    "county": {
+      "file": "county.geojson",
+      "encoding": "utf-8",
+      "feature_count": 11,
+      "geometry_type": "mixed",
+      "bbox": [
+        115.864807,
+        34.445446,
+        117.587788,
+        35.981527
+      ],
+      "sha256": "3296e63052ba9ccf6e23940fbfe27074f2ff6ac4c18e5dccdac685c10d8aaa37",
+      "content_sha256": "3296e63052ba9ccf6e23940fbfe27074f2ff6ac4c18e5dccdac685c10d8aaa37"
+    },
+    "townships": {
+      "file": "townships.geojson.gz",
+      "encoding": "gzip+utf-8",
+      "feature_count": 157,
+      "geometry_type": "mixed",
+      "bbox": [
+        115.86481,
+        34.446854,
+        117.587788,
+        35.981527
+      ],
+      "sha256": "baaf9e256f56c9a8b47f019afaf80d7d4a64b623eefa05aa77b382f6804ad4bd",
+      "content_sha256": "c0c625317cae8c27f541e54c7a9419bbb88da47d0e08703c465282971c097276"
+    },
+    "villages": {
+      "file": "villages.geojson.gz",
+      "encoding": "gzip+utf-8",
+      "feature_count": 6504,
+      "geometry_type": "mixed",
+      "bbox": [
+        115.864809,
+        34.445544,
+        117.587475,
+        35.981307
+      ],
+      "sha256": "8801e4ab3a9f290889425031e739d3410b01658ba1b1682e48a89e20f86a5637",
+      "content_sha256": "29c6a1a4c781b9b717dccf430ffd52e3434a5a981b37a34cbd723e8ee0c33b08"
+    }
+  }
+}

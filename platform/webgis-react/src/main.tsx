@@ -2,6 +2,7 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import { HashRouter, Route, Routes } from "react-router-dom";
 import App from "./App";
+import CardPage from "./pages/CardPage";
 import LoginPage from "./pages/LoginPage";
 import ModelViewerPage from "./pages/ModelViewerPage";
 import PdfViewerPage from "./pages/PdfViewerPage";
@@ -19,6 +20,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
         <Route path="/login" element={<LoginPage />} />
         <Route path="/model-viewer" element={<ModelViewerPage />} />
         <Route path="/pdf-viewer" element={<PdfViewerPage />} />
+        <Route path="/card/:code" element={<CardPage />} />
         <Route path="*" element={<App />} />
       </Routes>
     </HashRouter>

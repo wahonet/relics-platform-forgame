@@ -4,6 +4,8 @@ import {
   categorySilhouetteUrl,
   RANK_COLOR,
 } from "../map/relicIcons";
+import { useUIStore } from "../stores/uiStore";
+import { HEALTH_COLOR, HEALTH_LABEL, type HealthLevel } from "../utils/health";
 
 const RANK_ITEMS: { code: string; label: string }[] = [
   { code: "1", label: "国保" },
@@ -21,10 +23,13 @@ const CATEGORY_ITEMS: { code: string; label: string }[] = [
   { code: "0500", label: "近现代史迹" },
 ];
 
-/** 地图左下角图例:保护级别配色 + 类别图标形状。 */
+const HEALTH_ITEMS: HealthLevel[] = ["good", "watch", "risk"];
+
+/** 地图左下角图例:保护级别配色 + 类别图标形状;健康度模式下切换为健康分级。 */
 export function MapLegend() {
   const [icons, setIcons] = useState<Record<string, string>>({});
   const [collapsed, setCollapsed] = useState(false);
+  const healthMode = useUIStore((s) => s.healthMode);
 
   useEffect(() => {
     let cancelled = false;
@@ -50,7 +55,21 @@ export function MapLegend() {
         <span>图例</span>
         <i>{collapsed ? "+" : "−"}</i>
       </div>
-      {!collapsed && (
+      {!collapsed && healthMode && (
+        <div className="map-legend-body">
+          <div className="map-legend-sec">
+            <div className="map-legend-title">健康度(综合评分)</div>
+            {HEALTH_ITEMS.map((level) => (
+              <div key={level} className="map-legend-row">
+                <i className="map-legend-dot" style={{ background: HEALTH_COLOR[level] }} />
+                <span>{HEALTH_LABEL[level]}</span>
+              </div>
+            ))}
+            <div className="map-legend-note">保存状况 × 巡查时效 × 天气风险</div>
+          </div>
+        </div>
+      )}
+      {!collapsed && !healthMode && (
         <div className="map-legend-body">
           <div className="map-legend-sec">
             <div className="map-legend-title">保护级别(颜色)</div>

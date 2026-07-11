@@ -33,6 +33,7 @@ CREATE TABLE IF NOT EXISTS patrol_routes (
     name         TEXT NOT NULL,
     plan_date    TEXT,                          -- YYYY-MM-DD
     mode         TEXT DEFAULT 'manual',         -- manual / area / ai / monthly
+    data_scope   TEXT NOT NULL DEFAULT 'protected', -- protected / all
     relic_codes  TEXT NOT NULL,                 -- JSON 有序数组
     note         TEXT,
     token        TEXT UNIQUE NOT NULL,          -- 移动端访问令牌(二维码)
@@ -128,6 +129,16 @@ class PatrolDB:
         cols = {r[1] for r in conn.execute("PRAGMA table_info(patrol_routes)")}
         if "start_json" not in cols:
             conn.execute("ALTER TABLE patrol_routes ADD COLUMN start_json TEXT")
+        if "data_scope" not in cols:
+            # 扩容前创建的路线全部来自文保单位数据集。
+            conn.execute(
+                "ALTER TABLE patrol_routes "
+                "ADD COLUMN data_scope TEXT NOT NULL DEFAULT 'protected'"
+            )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_proutes_scope "
+            "ON patrol_routes(data_scope)"
+        )
         conn.commit()
 
     def _conn(self) -> sqlite3.Connection:
@@ -171,6 +182,7 @@ class PatrolDB:
         relic_codes: list[str],
         plan_date: str = "",
         mode: str = "manual",
+        data_scope: str = "protected",
         note: str = "",
         created_by: str = "",
         distance_m: Optional[float] = None,
@@ -185,11 +197,11 @@ class PatrolDB:
         conn = self._conn()
         cur = conn.execute(
             """INSERT INTO patrol_routes
-               (name, plan_date, mode, relic_codes, note, token, status,
-                distance_m, duration_s, polyline, start_json, created_by, created_at, updated_at)
-               VALUES (?,?,?,?,?,?, 'planned', ?,?,?,?,?,?,?)""",
+               (name, plan_date, mode, data_scope, relic_codes, note, token, status,
+                 distance_m, duration_s, polyline, start_json, created_by, created_at, updated_at)
+               VALUES (?,?,?,?,?,?,?, 'planned', ?,?,?,?,?,?,?)""",
             (
-                name, plan_date or date.today().isoformat(), mode,
+                name, plan_date or date.today().isoformat(), mode, data_scope,
                 json.dumps(list(relic_codes), ensure_ascii=False), note, token,
                 distance_m, duration_s,
                 json.dumps(polyline, ensure_ascii=False) if polyline else None,
@@ -236,12 +248,24 @@ class PatrolDB:
             "SELECT * FROM patrol_routes WHERE token = ?", (token,)).fetchone()
         return self._route_row(row) if row else None
 
-    def list_routes(self, *, limit: int = 100, status: Optional[str] = None) -> list[dict]:
+    def list_routes(
+        self,
+        *,
+        limit: int = 100,
+        status: Optional[str] = None,
+        data_scope: Optional[str] = None,
+    ) -> list[dict]:
         sql = "SELECT * FROM patrol_routes"
         params: list = []
+        clauses: list[str] = []
         if status:
-            sql += " WHERE status = ?"
+            clauses.append("status = ?")
             params.append(status)
+        if data_scope:
+            clauses.append("data_scope = ?")
+            params.append(data_scope)
+        if clauses:
+            sql += " WHERE " + " AND ".join(clauses)
         sql += " ORDER BY id DESC LIMIT ?"
         params.append(limit)
         return [self._route_row(r) for r in self._conn().execute(sql, params).fetchall()]

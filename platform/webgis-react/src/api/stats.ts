@@ -1,8 +1,13 @@
 import { apiClient } from "./client";
-import type { DashboardStats, RelicArchives } from "../types";
+import type { DashboardStats, RelicArchives, RelicScope } from "../types";
 
-export async function fetchDashboardStats(): Promise<DashboardStats> {
-  const { data } = await apiClient.get<DashboardStats>("/api/stats/dashboard");
+export async function fetchDashboardStats(
+  scope: RelicScope = "protected",
+): Promise<DashboardStats> {
+  const { data } = await apiClient.get<DashboardStats>(
+    "/api/stats/dashboard",
+    { params: { scope } },
+  );
   return data;
 }
 

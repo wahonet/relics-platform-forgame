@@ -1,4 +1,5 @@
 import { apiClient } from "./client";
+import type { RelicScope } from "../types";
 
 /** 对比图斑(SHP 导入)相关 API。 */
 
@@ -24,6 +25,7 @@ export interface ParcelConflict {
 }
 
 export interface ParcelAnalysis {
+  scope?: RelicScope;
   layer_id: string;
   layer_name: string;
   analyzed_at: number;
@@ -80,18 +82,27 @@ export async function fetchParcelGeojson(layerId: string): Promise<ParcelFeature
   return data;
 }
 
-export async function analyzeParcelLayer(layerId: string): Promise<ParcelAnalysis> {
+export async function analyzeParcelLayer(
+  layerId: string,
+  scope: RelicScope = "protected",
+): Promise<ParcelAnalysis> {
   const { data } = await apiClient.post<ParcelAnalysis>(
     `/api/parcels/layers/${layerId}/analyze`,
     undefined,
-    { timeout: 120000 },
+    { timeout: 120000, params: { scope } },
   );
   return data;
 }
 
-export async function fetchParcelAnalysis(layerId: string): Promise<ParcelAnalysis | null> {
+export async function fetchParcelAnalysis(
+  layerId: string,
+  scope: RelicScope = "protected",
+): Promise<ParcelAnalysis | null> {
   try {
-    const { data } = await apiClient.get<ParcelAnalysis>(`/api/parcels/layers/${layerId}/analysis`);
+    const { data } = await apiClient.get<ParcelAnalysis>(
+      `/api/parcels/layers/${layerId}/analysis`,
+      { params: { scope } },
+    );
     return data;
   } catch {
     return null;

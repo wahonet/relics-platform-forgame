@@ -1,7 +1,7 @@
 """AI 知识库问答 (OpenAI 兼容协议,流式输出)。
 
-启动时把全量文物预烘焙成 system prompt;每次请求再按 query
-做轻量关键词评分,追加 Top-K 相关文物详情。配置统一来自 config.yaml。
+启动时分别预烘焙“文保单位 / 全部文物”统计上下文；每次请求再按
+当前 scope 做轻量关键词评分,追加 Top-K 相关文物详情。
 """
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ import sys
 from collections import Counter
 from pathlib import Path
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
@@ -21,12 +21,13 @@ if str(_SCRIPTS_DIR) not in sys.path:
 
 from _common import load_config  # noqa: E402
 from data_loader import store  # noqa: E402
+from relic_scope import SCOPE_PROTECTED, normalize_relic_scope  # noqa: E402
 from services import ai_service  # noqa: E402
 
 router = APIRouter()
 
 # 运行时状态,init_chat() 中赋值。
-_full_context: str = ""
+_scope_contexts: dict[str, str] = {}
 _project_name: str = "本市"
 _project_full_name: str = "文物保护利用平台"
 _default_model: str = ""
@@ -50,16 +51,18 @@ def _short_level(level: str) -> str:
     return "未"
 
 
-def _build_system_prompt() -> str:
+def _build_system_prompt(scope: str = SCOPE_PROTECTED) -> str:
     name = _project_full_name or _project_name
-    return f"""你是「{name}」的 AI 助手。你掌握着本市全部文物保护单位与不可移动文物的数据库。
+    scope_label = "全部文物（包含未定级不可移动文物）" if scope == "all" else "文物保护单位"
+    return f"""你是「{name}」的 AI 助手。当前用户选择的数据口径是“{scope_label}”，回答和地图联动都必须严格限制在此口径内。
 
-数据分两层:
-- 基础层(全市):国、省、市、县四级文物保护单位,含简介、坐标、两线范围、照片、图纸
-- 全量层(嘉祥县):全县不可移动文物,在基础层数据之上还有三普/四普档案与三维模型
+数据口径与资料层级是两个独立概念:
+- protected 口径:仅国、省、市、县四级文物保护单位
+- all 口径:在 protected 基础上再包含未定级不可移动文物
+- tier=city/full 只表示资料丰富度,不能用来判断是否为文保单位
 
 回答规则：
-1. **严格基于数据回答** —— 下方提供了完整的文物清单与统计，请据此回答，不要编造
+1. **严格基于数据回答** —— 下方提供了当前口径的统计与检索结果，请据此回答，不要编造
 2. 涉及数量统计时，请亲自数一遍数据再回答，确保数字准确
 3. 引用文物时务必带上 **名称** 和 **编号**（如：武氏墓群石刻 JN-JX-0001）
 4. 回答结构清晰，善用表格、列表和分组
@@ -107,9 +110,9 @@ def _build_system_prompt() -> str:
 - 不要在同一句话中过度标记，保持可读性"""
 
 
-def _build_full_context() -> str:
+def _build_full_context(scope: str = SCOPE_PROTECTED) -> str:
     """拼出全量文物上下文(总体统计 + 按县区分组的清单表格),作为 system prompt 复用。"""
-    relics = store.relics
+    relics = store.scoped_relics(scope)
     if not relics:
         return ""
 
@@ -141,6 +144,15 @@ def _build_full_context() -> str:
         f"- 已三维建模：{n3d}处\n"
     )
 
+    # 扩容后全部文物约 4,800 条，继续把完整清单塞进每次请求会超过
+    # 常见上下文预算。大数据口径保留确定性统计，具体记录由 top-k 检索补充。
+    if len(relics) > 2000:
+        return (
+            stats
+            + "\n## 检索说明\n"
+            + "当前数据量较大，完整清单未注入模型；系统会按本次问题追加最相关记录。"
+        )
+
     header = "编号|名称|年代|类别|级别|现状|乡镇|三维"
     sections = []
     for cnty in sorted(cnty_groups.keys()):
@@ -164,8 +176,12 @@ def _build_full_context() -> str:
     return stats + "\n## 完整文物清单（按县区分组）\n" + "\n".join(sections)
 
 
-def _find_relevant_intros(query: str, top_k: int = 8) -> str:
-    relics = store.relics
+def _find_relevant_intros(
+    query: str,
+    top_k: int = 8,
+    scope: str = SCOPE_PROTECTED,
+) -> str:
+    relics = store.scoped_relics(scope)
     if not relics:
         return ""
 
@@ -243,7 +259,7 @@ def _find_relevant_intros(query: str, top_k: int = 8) -> str:
 
 def init_chat() -> None:
     """在 lifespan 中调用:读配置、预烘上下文。客户端由 ai_service 统一管理。"""
-    global _full_context
+    global _scope_contexts
     global _project_name, _project_full_name
     global _default_model, _available_models
     global _top_k_relics, _history_turns, _temperature
@@ -260,20 +276,29 @@ def init_chat() -> None:
     _history_turns = int(sf.get("history_turns", 10))
     _temperature = float(sf.get("temperature", 0.2))
 
-    _full_context = _build_full_context()
-    if _full_context:
-        ctx_len = len(_full_context)
-        print(f"[AI] 全量上下文 {ctx_len} 字 ≈ {ctx_len // 2} tokens "
-              f"({len(store.relics)} 条文物)")
+    _scope_contexts = {
+        "protected": _build_full_context("protected"),
+        "all": _build_full_context("all"),
+    }
+    for scope, context in _scope_contexts.items():
+        if context:
+            ctx_len = len(context)
+            print(f"[AI] {scope} 上下文 {ctx_len} 字 ≈ {ctx_len // 2} tokens "
+                  f"({len(store.scoped_relics(scope))} 条文物)")
 
 
 class ChatRequest(BaseModel):
     message: str
     history: list = []
+    scope: str = SCOPE_PROTECTED
 
 
 @router.post("/chat")
 async def chat(req: ChatRequest):
+    try:
+        scope = normalize_relic_scope(req.scope)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     client = ai_service.get_client()
     if not client:
         return StreamingResponse(
@@ -281,9 +306,13 @@ async def chat(req: ChatRequest):
             media_type="text/event-stream",
         )
 
-    detail = _find_relevant_intros(req.message, top_k=_top_k_relics)
+    detail = _find_relevant_intros(
+        req.message,
+        top_k=_top_k_relics,
+        scope=scope,
+    )
 
-    system_content = _build_system_prompt() + "\n\n" + _full_context
+    system_content = _build_system_prompt(scope) + "\n\n" + _scope_contexts.get(scope, "")
     if detail:
         system_content += "\n\n## 与本次提问最相关的文物详情\n" + detail
 

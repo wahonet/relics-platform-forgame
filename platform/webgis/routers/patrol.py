@@ -28,6 +28,11 @@ if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
 
 from data_loader import store  # noqa: E402
+from relic_scope import (  # noqa: E402
+    SCOPE_PROTECTED,
+    normalize_relic_scope,
+    relic_in_scope,
+)
 from services import ai_service, amap_service  # noqa: E402
 from services.exif_gps import extract_gps  # noqa: E402
 from services.patrol_service import haversine_m, order_nearest_neighbor, patrol_db  # noqa: E402
@@ -60,6 +65,13 @@ def init_patrol(cfg: dict, paths) -> None:
 
 
 # ── 工具 ────────────────────────────────────────────────────
+def _scope_or_422(value: str | None) -> str:
+    try:
+        return normalize_relic_scope(value)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
 def _is_private_ip(ip: str) -> bool:
     return (ip.startswith("192.168.") or ip.startswith("10.")
             or any(ip.startswith(f"172.{i}.") for i in range(16, 32)))
@@ -100,9 +112,9 @@ def _base_url(request: Optional[Request] = None) -> str:
     return f"http://{_lan_ip()}:{_SERVER_PORT}"
 
 
-def _stop_of(code: str) -> Optional[dict]:
+def _stop_of(code: str, scope: str | None = None) -> Optional[dict]:
     r = store.get_relic(code)
-    if not r:
+    if not r or (scope is not None and not relic_in_scope(r, scope)):
         return None
     return {
         "code": code,
@@ -118,12 +130,29 @@ def _stop_of(code: str) -> Optional[dict]:
     }
 
 
-def _resolve_stops(codes: list[str]) -> list[dict]:
+def _resolve_stops(
+    codes: list[str],
+    scope: str | None = None,
+    *,
+    strict: bool = False,
+) -> list[dict]:
     stops = []
+    invalid: list[str] = []
     for c in codes:
-        s = _stop_of(c)
+        s = _stop_of(c, scope)
         if s and s["lng"] is not None and s["lat"] is not None:
             stops.append(s)
+        else:
+            invalid.append(c)
+    if strict and invalid:
+        label = "全部文物" if scope == "all" else "文保单位"
+        raise HTTPException(
+            422,
+            detail={
+                "message": f"以下编号不存在、无有效坐标或不属于当前“{label}”口径",
+                "codes": invalid,
+            },
+        )
     return stops
 
 
@@ -190,15 +219,21 @@ async def patrol_due(
     county: str | None = Query(None),
     only_overdue: bool = Query(False),
     limit: int = Query(100, ge=1, le=2000),
+    scope: str = Query(SCOPE_PROTECTED, description="protected=文保单位 all=全部文物"),
 ):
     """按保存状况频次策略计算的巡查到期清单(due_in_days<0 已逾期)。"""
-    relics = store.relics
+    canonical_scope = _scope_or_422(scope)
+    relics = store.scoped_relics(canonical_scope)
     if county:
         relics = [r for r in relics if (r.get("county") or "") == county]
     due = patrol_db.compute_due(relics)
     if only_overdue:
         due = [d for d in due if d["due_in_days"] < 0]
-    return {"data": due[:limit], "total": len(due)}
+    return {
+        "scope": canonical_scope,
+        "data": due[:limit],
+        "total": len(due),
+    }
 
 
 # ── AI / 规则规划 ───────────────────────────────────────────
@@ -209,29 +244,37 @@ MAX_STOPS_HARD_LIMIT = 30
 class PlanRequest(BaseModel):
     text: str
     max_stops: int = MAX_STOPS_HARD_LIMIT
+    scope: str = SCOPE_PROTECTED
 
 
-def _find_relic_by_name(name: str) -> Optional[dict]:
+def _find_relic_by_name(name: str, scope: str = SCOPE_PROTECTED) -> Optional[dict]:
     name = (name or "").strip()
     if not name:
         return None
+    relics = store.scoped_relics(scope)
     # 精确 → 包含 → FTS
-    for r in store.relics:
+    for r in relics:
         if r.get("name") == name:
             return r
-    for r in store.relics:
+    for r in relics:
         if name in (r.get("name") or ""):
             return r
-    hits = store.search_fulltext(name, limit=1)
+    hits = store.search_fulltext(name, limit=1, scope=scope)
     if hits:
         return store.get_relic(hits[0]["code"])
     return None
 
 
-def _nearest_relics(anchor: dict, count: int, *, exclude: set[str]) -> list[dict]:
+def _nearest_relics(
+    anchor: dict,
+    count: int,
+    *,
+    exclude: set[str],
+    scope: str = SCOPE_PROTECTED,
+) -> list[dict]:
     lng0, lat0 = anchor.get("center_lng"), anchor.get("center_lat")
     scored = []
-    for r in store.relics:
+    for r in store.scoped_relics(scope):
         code = r.get("archive_code")
         if code in exclude or r is anchor:
             continue
@@ -265,13 +308,13 @@ def _chunk_routes(due: list[dict], *, chunk: int = 8, max_routes: int = 4) -> li
     return routes
 
 
-def _resolve_origin(origin_name: str) -> Optional[dict]:
+def _resolve_origin(origin_name: str, scope: str = SCOPE_PROTECTED) -> Optional[dict]:
     """把出发地名称解析成坐标:先按文物名匹配台账,再走高德地理编码。
     返回 {lng, lat, name} 或 None。"""
     name = (origin_name or "").strip()
     if not name:
         return None
-    r = _find_relic_by_name(name)
+    r = _find_relic_by_name(name, scope)
     if r and r.get("center_lng") is not None and r.get("center_lat") is not None:
         return {"lng": float(r["center_lng"]), "lat": float(r["center_lat"]),
                 "name": r.get("name") or name}
@@ -289,12 +332,14 @@ async def patrol_plan(req: PlanRequest):
     text = (req.text or "").strip()
     if not text:
         raise HTTPException(400, "请输入巡查需求")
+    scope = _scope_or_422(req.scope)
+    scoped_relics = store.scoped_relics(scope)
 
     intent = ai_service.parse_patrol_intent(text)
     itype = intent.get("type") or "condition"
 
     # 出发地:「从XX出发」→ 文物名匹配 / 高德地理编码 → 路线起点
-    start = _resolve_origin(intent.get("origin") or "")
+    start = _resolve_origin(intent.get("origin") or "", scope)
     start_xy = (start["lng"], start["lat"]) if start else None
     origin_note = ""
     if intent.get("origin") and not start:
@@ -312,7 +357,7 @@ async def patrol_plan(req: PlanRequest):
     suggestions: list[dict] = []
 
     if itype == "monthly":
-        due = patrol_db.compute_due(store.relics)
+        due = patrol_db.compute_due(scoped_relics)
         county = intent.get("county")
         if county:
             due = [d for d in due if d["county"] == county]
@@ -327,10 +372,10 @@ async def patrol_plan(req: PlanRequest):
         explanation = (f"{_month_label()}共有 {len(overdue)} 处文物已到巡查周期"
                        f"(按保存状况频次策略),已按地理就近分成 {len(groups)} 条路线。")
     elif itype == "near":
-        anchor = _find_relic_by_name(intent.get("anchor") or "")
+        anchor = _find_relic_by_name(intent.get("anchor") or "", scope)
         if not anchor:
             raise HTTPException(404, f"未找到锚点文物「{intent.get('anchor')}」")
-        near = _nearest_relics(anchor, count, exclude=set())
+        near = _nearest_relics(anchor, count, exclude=set(), scope=scope)
         stops = [anchor] + near
         ordered = order_nearest_neighbor([
             {"code": r["archive_code"], "lng": r["center_lng"], "lat": r["center_lat"], "name": r["name"]}
@@ -345,20 +390,20 @@ async def patrol_plan(req: PlanRequest):
         codes = []
         missing = []
         for nm in intent.get("names") or []:
-            r = _find_relic_by_name(nm)
+            r = _find_relic_by_name(nm, scope)
             if r:
                 codes.append(r["archive_code"])
             else:
                 missing.append(nm)
         if not codes:
             raise HTTPException(404, "未匹配到点名的文物")
-        ordered = order_nearest_neighbor(_resolve_stops(codes), start=start_xy)
+        ordered = order_nearest_neighbor(_resolve_stops(codes, scope), start=start_xy)
         suggestions.append({"name": "自定义点名巡查", "codes": [s["code"] for s in ordered]})
         explanation = "已按最近邻排序点名文物。" + (f"未找到: {'、'.join(missing)}" if missing else "")
     else:  # condition / county
         from codes import normalize_rank
 
-        relics = store.relics
+        relics = list(scoped_relics)
         county = intent.get("county")
         township = intent.get("township")
         cond = intent.get("condition")
@@ -405,11 +450,14 @@ async def patrol_plan(req: PlanRequest):
 
     out_routes = []
     for s in suggestions:
-        stops = _resolve_stops(s["codes"])
+        stops = _resolve_stops(s["codes"], scope)
         geom = _plan_geometry(stops, start=start)
         out_routes.append({**s, "stops": stops, **geom})
 
+    scope_label = "全部文物" if scope == "all" else "文保单位"
+    explanation = f"当前按“{scope_label}”口径规划。" + explanation
     return {
+        "scope": scope,
         "intent": intent,
         "explanation": explanation,
         "routes": out_routes,
@@ -428,6 +476,7 @@ class RouteStart(BaseModel):
 class RouteCreate(BaseModel):
     name: str
     codes: list[str]
+    scope: str = SCOPE_PROTECTED
     plan_date: str = ""
     mode: str = "manual"          # manual / area / ai / monthly
     note: str = ""
@@ -453,7 +502,8 @@ def _default_route_name(stops: list[dict]) -> str:
 
 @router.post("/patrol/routes")
 async def create_route(body: RouteCreate, request: Request):
-    stops = _resolve_stops(body.codes)
+    scope = _scope_or_422(body.scope)
+    stops = _resolve_stops(body.codes, scope, strict=True)
     if not stops:
         raise HTTPException(400, "路线中没有有效文物点")
     start = body.start.dict() if body.start else None
@@ -467,6 +517,7 @@ async def create_route(body: RouteCreate, request: Request):
         relic_codes=[s["code"] for s in stops],
         plan_date=body.plan_date,
         mode=body.mode,
+        data_scope=scope,
         note=body.note,
         created_by=body.created_by,
         distance_m=geom["distance_m"],
@@ -478,10 +529,22 @@ async def create_route(body: RouteCreate, request: Request):
 
 
 @router.get("/patrol/routes")
-async def list_routes(request: Request, status: str | None = Query(None),
-                      limit: int = Query(100, ge=1, le=500)):
-    routes = patrol_db.list_routes(limit=limit, status=status)
-    return {"data": [_route_payload(r, request=request) for r in routes]}
+async def list_routes(
+    request: Request,
+    status: str | None = Query(None),
+    scope: str = Query(SCOPE_PROTECTED, description="路线创建时的数据口径"),
+    limit: int = Query(100, ge=1, le=500),
+):
+    canonical_scope = _scope_or_422(scope)
+    routes = patrol_db.list_routes(
+        limit=limit,
+        status=status,
+        data_scope=canonical_scope,
+    )
+    return {
+        "scope": canonical_scope,
+        "data": [_route_payload(r, request=request) for r in routes],
+    }
 
 
 @router.get("/patrol/routes/{route_id}")
@@ -499,7 +562,8 @@ async def patch_route(route_id: int, body: RoutePatch, request: Request):
         raise HTTPException(404, "路线不存在")
     patch = {k: v for k, v in body.dict().items() if v is not None}
     if "codes" in patch:
-        stops = _resolve_stops(patch.pop("codes"))
+        route_scope = _scope_or_422(route.get("data_scope") or SCOPE_PROTECTED)
+        stops = _resolve_stops(patch.pop("codes"), route_scope, strict=True)
         if not stops:
             raise HTTPException(400, "路线中没有有效文物点")
         geom = _plan_geometry(stops)
@@ -792,20 +856,28 @@ async def mobile_checkin(
 
 # ── 巡查统计(供数据门面) ────────────────────────────────────
 @router.get("/patrol/stats")
-async def patrol_stats():
-    routes = patrol_db.list_routes(limit=500)
+async def patrol_stats(
+    scope: str = Query(SCOPE_PROTECTED, description="protected=文保单位 all=全部文物"),
+):
+    canonical_scope = _scope_or_422(scope)
+    routes = patrol_db.list_routes(limit=500, data_scope=canonical_scope)
     records = patrol_db.list_records(limit=5000)
-    due = patrol_db.compute_due(store.relics)
+    scoped_relics = store.scoped_relics(canonical_scope)
+    due = patrol_db.compute_due(scoped_relics)
+    scoped_codes = {str(r.get("archive_code") or "") for r in scoped_relics}
+    scoped_records = [r for r in records if str(r.get("relic_code") or "") in scoped_codes]
     overdue = sum(1 for d in due if d["due_in_days"] < 0)
     t = date.today()
     month_start = int(time.mktime((t.year, t.month, 1, 0, 0, 0, 0, 0, -1)))
-    month_records = [r for r in records if (r.get("created_at") or 0) >= month_start]
     return {
+        "scope": canonical_scope,
         "route_total": len(routes),
         "route_done": sum(1 for r in routes if r["status"] == "done"),
-        "record_total": len(records),
-        "record_this_month": len(month_records),
-        "verified_total": sum(1 for r in records if r["verified"]),
+        "record_total": len(scoped_records),
+        "record_this_month": len([
+            r for r in scoped_records if (r.get("created_at") or 0) >= month_start
+        ]),
+        "verified_total": sum(1 for r in scoped_records if r["verified"]),
         "overdue_count": overdue,
         "due_7days": sum(1 for d in due if 0 <= d["due_in_days"] <= 7),
         "month_days": calendar.monthrange(t.year, t.month)[1],

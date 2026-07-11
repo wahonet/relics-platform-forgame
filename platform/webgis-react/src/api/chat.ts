@@ -1,3 +1,5 @@
+import type { RelicScope } from "../types";
+
 export interface ChatStreamHandlers {
   onChunk: (text: string) => void;
   onError?: (msg: string) => void;
@@ -9,13 +11,14 @@ export interface ChatStreamHandlers {
 export async function streamChat(
   message: string,
   history: { role: "user" | "assistant"; content: string }[],
+  scope: RelicScope,
   handlers: ChatStreamHandlers,
 ) {
   const resp = await fetch("/api/chat", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     credentials: "same-origin",
-    body: JSON.stringify({ message, history: history.slice(-10) }),
+    body: JSON.stringify({ message, history: history.slice(-10), scope }),
     signal: handlers.signal,
   });
 

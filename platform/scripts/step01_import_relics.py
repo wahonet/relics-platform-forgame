@@ -4,6 +4,8 @@
     A. Markdown 档案  data/input/01_relics/markdown/{分组}/*.md
        (step00 从四普登记表 docx 提取的产物,含简介/DMS坐标/本体边界/清单)
        照片与图纸直接从 data/input/00_docs 对应 docx 内嵌图片按清单顺序抽取。
+       若 data/济宁市未清洗数据 存在,再从其中仅追加 rank=5 的未定级文物；
+       rank=1..4 的在级文保单位由主档案保持权威,不会重复导入。
     B. 台账 Excel/CSV data/input/01_relics/*.xlsx|csv (旧格式,兼容保留)
 
 两线范围(保护范围/建设控制地带):
@@ -23,6 +25,7 @@ from __future__ import annotations
 
 import csv
 import json
+import re
 import shutil
 import sys
 from pathlib import Path
@@ -111,51 +114,190 @@ def _copy_media_dir(src_root: Path, dst_root: Path, code: str,
     return index
 
 
+def _supplemental_markdown_root(paths, cfg: dict) -> Path | None:
+    """返回“全市未清洗 Markdown”目录。
+
+    默认使用用户约定的 data/济宁市未清洗数据；可通过
+    data_import.include_ungraded_markdown=false 关闭，或用
+    data_import.ungraded_markdown_dir 指向其他目录。
+    """
+    data_cfg = cfg.get("data_import") or {}
+    if data_cfg.get("include_ungraded_markdown", True) is False:
+        return None
+    raw = str(data_cfg.get("ungraded_markdown_dir") or "data/济宁市未清洗数据").strip()
+    if not raw:
+        return None
+    root = Path(raw)
+    if not root.is_absolute():
+        root = paths.root / root
+    try:
+        if root.resolve() == paths.input_markdown.resolve():
+            return None
+    except OSError:
+        pass
+    return root
+
+
+def _configured_code_set(cfg: dict, key: str) -> set[str]:
+    """读取 data_import 下的档案号白名单，兼容单值和 YAML 列表。"""
+    raw = (cfg.get("data_import") or {}).get(key) or []
+    if isinstance(raw, str):
+        raw = [raw]
+    return {str(code).strip() for code in raw if str(code).strip()}
+
+
+def _configured_level_overrides(cfg: dict) -> dict[str, str]:
+    """读取受控修复记录的保护级别覆写。"""
+    raw = (cfg.get("data_import") or {}).get("protected_repair_level_overrides") or {}
+    if not isinstance(raw, dict):
+        return {}
+    return {
+        str(code).strip(): str(level).strip()
+        for code, level in raw.items()
+        if str(code).strip() and str(level).strip()
+    }
+
+
 def import_from_markdown(paths, cfg: dict) -> tuple[list[dict], list[dict], list[dict], list[dict]] | None:
     """解析 markdown 档案。返回 (relics, photo_index, drawing_index, boundary_features);
     没有 md 文件时返回 None(让调用方走 Excel 路径)。"""
     md_root = paths.input_markdown
-    md_files: list[Path] = []
+    primary_files: list[Path] = []
     if md_root.exists():
-        md_files = sorted(p for p in md_root.rglob("*.md") if not p.name.endswith("_QC.md"))
-    if not md_files:
+        primary_files = sorted(p for p in md_root.rglob("*.md") if not p.name.endswith("_QC.md"))
+
+    supplemental_root = _supplemental_markdown_root(paths, cfg)
+    supplemental_files: list[Path] = []
+    if supplemental_root and supplemental_root.exists():
+        supplemental_files = sorted(
+            p for p in supplemental_root.rglob("*.md") if not p.name.endswith("_QC.md")
+        )
+
+    if not primary_files and not supplemental_files:
         return None
 
-    log.info("[MD] 发现 %d 个 markdown 档案: %s", len(md_files), md_root)
+    log.info("[MD] 主档案 %d 个: %s", len(primary_files), md_root)
+    if supplemental_files:
+        log.info("[MD] 全市补充档案 %d 个: %s（仅追加未定级）",
+                 len(supplemental_files), supplemental_root)
 
     full_tier_county = ((cfg.get("administrative") or {}).get("full_tier_county") or "").strip()
     src_crs = ((cfg.get("geo") or {}).get("source_crs") or "wgs84").lower()
+    protected_repair_codes = _configured_code_set(cfg, "protected_repair_codes")
+    invalid_baseline_codes = _configured_code_set(cfg, "invalid_protected_baseline_codes")
+    repair_level_overrides = _configured_level_overrides(cfg)
 
     relics: list[dict] = []
     photo_index: list[dict] = []
     drawing_index: list[dict] = []
     boundary_features: list[dict] = []
     seen: set[str] = set()
+    primary_codes: set[str] = set()
     n_fail = n_media_docx = n_media_dir = 0
+    report = {
+        "primary_discovered": len(primary_files),
+        "supplemental_discovered": len(supplemental_files),
+        "supplemental_protected_excluded": 0,
+        "protected_repair_requested": sorted(protected_repair_codes),
+        "protected_repair_accepted": 0,
+        "protected_repair_level_overrides": {},
+        "primary_invalid_code_excluded": 0,
+        "supplemental_existing_code_excluded": 0,
+        "supplemental_duplicate_excluded": 0,
+        "supplemental_ungraded_accepted": 0,
+        "parse_or_validation_failed": 0,
+        "rejects": [],
+    }
 
-    for md_path in md_files:
-        group = md_path.parent.name if md_path.parent != md_root else ""
+    sources = (
+        [(p, md_root, False) for p in primary_files]
+        + [(p, supplemental_root, True) for p in supplemental_files]
+    )
+    for md_path, source_root, is_supplemental in sources:
+        assert source_root is not None
+        group = md_path.parent.name if md_path.parent != source_root else ""
         try:
             r = parse_archive_md(md_path, group_name=group)
         except Exception as e:  # noqa: BLE001
             log.warning("[MD] 解析失败 %s: %s", md_path.name, e)
             n_fail += 1
+            report["parse_or_validation_failed"] += 1
+            report["rejects"].append({
+                "source": "supplemental" if is_supplemental else "primary",
+                "file": str(md_path.relative_to(paths.root)),
+                "reason": f"parse_error: {e}",
+            })
             continue
 
-        code = r.get("archive_code") or ""
-        name = r.get("name") or ""
+        code = str(r.get("archive_code") or "").strip()
+        name = str(r.get("name") or "").strip()
+        rank_code = normalize_rank(r.get("heritage_level"))
+
+        if not is_supplemental and code in invalid_baseline_codes:
+            report["primary_invalid_code_excluded"] += 1
+            continue
+
+        is_protected_repair = (
+            is_supplemental
+            and rank_code in {"1", "2", "3", "4"}
+            and code in protected_repair_codes
+        )
+        if is_supplemental:
+            # 补充目录同时含 1,110 处在级文保单位。默认只接收未定级；
+            # 已确认的少量历史基线异常可通过精确档案号白名单修复。
+            if rank_code != "5" and not is_protected_repair:
+                report["supplemental_protected_excluded"] += 1
+                continue
+            try:
+                county_dir = md_path.relative_to(source_root).parts[0]
+            except (ValueError, IndexError):
+                county_dir = ""
+            if re.search(r"[县区市]$", county_dir):
+                r["county"] = county_dir
+            if is_protected_repair and code in repair_level_overrides:
+                level = repair_level_overrides[code]
+                if normalize_rank(level) not in {"1", "2", "3", "4"}:
+                    raise ValueError(f"白名单修复级别无效: {code} -> {level}")
+                r["heritage_level"] = level
+                rank_code = normalize_rank(level)
+                report["protected_repair_level_overrides"][code] = level
+
         if not code or not name:
             log.warning("[MD] 缺编号或名称,跳过: %s", md_path.name)
             n_fail += 1
+            report["parse_or_validation_failed"] += 1
+            report["rejects"].append({
+                "source": "supplemental" if is_supplemental else "primary",
+                "file": str(md_path.relative_to(paths.root)),
+                "code": code,
+                "name": name,
+                "reason": "missing_code_or_name",
+            })
             continue
         if code in seen:
-            log.warning("[MD] 重复编号,跳过: %s (%s)", code, md_path.name)
+            if is_supplemental:
+                if code in primary_codes:
+                    report["supplemental_existing_code_excluded"] += 1
+                else:
+                    report["supplemental_duplicate_excluded"] += 1
+            else:
+                log.warning("[MD] 重复编号,跳过: %s (%s)", code, md_path.name)
             continue
         if r.get("center_lng") is None or r.get("center_lat") is None:
             log.warning("[MD] 无有效坐标,跳过: %s %s", code, name)
             n_fail += 1
+            report["parse_or_validation_failed"] += 1
+            report["rejects"].append({
+                "source": "supplemental" if is_supplemental else "primary",
+                "file": str(md_path.relative_to(paths.root)),
+                "code": code,
+                "name": name,
+                "reason": "missing_valid_coordinate",
+            })
             continue
         seen.add(code)
+        if not is_supplemental:
+            primary_codes.add(code)
 
         if src_crs == "gcj02":
             from _common import gcj02_to_wgs84
@@ -176,6 +318,13 @@ def import_from_markdown(paths, cfg: dict) -> tuple[list[dict], list[dict], list
         r["center_alt"] = r.get("center_alt") if r.get("center_alt") is not None else 0.0
         r["category_code"] = normalize_category(r.get("category_main"))
         r["rank_code"] = normalize_rank(r.get("heritage_level"))
+        r["data_scope"] = "ungraded" if r["rank_code"] == "5" else "protected"
+        if is_protected_repair:
+            r["source_collection"] = "approved_protected_repair"
+        elif is_supplemental:
+            r["source_collection"] = "supplemental_ungraded"
+        else:
+            r["source_collection"] = "primary"
 
         # 档案里的本体边界测点只记数量,不再生成面——
         # 地图上的边界面只用外部两线范围(保护范围/建控地带)。
@@ -184,7 +333,7 @@ def import_from_markdown(paths, cfg: dict) -> tuple[list[dict], list[dict], list
         r["boundary_count"] = len(boundary_points)
 
         # 媒体:优先从源 docx 抽取内嵌图片,否则回退 02_media 目录
-        docx = _find_docx_for(md_path, md_root, code, paths.input_docs)
+        docx = _find_docx_for(md_path, source_root, code, paths.input_docs)
         if docx and (drawings_meta or photos_meta):
             try:
                 d_rows, p_rows = extract_media_from_docx(
@@ -207,9 +356,26 @@ def import_from_markdown(paths, cfg: dict) -> tuple[list[dict], list[dict], list
                 n_media_dir += 1
 
         relics.append(r)
+        if is_protected_repair:
+            report["protected_repair_accepted"] += 1
+        elif is_supplemental:
+            report["supplemental_ungraded_accepted"] += 1
 
     log.info("[MD] 解析成功 %d / 失败 %d;媒体来源: docx %d 处 / 目录 %d 处",
              len(relics), n_fail, n_media_docx, n_media_dir)
+    if supplemental_files:
+        log.info("[MD] 补充数据筛选: 排除在级 %d / 白名单修复 %d / 编号冲突 %d / "
+                 "重复编号 %d / 接收未定级 %d",
+                 report["supplemental_protected_excluded"],
+                 report["protected_repair_accepted"],
+                 report["supplemental_existing_code_excluded"],
+                 report["supplemental_duplicate_excluded"],
+                 report["supplemental_ungraded_accepted"])
+        paths.output_dataset.mkdir(parents=True, exist_ok=True)
+        (paths.output_dataset / "ungraded_import_report.json").write_text(
+            json.dumps(report, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
     return relics, photo_index, drawing_index, boundary_features
 
 
@@ -578,6 +744,9 @@ def _load_two_line_features() -> list[dict]:
 def _match_two_lines(relics: list[dict]) -> list[dict]:
     """把外部两线面匹配到台账文物,返回带 archive_code/kind 的 Feature 列表。
 
+    保护范围/建设控制地带只属于 rank 1..4 的在级文保单位；未定级点即使
+    与两线数据同名，也不得吸收这些面。
+
     匹配策略(依次):
     1. 名称+县区 精确匹配
     2. 名称唯一时仅按名称
@@ -590,6 +759,8 @@ def _match_two_lines(relics: list[dict]) -> list[dict]:
     by_name_county: dict[tuple[str, str], str] = {}
     by_name: dict[str, list[str]] = {}
     for r in relics:
+        if normalize_rank(r.get("heritage_level")) not in {"1", "2", "3", "4"}:
+            continue
         name = (r.get("name") or "").strip()
         county = (r.get("county") or "").strip()
         code = r.get("archive_code") or ""
@@ -668,9 +839,79 @@ def _write_index_csv(rows: list[dict], out: Path, fields: list[str]) -> None:
         w.writerows(rows)
 
 
+def _load_protected_baseline(path: Path) -> list[dict]:
+    """读取现有标准数据集中的 rank 1..4，作为在级文保单位权威基线。
+
+    新下载目录内的 1,110 份在级 Markdown 仅用于识别并排除，绝不覆盖
+    已入库的编号、坐标、级别、两线和资源标记。
+    """
+    if not path.exists():
+        return []
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        log.warning("[基线] 现有 relics_full.json 读取失败: %s", exc)
+        return []
+    if not isinstance(payload, list):
+        return []
+    protected = [
+        dict(r) for r in payload
+        if isinstance(r, dict) and normalize_rank(r.get("heritage_level")) in {"1", "2", "3", "4"}
+    ]
+    return protected
+
+
+def _merge_protected_baseline(
+    baseline: list[dict],
+    repair_records: list[dict],
+    repair_codes: set[str],
+    invalid_codes: set[str],
+) -> tuple[list[dict], dict]:
+    """以精确白名单修复在级基线，并返回可写入导入报告的审计信息。"""
+    repairs: dict[str, dict] = {}
+    for row in repair_records:
+        code = str(row.get("archive_code") or "").strip()
+        if code not in repair_codes:
+            continue
+        if normalize_rank(row.get("heritage_level")) not in {"1", "2", "3", "4"}:
+            raise ValueError(f"白名单修复记录不是在级文物: {code}")
+        if code in repairs:
+            raise ValueError(f"白名单修复记录编号重复: {code}")
+        repairs[code] = row
+
+    missing = sorted(repair_codes - set(repairs))
+    if missing:
+        raise ValueError(f"白名单修复记录缺失或解析失败: {', '.join(missing)}")
+
+    baseline_codes = {str(row.get("archive_code") or "").strip() for row in baseline}
+    removed_invalid = sorted(code for code in baseline_codes if code in invalid_codes)
+    replaced_existing = sorted(code for code in baseline_codes if code in repair_codes)
+    preserved = [
+        row for row in baseline
+        if str(row.get("archive_code") or "").strip() not in invalid_codes | repair_codes
+    ]
+    merged = preserved + [repairs[code] for code in sorted(repairs)]
+
+    merged_codes = [str(row.get("archive_code") or "").strip() for row in merged]
+    if not all(merged_codes) or len(set(merged_codes)) != len(merged_codes):
+        raise ValueError("修复后的在级基线含空编号或重复编号")
+
+    audit = {
+        "protected_baseline_input": len(baseline),
+        "protected_baseline_preserved": len(preserved),
+        "protected_baseline_invalid_removed": removed_invalid,
+        "protected_baseline_replaced_codes": replaced_existing,
+        "protected_repair_codes": sorted(repairs),
+        "protected_final_total": len(merged),
+    }
+    return merged, audit
+
+
 def main() -> int:
     paths = get_paths()
     cfg = load_config()
+    existing_dataset = paths.output_dataset / "relics_full.json"
+    protected_baseline = _load_protected_baseline(existing_dataset)
 
     result = import_from_markdown(paths, cfg)
     source = "markdown"
@@ -686,10 +927,72 @@ def main() -> int:
         return 2
 
     relics, photo_index, drawing_index, boundary_features = result
+    supplemental_root = _supplemental_markdown_root(paths, cfg)
+    supplemental_enabled = bool(
+        supplemental_root
+        and supplemental_root.exists()
+        and next(supplemental_root.rglob("*.md"), None)
+    )
+    supplemental_ungraded = [
+        r for r in relics
+        if r.get("source_collection") == "supplemental_ungraded"
+        and normalize_rank(r.get("heritage_level")) == "5"
+    ]
+    protected_repairs = [
+        r for r in relics
+        if r.get("source_collection") == "approved_protected_repair"
+    ]
+    if supplemental_enabled and protected_baseline:
+        repair_codes = _configured_code_set(cfg, "protected_repair_codes")
+        invalid_codes = _configured_code_set(cfg, "invalid_protected_baseline_codes")
+        try:
+            protected_baseline, baseline_audit = _merge_protected_baseline(
+                protected_baseline,
+                protected_repairs,
+                repair_codes,
+                invalid_codes,
+            )
+        except ValueError as exc:
+            log.error("[基线] 受控修复失败，保留现有产物不写出: %s", exc)
+            return 3
+        for r in protected_baseline:
+            r["data_scope"] = "protected"
+            if r.get("source_collection") != "approved_protected_repair":
+                r["source_collection"] = "protected_baseline"
+        relics = protected_baseline + supplemental_ungraded
+        source = "protected_baseline+approved_repairs+supplemental_ungraded"
+        log.info("[基线] 原样保留在级 %d 条 / 移除异常 %d 条 / 白名单修复 %d 条 / "
+                 "最终在级 %d 条 / 追加未定级 %d 条",
+                 baseline_audit["protected_baseline_preserved"],
+                 len(baseline_audit["protected_baseline_invalid_removed"]),
+                 len(baseline_audit["protected_repair_codes"]),
+                 len(protected_baseline), len(supplemental_ungraded))
+        report_path = paths.output_dataset / "ungraded_import_report.json"
+        try:
+            report = json.loads(report_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            report = {}
+        report.update({
+            **baseline_audit,
+            "final_ungraded_total": len(supplemental_ungraded),
+            "final_all_total": len(relics),
+            "protected_source_policy": (
+                "现有 relics_full.json 为权威基线；补充目录中的 rank 1..4 默认排除，"
+                "仅精确档案号白名单可替换已确认异常"
+            ),
+        })
+        report_path.write_text(
+            json.dumps(report, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
 
     # 普查档案 PDF / 三维模型标记 + 媒体计数
     archives = _scan_archive_docs(paths.input_archive_docs)
     models_root = paths.input_models_3d
+
+    valid_codes = {str(r.get("archive_code") or "") for r in relics}
+    photo_index = [p for p in photo_index if p.get("archive_code") in valid_codes]
+    drawing_index = [d for d in drawing_index if d.get("archive_code") in valid_codes]
 
     photo_count: dict[str, int] = {}
     for p in photo_index:

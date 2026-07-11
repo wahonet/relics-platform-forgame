@@ -2,10 +2,13 @@ import { useEffect, useMemo } from "react";
 import { useFilterStore } from "../stores/filterStore";
 import { useRelicsStore } from "../stores/relicsStore";
 import { useUIStore } from "../stores/uiStore";
+import { useDrillStore } from "../stores/drillStore";
 import { usePlatformStore } from "../stores/platformStore";
 import { DIMS, dimValue, buildColorMap } from "../utils/dict";
 import { fetchRelicDetail } from "../api/relics";
-import type { RelicSummary } from "../types";
+import type { RelicScope, RelicSummary } from "../types";
+import { useCatalogScopeStore } from "../stores/catalogScopeStore";
+import { filterRelicsByScope, relicInScope } from "../utils/relicScope";
 
 /** 判断一条文物是否通过当前筛选(供计数和结果列表复用,Toolbar 徽章也使用)。 */
 export function passFilter(
@@ -18,10 +21,14 @@ export function passFilter(
     cond: string;
     tier: string;
     threeD: string;
+    scope: RelicScope;
     activeCats: Set<string>;
+    /** 村级下钻时的村内 code 集合(可选)。 */
+    villageCodes?: Set<string> | null;
   },
   lvDim?: (typeof DIMS)[number],
 ): boolean {
+  if (!relicInScope(r, f.scope)) return false;
   if (f.activeCats.size && r.category_main && !f.activeCats.has(r.category_main)) return false;
   const kw = f.search.trim().toLowerCase();
   if (
@@ -33,6 +40,7 @@ export function passFilter(
     return false;
   if (f.county && (r.county || "") !== f.county) return false;
   if (f.township && (r.township || "") !== f.township) return false;
+  if (f.villageCodes && !f.villageCodes.has(r.archive_code)) return false;
   if (f.level && lvDim && dimValue(r as Record<string, unknown>, lvDim) !== f.level) return false;
   if (f.cond && r.condition_level !== f.cond) return false;
   if (f.tier && (r.tier || "") !== f.tier) return false;
@@ -52,12 +60,18 @@ export function FilterPanel() {
   const cond = useFilterStore((s) => s.cond);
   const tier = useFilterStore((s) => s.tier);
   const threeD = useFilterStore((s) => s.threeD);
+  const scope = useCatalogScopeStore((s) => s.scope);
   const activeCats = useFilterStore((s) => s.activeCats);
   const setPartial = useFilterStore((s) => s.setPartial);
   const setActiveCats = useFilterStore((s) => s.setActiveCats);
   const toggleCat = useFilterStore((s) => s.toggleCat);
   const resetFilter = useFilterStore((s) => s.reset);
+  const villageCodes = useDrillStore((s) => s.villageCodes);
   const allRelics = useRelicsStore((s) => s.all);
+  const scopedRelics = useMemo(
+    () => filterRelicsByScope(allRelics, scope),
+    [allRelics, scope],
+  );
 
   const lvDim = DIMS.find((d) => d.id === "heritage_level");
   const catDim = DIMS.find((d) => d.id === "category_main")!;
@@ -65,22 +79,22 @@ export function FilterPanel() {
   const counties = useMemo(() => {
     const fromCfg = config?.administrative?.counties || [];
     if (fromCfg.length) return fromCfg;
-    return [...new Set(allRelics.map((r) => r.county).filter(Boolean) as string[])].sort();
-  }, [allRelics, config]);
+    return [...new Set(scopedRelics.map((r) => r.county).filter(Boolean) as string[])].sort();
+  }, [scopedRelics, config]);
 
   // 乡镇仅在选定县区后展示(全市乡镇太多)。
   const towns = useMemo(() => {
     if (!county) return [];
     const set = new Set<string>();
-    allRelics.forEach((r) => {
+    scopedRelics.forEach((r) => {
       if (r.county === county && r.township) set.add(r.township);
     });
     return [...set].sort();
-  }, [allRelics, county]);
+  }, [scopedRelics, county]);
 
   const levels = useMemo(() => {
     const set = new Set<string>();
-    allRelics.forEach((r) => {
+    scopedRelics.forEach((r) => {
       if (r.heritage_level)
         set.add(lvDim ? dimValue(r as Record<string, unknown>, lvDim) : r.heritage_level);
     });
@@ -91,26 +105,26 @@ export function FilterPanel() {
       const ib = order.indexOf(b);
       return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib);
     });
-  }, [allRelics, lvDim]);
+  }, [scopedRelics, lvDim]);
 
   const conds = useMemo(() => {
     const order = ["好", "较好", "一般", "较差", "差"];
     const set = new Set<string>();
-    allRelics.forEach((r) => {
+    scopedRelics.forEach((r) => {
       if (r.condition_level) set.add(r.condition_level);
     });
     return order.filter((c) => set.has(c));
-  }, [allRelics]);
+  }, [scopedRelics]);
 
   const catNames = useMemo(
     () =>
-      [...new Set(allRelics.map((r) => r.category_main).filter(Boolean) as string[])].sort(),
-    [allRelics],
+      [...new Set(scopedRelics.map((r) => r.category_main).filter(Boolean) as string[])].sort(),
+    [scopedRelics],
   );
 
   const colorMap = useMemo(
-    () => buildColorMap(allRelics as unknown as Record<string, unknown>[], catDim),
-    [allRelics, catDim],
+    () => buildColorMap(scopedRelics as unknown as Record<string, unknown>[], catDim),
+    [scopedRelics, catDim],
   );
 
   useEffect(() => {
@@ -120,17 +134,28 @@ export function FilterPanel() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [catNames.length]);
 
-  const fstate = { search, county, township, level, cond, tier, threeD, activeCats };
+  const fstate = {
+    search,
+    county,
+    township,
+    level,
+    cond,
+    tier,
+    threeD,
+    scope,
+    activeCats,
+    villageCodes,
+  };
 
   const filteredCount = useMemo(
-    () => allRelics.filter((r) => passFilter(r, fstate, lvDim)).length,
+    () => scopedRelics.filter((r) => passFilter(r, fstate, lvDim)).length,
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [allRelics, activeCats, search, county, township, level, cond, tier, threeD, lvDim],
+    [scopedRelics, activeCats, search, county, township, level, cond, tier, threeD, scope, villageCodes, lvDim],
   );
 
   const has3dCount = useMemo(
-    () => allRelics.filter((r) => r.has_3d).length,
-    [allRelics],
+    () => scopedRelics.filter((r) => r.has_3d).length,
+    [scopedRelics],
   );
 
   return (
@@ -178,7 +203,10 @@ export function FilterPanel() {
         <select
           className="fp-select"
           value={county}
-          onChange={(e) => setPartial({ county: e.target.value, township: "" })}
+          onChange={(e) => {
+            setPartial({ county: e.target.value, township: "" });
+            useDrillStore.getState().syncFromFilter(e.target.value, "");
+          }}
         >
           <option value="">全部县市区</option>
           {counties.map((c) => (
@@ -194,7 +222,10 @@ export function FilterPanel() {
           <select
             className="fp-select"
             value={township}
-            onChange={(e) => setPartial({ township: e.target.value })}
+            onChange={(e) => {
+              setPartial({ township: e.target.value });
+              useDrillStore.getState().syncFromFilter(county, e.target.value);
+            }}
           >
             <option value="">全部乡镇</option>
             {towns.map((t) => (
@@ -257,7 +288,10 @@ export function FilterPanel() {
         </button>
         <button
           className="fp-btn secondary"
-          onClick={() => resetFilter(new Set(catNames))}
+          onClick={() => {
+            resetFilter(new Set(catNames));
+            useDrillStore.getState().syncFromFilter("", "");
+          }}
         >
           重置
         </button>

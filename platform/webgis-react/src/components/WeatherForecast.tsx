@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { fetchWeatherForecast, type WeatherDay } from "../api/weather";
+import type { WeatherDay } from "../api/weather";
+import { useWeatherStore } from "../stores/weatherStore";
 
 const WEEKDAYS = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
 
@@ -47,42 +48,27 @@ function numberText(value: number | null, suffix = ""): string {
   return value == null ? "—" : `${value}${suffix}`;
 }
 
+/** UTC ISO 时间 → 本地 HH:MM。 */
+function updateTimeLabel(iso: string): string {
+  const parsed = new Date(iso);
+  if (Number.isNaN(parsed.getTime())) return "";
+  return `${String(parsed.getHours()).padStart(2, "0")}:${String(parsed.getMinutes()).padStart(2, "0")}`;
+}
+
 export function WeatherForecast() {
-  const [forecast, setForecast] = useState<Awaited<ReturnType<typeof fetchWeatherForecast>> | null>(null);
+  const forecast = useWeatherStore((s) => s.forecast);
+  const loading = useWeatherStore((s) => s.loading);
+  const error = useWeatherStore((s) => s.error);
+  const refresh = useWeatherStore((s) => s.refresh);
+  const start = useWeatherStore((s) => s.start);
   const [selectedIndex, setSelectedIndex] = useState(0);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-  const [retryTick, setRetryTick] = useState(0);
 
   useEffect(() => {
-    let alive = true;
-    const load = async () => {
-      setLoading(true);
-      try {
-        const data = await fetchWeatherForecast();
-        if (!alive) return;
-        setForecast(data);
-        setSelectedIndex((current) => Math.min(current, Math.max(0, data.days.length - 1)));
-        setError("");
-      } catch (reason) {
-        if (!alive) return;
-        const detail = (reason as { response?: { data?: { detail?: string } } })
-          ?.response?.data?.detail;
-        setError(detail || "天气预报暂时无法加载");
-      } finally {
-        if (alive) setLoading(false);
-      }
-    };
-    void load();
-    const timer = window.setInterval(load, 30 * 60 * 1000);
-    return () => {
-      alive = false;
-      window.clearInterval(timer);
-    };
-  }, [retryTick]);
+    start();
+  }, [start]);
 
   const days = forecast?.days || [];
-  const selected = days[selectedIndex] || null;
+  const selected = days[Math.min(selectedIndex, Math.max(0, days.length - 1))] || null;
 
   if (loading && !forecast) {
     return (
@@ -99,7 +85,7 @@ export function WeatherForecast() {
         <h4>天气预报</h4>
         <div className="weather-error">
           <span>{error || "暂无天气数据"}</span>
-          <button type="button" onClick={() => setRetryTick((value) => value + 1)}>
+          <button type="button" onClick={() => void refresh()}>
             重试
           </button>
         </div>
@@ -109,44 +95,30 @@ export function WeatherForecast() {
 
   const selectedDate = dateParts(selected.date);
   const risk = selected.risk_tags.length > 0;
+  const precipitation =
+    selected.precipitation_probability_max != null && selected.precipitation_probability_max > 0
+      ? ` · 降水 ${selected.precipitation_probability_max}%`
+      : "";
 
   return (
     <section className="weather-panel dash-sec" aria-label="天气预报">
       <div className="weather-heading">
         <h4>天气预报</h4>
-        <span>{forecast.location.name} · 未来 {days.length} 天</span>
+        <span>{forecast.location.name}</span>
       </div>
 
-      <div className="weather-day-nav">
-        <button
-          type="button"
-          aria-label="前一天"
-          disabled={selectedIndex === 0}
-          onClick={() => setSelectedIndex((value) => Math.max(0, value - 1))}
-        >
-          ‹
-        </button>
-        <div className="weather-day-main">
-          <span className="weather-main-icon" aria-hidden="true">
-            {weatherIcon(selected.weather_code)}
-          </span>
-          <div>
-            <b>{dayName(selected, forecast.timezone)} · {selectedDate.short}</b>
-            <em>{selected.text}</em>
-          </div>
-          <strong>
-            {numberText(selected.temp_max_c, "°")}
-            <small> / {numberText(selected.temp_min_c, "°")}</small>
-          </strong>
+      <div className="weather-day-main">
+        <span className="weather-main-icon" aria-hidden="true">
+          {weatherIcon(selected.weather_code)}
+        </span>
+        <div>
+          <b>{dayName(selected, forecast.timezone)} · {selectedDate.short}</b>
+          <em>{selected.text}{precipitation}</em>
         </div>
-        <button
-          type="button"
-          aria-label="后一天"
-          disabled={selectedIndex >= days.length - 1}
-          onClick={() => setSelectedIndex((value) => Math.min(days.length - 1, value + 1))}
-        >
-          ›
-        </button>
+        <strong>
+          {numberText(selected.temp_max_c, "°")}
+          <small> / {numberText(selected.temp_min_c, "°")}</small>
+        </strong>
       </div>
 
       <div className="weather-week" aria-label="未来七天">
@@ -167,43 +139,21 @@ export function WeatherForecast() {
         ))}
       </div>
 
-      <div className="weather-metrics">
-        <span>降水 {numberText(selected.precipitation_probability_max, "%")}</span>
-        <span>雨量 {numberText(selected.precipitation_mm, "mm")}</span>
-        <span>阵风 {numberText(selected.wind_gusts_max_ms, "m/s")}</span>
-      </div>
-
       {risk ? (
         <div className={`weather-risk ${selected.risk_level}`}>
-          <b>文物防护提示</b>
-          <span>{selected.risk_tags.join("、")}天气，建议关注保存状况较差的古建筑</span>
+          <b>防护提示</b>
+          <span>{selected.risk_tags.join("、")}天气，注意关注易损文物点</span>
         </div>
       ) : null}
-
-      <div className="weather-hour-title">当天分时天气</div>
-      <div className="weather-hourly">
-        {selected.hours.length > 0 ? (
-          selected.hours.map((hour) => (
-            <div className="weather-hour" key={hour.time} title={`${hour.text} · 风速 ${numberText(hour.wind_speed_ms, "m/s")}`}>
-              <span>{hour.time.slice(11, 16)}</span>
-              <b aria-hidden="true">{weatherIcon(hour.weather_code)}</b>
-              <em>{numberText(hour.temperature_c, "°")}</em>
-              <small>{numberText(hour.precipitation_probability, "%")}</small>
-            </div>
-          ))
-        ) : (
-          <div className="weather-hour-empty">暂无分时数据</div>
-        )}
-      </div>
 
       <div className="weather-source">
         {error
           ? <span>更新失败：{error}</span>
           : forecast.stale
           ? <span>{forecast.warning || "缓存天气"}</span>
-          : <span>每 30 分钟更新 · 中文整理</span>}
+          : <span>{updateTimeLabel(forecast.updated_at)} 更新</span>}
         <a href={forecast.source_url} target="_blank" rel="noreferrer">
-          Weather data by {forecast.provider} · {forecast.license}
+          {forecast.provider} · {forecast.license}
         </a>
       </div>
     </section>

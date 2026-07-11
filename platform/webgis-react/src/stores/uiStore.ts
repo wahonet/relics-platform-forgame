@@ -84,6 +84,30 @@ interface UIState {
   /** 综合统计面板每个模块的布局/图表类型,持久化到 localStorage("dashModules")。 */
   dashModules: Record<string, DashModuleCfg>;
 
+  // ── 系统管理 → 设置(本机偏好,localStorage) ──
+  /** 地图天气氛围效果(雨/雪/阴)。 */
+  weatherFxEnabled: boolean;
+  /** 右侧栏天气预报面板。 */
+  weatherPanelVisible: boolean;
+  /** 地图双击逐级下钻(县→镇→村,右键返回)。 */
+  drillEnabled: boolean;
+  /** 点击统计图下钻时镜头同步飞行。 */
+  chartFlyEnabled: boolean;
+  /** 健康度一张图:点位按健康分红黄绿着色(不持久化,演示模式)。 */
+  healthMode: boolean;
+  /** 文物密度热力图(开启时隐藏点位,不持久化)。 */
+  heatMode: boolean;
+
+  // ── 语音讲解偏好(系统管理 → 设置,localStorage) ──
+  /** 中文讲解音色(CosyVoice2 预置音色名)。 */
+  ttsVoiceZh: string;
+  /** 英文讲解音色。 */
+  ttsVoiceEn: string;
+  /** 语速(0.5~2.0)。 */
+  ttsSpeed: number;
+  /** 朗读范围:full=信息+简介 brief=仅基础信息 intro=名称+简介。 */
+  ttsScope: "full" | "brief" | "intro";
+
   set: (patch: Partial<Omit<UIState, "set" | "showToast" | "bumpOfflineCoverage" | "bumpBoundary" | "setDashModule" | "resetDashModules">>) => void;
   showToast: (text: string, kind?: ToastKind) => void;
   bumpOfflineCoverage: () => void;
@@ -158,6 +182,24 @@ export const useUIStore = create<UIState>((set, get) => ({
   boundaryReloadTick: 0,
 
   dashModules: loadDashModules(),
+
+  weatherFxEnabled: localStorage.getItem("weatherFx") !== "0",
+  weatherPanelVisible: localStorage.getItem("weatherPanel") !== "0",
+  drillEnabled: localStorage.getItem("adminDrill") !== "0",
+  chartFlyEnabled: localStorage.getItem("chartFly") !== "0",
+  healthMode: false,
+  heatMode: false,
+
+  ttsVoiceZh: localStorage.getItem("ttsVoiceZh") || "anna",
+  ttsVoiceEn: localStorage.getItem("ttsVoiceEn") || "charles",
+  ttsSpeed: ((): number => {
+    const v = Number(localStorage.getItem("ttsSpeed"));
+    return Number.isFinite(v) && v >= 0.5 && v <= 2 ? v : 1;
+  })(),
+  ttsScope: ((): "full" | "brief" | "intro" => {
+    const v = localStorage.getItem("ttsScope");
+    return v === "brief" || v === "intro" ? v : "full";
+  })(),
 
   set(patch) {
     set(patch);

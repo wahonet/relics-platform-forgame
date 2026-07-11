@@ -82,7 +82,8 @@ flowchart LR
 
 ### step02 边界处理
 
-- `pyshp` 读取 Shapefile,支持高斯-克吕格反算与 GCJ-02 纠偏,统一输出 WGS-84 的县/乡镇/村三级 GeoJSON;村点用射线法回填所属乡镇。
+- 常规数据管线由 `pyshp` 读取 Shapefile，支持高斯-克吕格反算与 GCJ-02 纠偏，统一输出 WGS-84 GeoJSON。
+- 济宁市随包边界以 `boundary/standard/manifest.json` 为权威版本：市、县、镇街源层直接按 EPSG:4326 读取，村界按其 Krasovsky 1940 Albers `.prj` 重投影，并过滤邻市要素。`import_standard_boundaries.py` 生成四层标准资产、运行时文件及离线县区导航副本。
 
 ### step03 SQLite 建库
 
@@ -99,7 +100,7 @@ flowchart LR
 
 ### 启动生命周期(main.py lifespan)
 
-加载配置(`${ENV}` 占位自动展开)→ 功能探测(`detect_features`,数据目录为空则自动关闭对应功能)→ 数据装载(`data_loader.store`,优先 DB 模式)→ 边界种子恢复(`services/boundary_seed.py`,清库后从 `boundary/` 自动恢复市界/县界)→ 初始化 AI/巡查/问答服务与配置热更新回调(系统管理页保存 Key 即生效,无需重启)。
+加载配置(`${ENV}` 占位自动展开)→ 功能探测(`detect_features`,数据目录为空则自动关闭对应功能)→ 数据装载(`data_loader.store`,优先 DB 模式)→ 标准边界恢复(`services/boundary_seed.py`,按 manifest 版本与 SHA-256 校验并展开市/县/镇街/村四层)→ 初始化 AI/巡查/问答服务与配置热更新回调(系统管理页保存 Key 即生效,无需重启)。
 
 ### 路由分层(routers/,统一挂 /api)
 

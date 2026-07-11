@@ -4,6 +4,7 @@ import type {
   BboxRelic,
   Drawing,
   Photo,
+  RelicScope,
   RelicSummary,
 } from "../types";
 
@@ -14,12 +15,13 @@ interface BboxResp {
 }
 
 export async function fetchRelicsList(): Promise<RelicSummary[]> {
-  const { data } = await apiClient.get<RelicSummary[]>("/api/relics");
+  // 前端需要同时持有两套逻辑视图的摘要；地图仍按 scope + bbox 查询。
+  const { data } = await apiClient.get<RelicSummary[]>("/api/relics?scope=all");
   return data;
 }
 
-export async function fetchStats() {
-  const { data } = await apiClient.get("/api/stats");
+export async function fetchStats(scope: RelicScope = "protected") {
+  const { data } = await apiClient.get("/api/stats", { params: { scope } });
   return data;
 }
 
@@ -68,9 +70,13 @@ export async function fetchPolygon(code: string): Promise<unknown> {
   return data;
 }
 
-export async function searchFulltext(q: string, limit = 30): Promise<BboxResp> {
+export async function searchFulltext(
+  q: string,
+  limit = 30,
+  scope: RelicScope = "protected",
+): Promise<BboxResp> {
   const { data } = await apiClient.get<BboxResp>(
-    `/api/relics/search?q=${encodeURIComponent(q)}&limit=${limit}`,
+    `/api/relics/search?q=${encodeURIComponent(q)}&limit=${limit}&scope=${scope}`,
   );
   return data;
 }

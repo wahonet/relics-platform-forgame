@@ -3,6 +3,7 @@ import { usePlatformStore } from "../stores/platformStore";
 import { useUIStore } from "../stores/uiStore";
 import type { AppTab } from "../App";
 import emblemUrl from "../assets/emblem-wenhua-jining.png";
+import { RelicScopeToggle } from "./RelicScopeToggle";
 
 const NAV_TABS: { tab: AppTab; label: string; to: string }[] = [
   { tab: "map", label: "地图总览", to: "/" },
@@ -39,6 +40,7 @@ export function Header({ activeTab }: { activeTab: AppTab }) {
       </nav>
 
       <div className="hdr-right">
+        <RelicScopeToggle compact />
         {aiEnabled ? (
           <button
             className="tb"

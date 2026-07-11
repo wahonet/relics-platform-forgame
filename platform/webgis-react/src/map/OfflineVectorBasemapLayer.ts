@@ -43,11 +43,6 @@ interface CountyRegion {
   rectangle: Cesium.Rectangle;
 }
 
-export interface CountyHit {
-  name: string;
-  rectangle: Cesium.Rectangle;
-}
-
 const ASSET_ROOT = "/static/vector_basemap";
 const FALLBACK_BOUNDS: Bounds = {
   west: 115.87,
@@ -127,27 +122,6 @@ function polygonsFromGeometry(geometry?: GeoJsonGeometry): Polygon[] {
   return [];
 }
 
-function pointInRing(lng: number, lat: number, ring: Ring): boolean {
-  let inside = false;
-  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
-    const [xi, yi] = ring[i];
-    const [xj, yj] = ring[j];
-    const crosses =
-      yi > lat !== yj > lat &&
-      lng < ((xj - xi) * (lat - yi)) / (yj - yi || Number.EPSILON) + xi;
-    if (crosses) inside = !inside;
-  }
-  return inside;
-}
-
-function pointInPolygon(lng: number, lat: number, polygon: Polygon): boolean {
-  if (!polygon.length || !pointInRing(lng, lat, polygon[0])) return false;
-  for (let i = 1; i < polygon.length; i += 1) {
-    if (pointInRing(lng, lat, polygon[i])) return false;
-  }
-  return true;
-}
-
 function centroidOfRing(ring: Ring): Coordinate {
   let twiceArea = 0;
   let x = 0;
@@ -207,6 +181,10 @@ export class OfflineVectorBasemapLayer {
   private dataSource = new Cesium.CustomDataSource("offline-vector-basemap");
   private opacity = 0.9;
   private counties: CountyRegion[] = [];
+  private countyLineEntities: Cesium.Entity[] = [];
+  private countyLabelEntities: Cesium.Entity[] = [];
+  private suppressCountyLines = false;
+  private suppressCountyLabels = false;
   private loading: Promise<void> | null = null;
   private addPromise: Promise<Cesium.DataSource>;
   private destroyed = false;
@@ -322,7 +300,8 @@ export class OfflineVectorBasemapLayer {
       polygons.forEach((polygon) => {
         polygon.forEach((ring) => {
           if (ring.length < 2) return;
-          this.dataSource.entities.add({
+          const line = this.dataSource.entities.add({
+            show: !this.suppressCountyLines,
             polyline: {
               positions: toPositions(ring),
               width: 1.2,
@@ -330,14 +309,29 @@ export class OfflineVectorBasemapLayer {
               clampToGround: true,
             },
           });
+          this.countyLineEntities.push(line);
         });
       });
 
       const largestOuter = polygons
         .map((polygon) => polygon[0])
         .sort((a, b) => ringArea(b) - ringArea(a))[0];
-      const [lng, lat] = centroidOfRing(largestOuter);
-      this.dataSource.entities.add({
+      const rawLng = feature.properties?.label_lng ?? feature.properties?._label_lng;
+      const rawLat = feature.properties?.label_lat ?? feature.properties?._label_lat;
+      const configuredLng = Number(rawLng);
+      const configuredLat = Number(rawLat);
+      const [lng, lat] = rawLng !== null
+        && rawLng !== undefined
+        && rawLng !== ""
+        && rawLat !== null
+        && rawLat !== undefined
+        && rawLat !== ""
+        && Number.isFinite(configuredLng)
+        && Number.isFinite(configuredLat)
+        ? [configuredLng, configuredLat]
+        : centroidOfRing(largestOuter);
+      const label = this.dataSource.entities.add({
+        show: !this.suppressCountyLabels,
         position: Cesium.Cartesian3.fromDegrees(lng, lat),
         label: {
           text: name,
@@ -351,6 +345,7 @@ export class OfflineVectorBasemapLayer {
           distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 260_000),
         },
       });
+      this.countyLabelEntities.push(label);
     });
     this.counties = regions;
   }
@@ -428,20 +423,17 @@ export class OfflineVectorBasemapLayer {
     if (!this.viewer.isDestroyed()) this.viewer.scene.requestRender();
   }
 
-  findCountyAt(lng: number, lat: number): CountyHit | null {
-    for (const county of this.counties) {
-      const b = county.bounds;
-      if (lng < b.west || lng > b.east || lat < b.south || lat > b.north) {
-        continue;
-      }
-      if (county.polygons.some((polygon) => pointInPolygon(lng, lat, polygon))) {
-        return {
-          name: county.name,
-          rectangle: Cesium.Rectangle.clone(county.rectangle),
-        };
-      }
-    }
-    return null;
+  /** BoundaryLayer 的业务边界开启时，隐藏底图里重复的县线/县名。 */
+  setCountyVisualSuppressed(lines: boolean, labels: boolean): void {
+    this.suppressCountyLines = lines;
+    this.suppressCountyLabels = labels;
+    this.countyLineEntities.forEach((entity) => {
+      entity.show = !lines;
+    });
+    this.countyLabelEntities.forEach((entity) => {
+      entity.show = !labels;
+    });
+    if (!this.viewer.isDestroyed()) this.viewer.scene.requestRender();
   }
 
   destroy(): void {
@@ -455,5 +447,7 @@ export class OfflineVectorBasemapLayer {
       /* viewer 可能已先销毁 */
     }
     this.counties = [];
+    this.countyLineEntities = [];
+    this.countyLabelEntities = [];
   }
 }

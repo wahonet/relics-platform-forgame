@@ -30,7 +30,7 @@ import uuid
 import zipfile
 from pathlib import Path
 
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, File, HTTPException, Query, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import Response
 
@@ -41,6 +41,7 @@ from _common import get_paths, load_config  # noqa: E402
 from crs import gk_inverse  # noqa: E402
 
 from data_loader import store  # noqa: E402
+from relic_scope import SCOPE_PROTECTED, normalize_relic_scope  # noqa: E402
 
 router = APIRouter(prefix="/parcels", tags=["图斑对比"])
 
@@ -373,11 +374,22 @@ def _import_sync(payload: list[tuple[str, bytes]]) -> dict:
 _KIND_ORDER = {"body": 0, "protection": 1, "control": 2, "point": 3}
 
 
+def _scope_or_422(value: str | None) -> str:
+    try:
+        return normalize_relic_scope(value)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+def _analysis_path(layer_id: str, scope: str) -> Path:
+    return _PARCEL_DIR / f"{layer_id}.{scope}.analysis.json"
+
+
 def _m2_per_deg2(lat: float) -> float:
     return 111_132.954 * 111_319.490 * math.cos(math.radians(lat))
 
 
-def _analyze_sync(layer_id: str) -> dict:
+def _analyze_sync(layer_id: str, scope: str = SCOPE_PROTECTED) -> dict:
     from shapely.geometry import Point, shape as shp_shape
     from shapely.strtree import STRtree
     from shapely.validation import make_valid
@@ -388,6 +400,8 @@ def _analyze_sync(layer_id: str) -> dict:
         raise HTTPException(404, "图层不存在")
     gj = json.loads(gj_file.read_text(encoding="utf-8"))
     feats = gj.get("features") or []
+    scoped_relics = store.scoped_relics(scope)
+    scoped_codes = {str(r.get("archive_code") or "") for r in scoped_relics}
 
     def _valid(geom):
         try:
@@ -405,6 +419,8 @@ def _analyze_sync(layer_id: str) -> dict:
         if g is None or g.is_empty:
             continue
         props = f.get("properties") or {}
+        if str(props.get("archive_code") or "") not in scoped_codes:
+            continue
         fidx = int(props.get("_idx", i))
         label = str(props.get("_label") or f"要素 #{fidx + 1}")
         parcel_geoms.append(g)
@@ -466,7 +482,7 @@ def _analyze_sync(layer_id: str) -> dict:
     # 2) 文物本体点位 落在图斑内(无本体面数据时的兜底核查)
     if parcel_geoms:
         ptree = STRtree(parcel_geoms)
-        for r in store.relics:
+        for r in scoped_relics:
             lng, lat = r.get("center_lng"), r.get("center_lat")
             if lng is None or lat is None:
                 continue
@@ -492,6 +508,7 @@ def _analyze_sync(layer_id: str) -> dict:
         conflicts = conflicts[:_MAX_CONFLICTS]
 
     result = {
+        "scope": scope,
         "layer_id": layer_id,
         "layer_name": meta.get("name") or "",
         "analyzed_at": int(time.time()),
@@ -506,7 +523,7 @@ def _analyze_sync(layer_id: str) -> dict:
             "relics_hit": len(hit_relics),
         },
     }
-    (_PARCEL_DIR / f"{layer_id}.analysis.json").write_text(
+    _analysis_path(layer_id, scope).write_text(
         json.dumps(result, ensure_ascii=False), encoding="utf-8"
     )
     return result
@@ -541,18 +558,25 @@ async def layer_geojson(layer_id: str):
 
 
 @router.get("/layers/{layer_id}/analysis")
-async def layer_analysis(layer_id: str):
-    p = _PARCEL_DIR / f"{layer_id}.analysis.json"
+async def layer_analysis(
+    layer_id: str,
+    scope: str = Query(SCOPE_PROTECTED, description="protected=文保单位 all=全部文物"),
+):
+    canonical_scope = _scope_or_422(scope)
+    p = _analysis_path(layer_id, canonical_scope)
     if not re.fullmatch(r"[0-9a-f]{8}", layer_id) or not p.exists():
         raise HTTPException(404, "尚未分析")
     return Response(content=p.read_bytes(), media_type="application/json")
 
 
 @router.post("/layers/{layer_id}/analyze")
-async def analyze_layer(layer_id: str):
+async def analyze_layer(
+    layer_id: str,
+    scope: str = Query(SCOPE_PROTECTED, description="protected=文保单位 all=全部文物"),
+):
     if not re.fullmatch(r"[0-9a-f]{8}", layer_id):
         raise HTTPException(404, "图层不存在")
-    return await run_in_threadpool(_analyze_sync, layer_id)
+    return await run_in_threadpool(_analyze_sync, layer_id, _scope_or_422(scope))
 
 
 @router.delete("/layers/{layer_id}")
@@ -565,7 +589,7 @@ async def delete_layer(layer_id: str):
         if len(kept) == len(idx):
             raise HTTPException(404, "图层不存在")
         _save_index(kept)
-    for suffix in (".geojson", ".analysis.json"):
+    for suffix in (".geojson", ".analysis.json", ".protected.analysis.json", ".all.analysis.json"):
         try:
             (_PARCEL_DIR / f"{layer_id}{suffix}").unlink(missing_ok=True)
         except OSError:

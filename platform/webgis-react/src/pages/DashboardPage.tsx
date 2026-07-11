@@ -4,6 +4,8 @@ import ReactECharts from "echarts-for-react";
 import { fetchDashboardStats } from "../api/stats";
 import { fetchPatrolStats } from "../api/patrol";
 import type { DashboardStats, PatrolStats, NameValue } from "../types";
+import { useCatalogScopeStore } from "../stores/catalogScopeStore";
+import { scopeLabel } from "../utils/relicScope";
 import { useChartTheme, withAlpha } from "../utils/chartTheme";
 import {
   RANK_COLOR,
@@ -34,6 +36,7 @@ function Num({ v }: { v: number | string }) {
 }
 
 export default function DashboardPage() {
+  const scope = useCatalogScopeStore((s) => s.scope);
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [patrol, setPatrol] = useState<PatrolStats | null>(null);
   const [now, setNow] = useState(new Date());
@@ -46,12 +49,12 @@ export default function DashboardPage() {
   );
 
   useEffect(() => {
-    document.title = "资源概览 — 济宁市文物保护利用平台";
-    fetchDashboardStats().then(setStats).catch(() => undefined);
-    fetchPatrolStats().then(setPatrol).catch(() => undefined);
+    document.title = "资源概览（" + scopeLabel(scope) + "）— 济宁市文物保护利用平台";
+    fetchDashboardStats(scope).then(setStats).catch(() => undefined);
+    fetchPatrolStats(scope).then(setPatrol).catch(() => undefined);
     const t = setInterval(() => setNow(new Date()), 1000);
     return () => clearInterval(t);
-  }, []);
+  }, [scope]);
 
   const rankOption = useMemo(() => {
     const data = (stats?.by_rank || []).map((d) => ({

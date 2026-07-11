@@ -8,6 +8,7 @@ import {
   type ParcelLayerMeta,
 } from "../api/parcels";
 import { useUIStore } from "./uiStore";
+import { useCatalogScopeStore } from "./catalogScopeStore";
 
 /**
  * 对比图斑状态:图层列表 / 显隐 / 分析结果。
@@ -34,6 +35,7 @@ interface ParcelState {
   analyze: (id: string) => Promise<void>;
   /** 一键查询全部图层(顺序执行,analyzing 置 "__all__")。 */
   analyzeAll: () => Promise<void>;
+  resetAnalyses: () => void;
   remove: (id: string) => Promise<void>;
   /** 批量删除:逐个调接口,最后一次性更新状态(避免地图层反复重建)。 */
   removeMany: (ids: string[]) => Promise<void>;
@@ -111,7 +113,10 @@ export const useParcelStore = create<ParcelState>((set, get) => ({
     if (get().analyzing) return;
     set({ analyzing: id });
     try {
-      const result = await analyzeParcelLayer(id);
+      const result = await analyzeParcelLayer(
+        id,
+        useCatalogScopeStore.getState().scope,
+      );
       set({ analyses: { ...get().analyses, [id]: result } });
       const s = result.summary;
       if (s.total === 0) {
@@ -134,12 +139,13 @@ export const useParcelStore = create<ParcelState>((set, get) => ({
     if (get().analyzing || !layers.length) return;
     set({ analyzing: "__all__" });
     const analyses = { ...get().analyses };
+    const scope = useCatalogScopeStore.getState().scope;
     let totalConflicts = 0;
     let relicsHit = 0;
     let failed = 0;
     for (const l of layers) {
       try {
-        const r = await analyzeParcelLayer(l.id);
+        const r = await analyzeParcelLayer(l.id, scope);
         analyses[l.id] = r;
         totalConflicts += r.summary.total;
         relicsHit += r.summary.relics_hit;
@@ -156,6 +162,10 @@ export const useParcelStore = create<ParcelState>((set, get) => ({
     } else {
       toast(`共发现 ${totalConflicts} 处冲突,涉及 ${relicsHit} 处文物`, "warning");
     }
+  },
+
+  resetAnalyses() {
+    set({ analyses: {}, analyzing: "" });
   },
 
   async remove(id) {

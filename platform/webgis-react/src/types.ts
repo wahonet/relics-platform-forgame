@@ -3,6 +3,9 @@
  * 字段命名严格对齐 Python 端 data_serializers.py 的输出。
  */
 
+/** protected=仅国/省/市/县级文保单位；all=再包含未定级不可移动文物。 */
+export type RelicScope = "protected" | "all";
+
 export interface RelicSummary {
   id?: number;
   archive_code: string;
@@ -70,6 +73,7 @@ export interface RelicArchives {
 }
 
 export interface BackendFilters {
+  scope?: RelicScope;
   category?: string;
   rank?: string;
   county?: string;
@@ -129,6 +133,7 @@ export interface PatrolRoute {
   name: string;
   plan_date: string;
   mode: string;
+  data_scope?: RelicScope;
   status: string;
   note?: string;
   distance_m: number;
@@ -169,6 +174,7 @@ export interface PlanSuggestion {
 }
 
 export interface PlanResponse {
+  scope?: RelicScope;
   intent: Record<string, unknown>;
   explanation: string;
   routes: PlanSuggestion[];
@@ -238,7 +244,11 @@ export interface NameValue {
 }
 
 export interface DashboardStats {
+  scope?: RelicScope;
   total: number;
+  all_total?: number;
+  protected_total?: number;
+  ungraded_total?: number;
   designated_total: number;
   tier: { city: number; full: number };
   by_rank: NameValue[];

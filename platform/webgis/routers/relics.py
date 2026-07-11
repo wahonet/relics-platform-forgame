@@ -17,9 +17,17 @@ import logging
 from fastapi import APIRouter, HTTPException, Query, Response
 
 from data_loader import store
+from relic_scope import SCOPE_PROTECTED, normalize_relic_scope
 
 router = APIRouter(tags=["文物"])
 log = logging.getLogger("uvicorn.error")
+
+
+def _scope_or_422(value: str | None) -> str:
+    try:
+        return normalize_relic_scope(value)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 # ── 新：视口查询 ────────────────────────────────────────────
@@ -34,6 +42,7 @@ async def relics_by_bbox(
     county: str | None = Query(None, description="县市区"),
     township: str | None = Query(None),
     tier: str | None = Query(None, description="数据层级 city/full"),
+    scope: str = Query(SCOPE_PROTECTED, description="protected=文保单位 all=全部文物"),
     condition: str | None = Query(None, description="保存状况 好/较好/一般/较差/差"),
     era: str | None = Query(None, description="era_stats 原始值集合,逗号分隔;__empty__=空值"),
     has_3d: bool | None = Query(None, description="true=仅有三维模型 false=仅无"),
@@ -61,6 +70,7 @@ async def relics_by_bbox(
     if era:
         eras = [v.strip() for v in era.split(",") if v.strip()]
 
+    canonical_scope = _scope_or_422(scope)
     data = store.query_bbox(
         qmin_lng, qmin_lat, qmax_lng, qmax_lat,
         categories=cats,
@@ -68,6 +78,7 @@ async def relics_by_bbox(
         county=county or None,
         township=township or None,
         tier=tier or None,
+        scope=canonical_scope,
         condition=condition or None,
         era_stats_in=eras,
         has_3d=has_3d,
@@ -77,7 +88,12 @@ async def relics_by_bbox(
     truncated = len(data) >= limit
 
     response = Response(
-        content=_dumps({"data": data, "total": len(data), "truncated": truncated}),
+        content=_dumps({
+            "scope": canonical_scope,
+            "data": data,
+            "total": len(data),
+            "truncated": truncated,
+        }),
         media_type="application/json",
     )
     response.headers["Cache-Control"] = "public, max-age=30"
@@ -88,19 +104,23 @@ async def relics_by_bbox(
 async def relics_search(
     q: str = Query(..., min_length=1, description="搜索关键词"),
     limit: int = Query(20, ge=1, le=200),
+    scope: str = Query(SCOPE_PROTECTED, description="protected=文保单位 all=全部文物"),
 ):
     """FTS5 全文搜索(trigram)。关键词 >=3 字走索引,否则 LIKE fallback。
     返回格式与 by-bbox 一致。"""
-    data = store.search_fulltext(q, limit=limit)
-    return {"data": data, "total": len(data), "query": q}
+    canonical_scope = _scope_or_422(scope)
+    data = store.search_fulltext(q, limit=limit, scope=canonical_scope)
+    return {"scope": canonical_scope, "data": data, "total": len(data), "query": q}
 
 
 # ── 兼容旧接口 ──────────────────────────────────────────────
 @router.get("/relics", deprecated=True)
-async def list_relics():
+async def list_relics(
+    scope: str = Query(SCOPE_PROTECTED, description="protected=文保单位 all=全部文物"),
+):
     """全量精简列表,DEPRECATED。请改用 /api/relics/by-bbox。"""
     log.warning("[deprecated] /api/relics 被调用，请迁移到 /api/relics/by-bbox")
-    return store.get_relics_summary()
+    return store.get_relics_summary(_scope_or_422(scope))
 
 
 @router.get("/relics/{code}")

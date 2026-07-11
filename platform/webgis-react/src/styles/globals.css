@@ -497,6 +497,178 @@ select option { background: var(--panel-solid); color: var(--t1); }
 }
 .cesium-viewer-bottom { display: none !important; }
 
+/* ── 地图天气氛围层(今日天气驱动:雨/雪/阴,刻意做得极淡) ──
+ * 与 .map-container 同区域的不可交互覆盖层;
+ * 雨丝/雪花用 SVG mask 平铺 + 纯 transform 位移动画(合成器友好,不打扰 Cesium)。 */
+.map-weather-fx {
+  --wx-line: rgba(206, 224, 245, 0.4);   /* 雨丝/雪花颜色(深色主题=浅亮) */
+  --wx-shade: rgba(146, 168, 194, 0.11); /* 云层压顶渐变 */
+  position: absolute; top: calc(var(--hdr) + var(--tbar)); left: 0; right: 0; bottom: 0;
+  z-index: 3; pointer-events: none; overflow: hidden;
+  background: linear-gradient(180deg, var(--wx-shade), transparent 55%);
+}
+[data-theme="light"] .map-weather-fx,
+[data-theme="glass"] .map-weather-fx {
+  --wx-line: rgba(94, 114, 138, 0.38);   /* 亮色地图上雨雪用暗灰蓝 */
+  --wx-shade: rgba(90, 104, 122, 0.12);
+}
+body.patrol-mode .map-weather-fx,
+body.parcel-mode .map-weather-fx { top: var(--hdr); left: calc(400px + var(--float-gap) * 2); }
+.map-weather-fx.rain::before, .map-weather-fx.rain::after,
+.map-weather-fx.snow::before, .map-weather-fx.snow::after {
+  content: ""; position: absolute; left: 0; right: 0; top: -390px; bottom: 0;
+  background: var(--wx-line);
+  -webkit-mask-repeat: repeat; mask-repeat: repeat;
+}
+/* 雨丝:130x260 平铺单元里 4 条短斜线 */
+.map-weather-fx.rain::before, .map-weather-fx.rain::after {
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='130' height='260'%3E%3Cg stroke='%23fff' stroke-width='1.1' stroke-linecap='round'%3E%3Cline x1='22' y1='18' x2='19' y2='40'/%3E%3Cline x1='86' y1='72' x2='83' y2='94'/%3E%3Cline x1='48' y1='150' x2='45' y2='172'/%3E%3Cline x1='112' y1='205' x2='109' y2='227'/%3E%3C/g%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='130' height='260'%3E%3Cg stroke='%23fff' stroke-width='1.1' stroke-linecap='round'%3E%3Cline x1='22' y1='18' x2='19' y2='40'/%3E%3Cline x1='86' y1='72' x2='83' y2='94'/%3E%3Cline x1='48' y1='150' x2='45' y2='172'/%3E%3Cline x1='112' y1='205' x2='109' y2='227'/%3E%3C/g%3E%3C/svg%3E");
+}
+.map-weather-fx.rain::before {
+  -webkit-mask-size: 130px 260px; mask-size: 130px 260px;
+  opacity: 0.5; animation: wx-fall-far 1.15s linear infinite;
+}
+.map-weather-fx.rain::after {
+  -webkit-mask-size: 195px 390px; mask-size: 195px 390px;
+  opacity: 0.7; animation: wx-fall-near 0.85s linear infinite;
+}
+/* 雪花:150x260 平铺单元里 6 个小圆点,慢速飘落带轻微横摆 */
+.map-weather-fx.snow::before, .map-weather-fx.snow::after {
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='150' height='260'%3E%3Cg fill='%23fff'%3E%3Ccircle cx='25' cy='28' r='1.6'/%3E%3Ccircle cx='95' cy='62' r='1.2'/%3E%3Ccircle cx='55' cy='118' r='1.8'/%3E%3Ccircle cx='130' cy='150' r='1.3'/%3E%3Ccircle cx='32' cy='192' r='1.4'/%3E%3Ccircle cx='105' cy='234' r='1.7'/%3E%3C/g%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='150' height='260'%3E%3Cg fill='%23fff'%3E%3Ccircle cx='25' cy='28' r='1.6'/%3E%3Ccircle cx='95' cy='62' r='1.2'/%3E%3Ccircle cx='55' cy='118' r='1.8'/%3E%3Ccircle cx='130' cy='150' r='1.3'/%3E%3Ccircle cx='32' cy='192' r='1.4'/%3E%3Ccircle cx='105' cy='234' r='1.7'/%3E%3C/g%3E%3C/svg%3E");
+}
+.map-weather-fx.snow::before {
+  -webkit-mask-size: 150px 260px; mask-size: 150px 260px;
+  opacity: 0.55; animation: wx-drift-far 7.5s linear infinite;
+}
+.map-weather-fx.snow::after {
+  -webkit-mask-size: 225px 390px; mask-size: 225px 390px;
+  opacity: 0.75; animation: wx-drift-near 5.5s linear infinite;
+}
+/* 位移一个平铺单元高度后图案与初始重合 → 无缝循环 */
+@keyframes wx-fall-far { to { transform: translateY(260px); } }
+@keyframes wx-fall-near { to { transform: translateY(390px); } }
+@keyframes wx-drift-far {
+  50% { transform: translate(6px, 130px); }
+  to { transform: translate(0, 260px); }
+}
+@keyframes wx-drift-near {
+  50% { transform: translate(-8px, 195px); }
+  to { transform: translate(0, 390px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .map-weather-fx::before, .map-weather-fx::after { display: none; }
+}
+
+/* ── 行政区下钻 ──
+ * .drill-bar     地图左上面包屑(全市 › 县 › 镇 › 村)
+ * .drill-crumbs  统计面板"县区分布"卡内的层级导航 */
+.drill-bar {
+  position: absolute; top: calc(var(--hdr) + var(--tbar) + 10px);
+  left: 50%; transform: translateX(-50%);
+  z-index: 120; display: flex; align-items: center; gap: 5px;
+  padding: 5px 7px 5px 11px;
+  background: var(--panel); border: 1px solid var(--panel-ring);
+  border-radius: 999px; backdrop-filter: var(--blur);
+  box-shadow: var(--shadow-md, 0 4px 14px rgba(0, 0, 0, 0.25));
+  font-size: 11px; color: var(--t2); white-space: nowrap;
+  animation: drill-bar-in var(--dur-2) var(--ease-out);
+}
+@keyframes drill-bar-in {
+  from { opacity: 0; transform: translateX(-50%) translateY(-8px); }
+  to { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+body.patrol-mode .drill-bar,
+body.parcel-mode .drill-bar { display: none; }
+.drill-bar > span { opacity: 0.55; }
+.drill-bar button {
+  border: none; background: transparent; padding: 2px 4px; border-radius: 4px;
+  color: var(--t2); font-size: 11px; cursor: pointer; white-space: nowrap;
+  transition: color var(--dur-1), background var(--dur-1);
+}
+.drill-bar button:hover { color: var(--t1); background: var(--hover-bg); }
+.drill-bar button.cur { color: var(--accent2); font-weight: 600; cursor: default; }
+.drill-bar button.cur:hover { background: transparent; }
+/* 亮底主题(经典亮白/琉璃)用加深的强调色,浅色调在白底上看不清 */
+[data-theme="light"] .drill-bar button.cur,
+[data-theme="glass"] .drill-bar button.cur { color: var(--accent-strong); }
+.drill-bar .drill-exit {
+  margin-left: 3px; width: 18px; height: 18px; padding: 0; line-height: 1;
+  border: 1px solid var(--bd); border-radius: 50%; font-size: 12px;
+}
+.drill-bar .drill-exit:hover { color: var(--red); border-color: color-mix(in srgb, var(--red) 45%, transparent); }
+
+/* ── 年代时间轴(地图底部居中,"文脉演变"演示) ── */
+.era-timeline {
+  position: absolute; bottom: 36px; left: 50%; transform: translateX(-50%);
+  z-index: 115; display: flex; align-items: center; gap: 10px;
+  padding: 8px 12px;
+  background: var(--panel); border: 1px solid var(--panel-ring);
+  border-radius: 999px; backdrop-filter: var(--blur);
+  box-shadow: var(--shadow-md, 0 6px 20px rgba(0, 0, 0, 0.28));
+  animation: era-in var(--dur-2) var(--ease-out);
+}
+@keyframes era-in {
+  from { opacity: 0; transform: translateX(-50%) translateY(10px); }
+  to { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+.era-play, .era-close {
+  flex-shrink: 0; width: 28px; height: 28px; display: flex; align-items: center; justify-content: center;
+  border: 1px solid var(--accent-bd); border-radius: 50%; background: var(--accent-dim);
+  color: var(--accent2); cursor: pointer; font-size: 15px; line-height: 1;
+  transition: background var(--dur-1), color var(--dur-1), border-color var(--dur-1);
+}
+.era-play svg { width: 14px; height: 14px; fill: currentColor; }
+.era-play:hover { background: color-mix(in srgb, var(--accent) 22%, transparent); }
+.era-close { border-color: var(--bd); background: transparent; color: var(--t2); }
+.era-close:hover { color: var(--red); border-color: color-mix(in srgb, var(--red) 45%, transparent); }
+.era-track { display: flex; align-items: flex-start; }
+.era-node {
+  position: relative; display: flex; flex-direction: column; align-items: center; gap: 4px;
+  min-width: 52px; padding: 2px 0 0; border: none; background: transparent; cursor: pointer;
+}
+/* 节点间连线 */
+.era-node::before {
+  content: ""; position: absolute; top: 7px; left: -50%; width: 100%; height: 2px;
+  background: var(--bd-strong); transition: background var(--dur-2);
+}
+.era-node:first-child::before { display: none; }
+.era-node.lit::before, .era-node.cur::before { background: var(--accent); }
+.era-node i {
+  position: relative; z-index: 1; width: 12px; height: 12px; border-radius: 50%;
+  background: var(--bg4); border: 2px solid var(--bd-strong);
+  transition: background var(--dur-2), border-color var(--dur-2), transform var(--dur-2);
+}
+.era-node span { font-size: 10px; color: var(--t2); white-space: nowrap; transition: color var(--dur-1); }
+.era-node:hover span { color: var(--t1); }
+.era-node.lit i { background: var(--accent); border-color: var(--accent); }
+.era-node.lit span { color: var(--t1); }
+.era-node.cur i {
+  background: var(--gold); border-color: var(--gold2); transform: scale(1.3);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--gold) 55%, transparent);
+}
+.era-node.cur span { color: var(--gold2); font-weight: 700; }
+
+.drill-crumbs {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 3px;
+  margin: 0 0 4px; font-size: 10px; color: var(--t3);
+}
+.drill-crumbs > span { opacity: 0.55; }
+.drill-crumbs button {
+  border: none; background: transparent; padding: 1px 4px; border-radius: 4px;
+  color: var(--t2); font-size: 10px; cursor: pointer; white-space: nowrap;
+  transition: color var(--dur-1), background var(--dur-1);
+}
+.drill-crumbs button:hover { color: var(--t1); background: var(--hover-bg); }
+.drill-crumbs button.cur { color: var(--accent2); font-weight: 600; cursor: default; }
+.drill-crumbs button.cur:hover { background: transparent; }
+[data-theme="light"] .drill-crumbs button.cur,
+[data-theme="glass"] .drill-crumbs button.cur { color: var(--accent-strong); }
+.drill-empty {
+  padding: 26px 0; color: var(--t2); font-size: 11px; text-align: center;
+}
+
 .offline-vector-attribution {
   position: absolute;
   right: 10px;
@@ -663,6 +835,34 @@ select option { background: var(--panel-solid); color: var(--t1); }
 }
 .dash-scope button:hover { color: var(--t1); }
 .dash-scope button.on { background: var(--accent-dim); color: var(--accent2); }
+
+/* 全局业务口径：与 tier=city/full（资料丰富度）完全独立。 */
+.relic-scope-toggle {
+  display: inline-flex;
+  gap: 0;
+  border: 1px solid var(--bd);
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--panel);
+}
+.relic-scope-toggle button {
+  border: 0;
+  border-right: 1px solid var(--bd);
+  background: transparent;
+  color: var(--t2);
+  padding: 5px 10px;
+  cursor: pointer;
+  white-space: nowrap;
+  font: 12px/1.2 inherit;
+}
+.relic-scope-toggle button:last-child { border-right: 0; }
+.relic-scope-toggle button:hover { color: var(--t1); background: var(--hover-bg); }
+.relic-scope-toggle button.on {
+  color: var(--accent2);
+  background: var(--accent-dim);
+  font-weight: 650;
+}
+.relic-scope-toggle.compact button { padding: 5px 8px; font-size: 11px; }
 .dash-cards { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; padding: 12px 14px; }
 .dc {
   background: linear-gradient(160deg, color-mix(in srgb, var(--accent) 7%, transparent), var(--wash));
@@ -688,7 +888,9 @@ select option { background: var(--panel-solid); color: var(--t1); }
   background: linear-gradient(180deg, var(--gold), var(--accent));
 }
 
-/* 右侧栏天气预报：7 日切换 + 当天逐小时预报 */
+.map-legend-note { margin-top: 4px; font-size: 9px; color: var(--t2); opacity: 0.8; }
+
+/* 右侧栏天气预报：当日概览 + 7 日切换(点周条切换概览) */
 .weather-panel { padding-bottom: 12px; }
 .weather-heading {
   display: flex; align-items: center; justify-content: space-between; gap: 8px;
@@ -697,47 +899,32 @@ select option { background: var(--panel-solid); color: var(--t1); }
 .weather-heading h4 { margin: 0; cursor: default; }
 .weather-heading h4:hover { background: transparent; }
 .weather-heading > span { color: var(--t2); font-size: 10px; white-space: nowrap; }
-.weather-day-nav {
-  display: grid; grid-template-columns: 25px minmax(0, 1fr) 25px;
-  align-items: stretch; gap: 5px;
-}
-.weather-day-nav > button {
-  border: 1px solid var(--bd); border-radius: var(--r-sm); background: var(--wash);
-  color: var(--t2); font-size: 21px; cursor: pointer;
-  transition: color var(--dur-1), border-color var(--dur-1), background var(--dur-1);
-}
-.weather-day-nav > button:hover:not(:disabled) {
-  color: var(--accent2); border-color: var(--accent-bd); background: var(--accent-dim);
-}
-.weather-day-nav > button:disabled { opacity: 0.28; cursor: default; }
 .weather-day-main {
   min-width: 0; min-height: 54px; display: grid;
-  grid-template-columns: 34px minmax(0, 1fr) auto; align-items: center; gap: 7px;
-  padding: 6px 8px; border: 1px solid var(--bd); border-radius: var(--r-sm);
+  grid-template-columns: 34px minmax(0, 1fr) auto; align-items: center; gap: 8px;
+  padding: 6px 10px; border: 1px solid var(--bd); border-radius: var(--r-sm);
   background: linear-gradient(145deg, color-mix(in srgb, var(--accent) 9%, transparent), var(--wash));
 }
 .weather-main-icon { font-size: 27px; line-height: 1; filter: saturate(0.85); }
 .weather-day-main > div { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .weather-day-main b { color: var(--t1); font-size: 11px; white-space: nowrap; }
-.weather-day-main em { color: var(--t2); font-size: 10px; font-style: normal; }
+.weather-day-main em {
+  color: var(--t2); font-size: 10px; font-style: normal;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
 .weather-day-main strong { color: var(--accent2); font-size: 19px; white-space: nowrap; }
 .weather-day-main strong small { color: var(--t2); font-size: 11px; font-weight: 500; }
 .weather-week { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 3px; margin-top: 6px; }
 .weather-week button {
-  min-width: 0; height: 57px; display: flex; flex-direction: column; align-items: center;
+  min-width: 0; height: 53px; display: flex; flex-direction: column; align-items: center;
   justify-content: center; gap: 1px; padding: 3px 1px; border: 1px solid transparent;
   border-radius: var(--r-sm); background: transparent; color: var(--t2); cursor: pointer;
 }
 .weather-week button:hover { background: var(--hover-bg); color: var(--t1); }
 .weather-week button.on { background: var(--accent-dim); border-color: var(--accent-bd); color: var(--accent2); }
 .weather-week span { max-width: 100%; overflow: hidden; font-size: 9px; white-space: nowrap; }
-.weather-week b { font-size: 17px; line-height: 1.15; font-weight: 400; }
+.weather-week b { font-size: 16px; line-height: 1.15; font-weight: 400; }
 .weather-week em { color: inherit; font-size: 9px; font-style: normal; }
-.weather-metrics {
-  display: flex; justify-content: space-between; gap: 6px; margin-top: 6px;
-  padding: 5px 7px; border-radius: var(--r-sm); background: var(--wash);
-  color: var(--t2); font-size: 9px; font-variant-numeric: tabular-nums;
-}
 .weather-risk {
   display: flex; flex-direction: column; gap: 2px; margin-top: 6px; padding: 6px 8px;
   border: 1px solid var(--gold-bd); border-radius: var(--r-sm); background: var(--gold-dim);
@@ -746,18 +933,8 @@ select option { background: var(--panel-solid); color: var(--t1); }
 .weather-risk b { color: var(--gold2); font-size: 10px; }
 .weather-risk.alert { border-color: color-mix(in srgb, var(--red) 45%, transparent); background: var(--red-dim); }
 .weather-risk.alert b { color: var(--red); }
-.weather-hour-title { margin: 8px 0 4px; color: var(--t3); font-size: 10px; font-weight: 600; }
-.weather-hourly { display: flex; gap: 4px; overflow-x: auto; padding: 1px 0 5px; scrollbar-width: thin; }
-.weather-hour {
-  flex: 0 0 47px; display: flex; flex-direction: column; align-items: center; gap: 1px;
-  padding: 5px 3px; border: 1px solid var(--hairline); border-radius: var(--r-sm); background: var(--wash);
-}
-.weather-hour span, .weather-hour small { color: var(--t2); font-size: 9px; }
-.weather-hour b { font-size: 16px; line-height: 1.15; font-weight: 400; }
-.weather-hour em { color: var(--t1); font-size: 10px; font-style: normal; font-weight: 600; }
-.weather-hour-empty { width: 100%; padding: 10px 0; color: var(--t2); font-size: 10px; text-align: center; }
 .weather-source {
-  display: flex; justify-content: space-between; gap: 6px; margin-top: 3px;
+  display: flex; justify-content: space-between; align-items: baseline; gap: 6px; margin-top: 7px;
   color: var(--t2); font-size: 8px; line-height: 1.35;
 }
 .weather-source a { color: var(--accent2); text-decoration: none; text-align: right; }
@@ -770,6 +947,87 @@ select option { background: var(--panel-solid); color: var(--t1); }
 .weather-error button {
   height: 25px; padding: 0 11px; border: 1px solid var(--accent-bd); border-radius: var(--r-sm);
   background: var(--accent-dim); color: var(--accent2); cursor: pointer;
+}
+
+/* ── 文物数字名片(扫码移动端页 + 二维码弹层) ─────────────── */
+.card-qr-mask {
+  position: fixed; inset: 0; z-index: 900;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--mask, rgba(6, 10, 18, 0.6)); backdrop-filter: blur(6px);
+}
+.card-qr-modal {
+  width: 300px; padding: 20px 22px 16px; text-align: center;
+  background: var(--panel-solid); border: 1px solid var(--panel-ring);
+  border-radius: var(--r-lg); box-shadow: var(--shadow-lg);
+  animation: slide-in 0.22s var(--ease-out);
+}
+.card-qr-modal h3 { font-size: 14px; color: var(--t1); margin-bottom: 12px; }
+.card-qr-modal img {
+  width: 208px; height: 208px; border-radius: 8px; background: #fff; padding: 6px;
+}
+.card-qr-modal p { margin: 10px 0 12px; font-size: 11px; color: var(--t2); line-height: 1.6; }
+.card-qr-actions { display: flex; justify-content: center; gap: 8px; }
+
+.card-page {
+  min-height: 100%; overflow-y: auto; padding: 14px 12px 30px;
+  background:
+    radial-gradient(700px 420px at 10% -6%, color-mix(in srgb, var(--accent) 14%, transparent), transparent 60%),
+    radial-gradient(600px 380px at 92% 106%, color-mix(in srgb, var(--gold) 10%, transparent), transparent 55%),
+    var(--bg);
+}
+.card-error { padding: 60px 0; color: var(--t2); font-size: 14px; text-align: center; }
+.card-sheet {
+  max-width: 560px; margin: 0 auto; overflow: hidden;
+  background: var(--panel-hd); border: 1px solid var(--panel-ring);
+  border-radius: var(--r-lg); backdrop-filter: var(--blur);
+  box-shadow: var(--shadow-lg);
+}
+.card-photo { position: relative; aspect-ratio: 16 / 10; background: var(--bg3); }
+.card-photo img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.card-photo-empty {
+  display: flex; align-items: center; justify-content: center;
+  color: var(--t2); font-size: 13px;
+}
+.card-photo-dots {
+  position: absolute; bottom: 10px; left: 0; right: 0;
+  display: flex; justify-content: center; gap: 6px;
+}
+.card-photo-dots button {
+  width: 8px; height: 8px; padding: 0; border: none; border-radius: 50%;
+  background: rgba(255, 255, 255, 0.45); cursor: pointer;
+}
+.card-photo-dots button.on { background: #fff; }
+.card-body { padding: 16px 18px 6px; }
+.card-body h1 {
+  font-family: var(--font-serif, inherit); font-size: 22px; color: var(--t1);
+  letter-spacing: 1px; margin-bottom: 10px;
+}
+.card-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.card-tags span {
+  padding: 3px 9px; border-radius: 999px; font-size: 11px;
+  background: var(--accent-dim); color: var(--accent2);
+  border: 1px solid var(--accent-bd);
+}
+.card-tags span.lv {
+  background: var(--gold-dim); color: var(--gold2); border-color: var(--gold-bd);
+}
+.card-loc { font-size: 13px; color: var(--t1); margin-bottom: 2px; }
+.card-addr { font-size: 12px; color: var(--t2); margin-bottom: 10px; }
+.card-voice { display: flex; gap: 8px; margin: 12px 0; }
+.card-voice button {
+  flex: 1; height: 40px; border-radius: 999px; font-size: 13px; cursor: pointer;
+  border: 1px solid var(--accent-bd); background: var(--accent-dim); color: var(--accent2);
+  transition: background var(--dur-1);
+}
+.card-voice button.on { background: color-mix(in srgb, var(--accent) 26%, transparent); }
+.card-intro { padding-bottom: 12px; }
+.card-intro p {
+  font-size: 13.5px; line-height: 1.85; color: var(--t1);
+  text-align: justify; margin-bottom: 8px; text-indent: 2em;
+}
+.card-foot {
+  padding: 12px; text-align: center; font-size: 10px; color: var(--t2);
+  border-top: 1px solid var(--hairline);
 }
 
 /* ── 详情面板 ────────────────────────────────────────────── */
@@ -803,6 +1061,22 @@ select option { background: var(--panel-solid); color: var(--t1); }
   margin-left: 6px; flex-shrink: 0; transition: background var(--dur-1), color var(--dur-1);
 }
 .pi-close:hover { background: var(--hover-bg-2); color: var(--t1); }
+/* 语音讲解按钮(标题栏,播放中脉冲提示) */
+.pi-voice {
+  width: 30px; height: 30px; background: var(--hover-bg); border: none; border-radius: var(--r-sm);
+  color: var(--t2); cursor: pointer; display: flex; align-items: center; justify-content: center;
+  margin-left: 6px; flex-shrink: 0; transition: background var(--dur-1), color var(--dur-1);
+}
+.pi-voice svg { width: 16px; height: 16px; fill: currentColor; }
+.pi-voice:hover { background: var(--hover-bg-2); color: var(--t1); }
+.pi-voice.on { color: var(--accent2); background: var(--accent-dim); animation: voice-pulse 1.6s ease-in-out infinite; }
+.pi-voice.loading { animation: none; }
+.pi-voice-en { font-size: 10px; font-weight: 700; letter-spacing: 0.5px; }
+.pi-voice-spin { animation: voice-spin 0.9s linear infinite; }
+@keyframes voice-spin { to { transform: rotate(360deg); } }
+@keyframes voice-pulse {
+  50% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 18%, transparent); }
+}
 .pi-tabs {
   flex-shrink: 0;
   display: flex; border-bottom: 1px solid var(--hairline); padding: 0 18px;
@@ -1149,6 +1423,11 @@ select option { background: var(--panel-solid); color: var(--t1); }
 .dropdown-item.on { background: color-mix(in srgb, var(--accent) 20%, transparent); color: var(--accent2); }
 .dropdown-divider { height: 1px; background: var(--hairline); margin: 4px 0; }
 .dropdown-group { padding: 8px 10px; font-size: 11px; color: var(--t2); }
+.boundary-lod-note {
+  margin: 3px 6px 5px; padding: 6px 8px;
+  border-radius: var(--r-sm); background: var(--wash);
+  color: var(--t2); font-size: 10px; line-height: 1.45;
+}
 
 /* ── 设置面板(悬浮玻璃卡片) ──────────────────────────────── */
 .settings-panel {
@@ -1686,6 +1965,16 @@ body.patrol-mode .settings-panel { top: calc(var(--hdr) + var(--float-gap)); }
 }
 .pp-hdr h3 { font-size: 15px; color: var(--t1); font-weight: 600; letter-spacing: 1px; }
 .pp-hint { font-size: 11px; color: var(--t2); margin-left: auto; }
+.pp-scope-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--hairline);
+  color: var(--t2);
+  font-size: 11px;
+}
 .pp-close {
   width: 28px; height: 28px; background: var(--hover-bg); border: none; border-radius: var(--r-sm);
   color: var(--t2); cursor: pointer; font-size: 15px; transition: background var(--dur-1), color var(--dur-1);
@@ -2109,6 +2398,49 @@ textarea.pp-input { height: auto; padding: 8px 10px; resize: vertical; }
 .adm-actions { margin-left: auto; display: flex; gap: 8px; }
 .adm-actions.start { margin-left: 0; margin-top: 6px; }
 .adm-hint { font-size: 12px; color: var(--t2); }
+
+/* 系统管理 → 设置:功能开关列表(checkbox 视觉替换为滑动开关) */
+.adm-set-list { display: flex; flex-direction: column; }
+.adm-set-row {
+  display: flex; align-items: center; gap: 14px;
+  padding: 12px 2px; cursor: pointer;
+  border-bottom: 1px solid var(--hairline);
+}
+.adm-set-row:last-child { border-bottom: none; }
+.adm-set-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.adm-set-text b { font-size: 13px; color: var(--t1); font-weight: 600; }
+.adm-set-text em { font-size: 11px; color: var(--t2); font-style: normal; line-height: 1.5; }
+.adm-set-row input[type="checkbox"] {
+  position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none;
+}
+.adm-set-switch {
+  flex-shrink: 0; position: relative; width: 36px; height: 20px;
+  border-radius: 999px; background: var(--bg4);
+  border: 1px solid var(--bd-strong);
+  transition: background var(--dur-2), border-color var(--dur-2);
+}
+.adm-set-switch::after {
+  content: ""; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px;
+  border-radius: 50%; background: var(--t2);
+  transition: transform var(--dur-2), background var(--dur-2);
+}
+.adm-set-row input:checked ~ .adm-set-switch {
+  background: var(--accent-dim); border-color: var(--accent-bd);
+}
+.adm-set-row input:checked ~ .adm-set-switch::after {
+  transform: translateX(16px); background: var(--accent2);
+}
+.adm-set-row input:focus-visible ~ .adm-set-switch {
+  outline: 2px solid var(--accent-bd); outline-offset: 2px;
+}
+/* 设置页的"标签 + 下拉/按钮"行(语音讲解等) */
+.adm-set-field {
+  display: flex; align-items: center; gap: 12px;
+  padding: 12px 2px; border-bottom: 1px solid var(--hairline);
+}
+.adm-set-field:last-child { border-bottom: none; }
+.adm-set-field select { width: 220px; flex-shrink: 0; }
+.adm-set-field .pp-btn { flex-shrink: 0; }
 .adm-flex-row { display: flex; gap: 8px; flex: 1; min-width: 0; }
 .adm-flex-fill { flex: 1; min-width: 0; }
 .adm-inline-check {

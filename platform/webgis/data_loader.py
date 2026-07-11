@@ -41,6 +41,13 @@ if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
 
 from data_serializers import row_to_legacy  # noqa: E402
+from relic_scope import (  # noqa: E402
+    SCOPE_PROTECTED,
+    filter_relics,
+    normalize_relic_scope,
+    relic_in_scope,
+    scope_counts,
+)
 
 
 
@@ -311,7 +318,14 @@ class DataStore:
     def get_drawings(self, code: str) -> list[dict]:
         return self.drawing_map.get(code, [])
 
-    def get_relics_summary(self) -> list[dict]:
+    def scoped_relics(self, scope: str = SCOPE_PROTECTED) -> list[dict]:
+        """返回当前业务口径的数据；tier 仍只表示资料丰富度。"""
+        return filter_relics(self.relics, scope)
+
+    def scope_counts(self) -> dict[str, int]:
+        return scope_counts(self.relics)
+
+    def get_relics_summary(self, scope: str = SCOPE_PROTECTED) -> list[dict]:
         """不含简介/边界点的精简列表,用于地图打点与列表渲染。"""
         fields = [
             "archive_code", "name", "category_main", "category_sub",
@@ -323,7 +337,7 @@ class DataStore:
             "has_archive_spu", "has_archive_fpu", "last_patrol_at",
         ]
         result = []
-        for r in self.relics:
+        for r in self.scoped_relics(scope):
             item = {k: r.get(k) for k in fields}
             arch = self.archive_map.get(r.get("archive_code", ""))
             if arch:
@@ -332,8 +346,9 @@ class DataStore:
             result.append(item)
         return result
 
-    def compute_stats(self) -> dict:
-        total = len(self.relics)
+    def compute_stats(self, scope: str = SCOPE_PROTECTED) -> dict:
+        relics = self.scoped_relics(scope)
+        total = len(relics)
         by_category: dict[str, int] = {}
         by_county: dict[str, int] = {}
         by_rank: dict[str, int] = {}
@@ -342,7 +357,7 @@ class DataStore:
         has_3d_count = 0
         has_boundary_count = 0
 
-        for r in self.relics:
+        for r in relics:
             by_category[r.get("category_main", "未知")] = by_category.get(r.get("category_main", "未知"), 0) + 1
             by_county[r.get("county") or "未知"] = by_county.get(r.get("county") or "未知", 0) + 1
             by_rank[r.get("heritage_level") or "未知"] = by_rank.get(r.get("heritage_level") or "未知", 0) + 1
@@ -354,6 +369,7 @@ class DataStore:
                 has_boundary_count += 1
 
         return {
+            "scope": normalize_relic_scope(scope),
             "total": total,
             "has_3d_count": has_3d_count,
             "has_boundary_count": has_boundary_count,
@@ -377,6 +393,7 @@ class DataStore:
         county: Optional[str] = None,
         township: Optional[str] = None,
         tier: Optional[str] = None,
+        scope: str = SCOPE_PROTECTED,
         condition: Optional[str] = None,
         era_stats_in: Optional[Iterable[str]] = None,
         has_3d: Optional[bool] = None,
@@ -390,11 +407,13 @@ class DataStore:
         era_stats_in 是 era_stats 原始值集合(前端按统计口径反查),
         "__empty__" 表示匹配空值。keyword 按名称/编号/地址做 LIKE 匹配。
         """
+        canonical_scope = normalize_relic_scope(scope)
         if not self._use_db:
             return self._query_bbox_memory(min_lng, min_lat, max_lng, max_lat,
                                             categories=categories, ranks=ranks,
                                             county=county, township=township,
-                                            tier=tier, condition=condition,
+                                            tier=tier, scope=canonical_scope,
+                                            condition=condition,
                                             era_stats_in=era_stats_in,
                                             has_3d=has_3d, keyword=keyword,
                                             limit=limit)
@@ -411,6 +430,8 @@ class DataStore:
         ]
         params: list = [min_lng, max_lng, min_lat, max_lat]
 
+        if canonical_scope == SCOPE_PROTECTED:
+            sql.append("  AND r.rank IN ('1','2','3','4')")
         if categories:
             cl = [str(v) for v in categories if v not in (None, "")]
             if cl:
@@ -477,7 +498,7 @@ class DataStore:
 
     def _query_bbox_memory(
         self, min_lng, min_lat, max_lng, max_lat,
-        *, categories, ranks, county, township, tier, condition,
+        *, categories, ranks, county, township, tier, scope, condition,
         era_stats_in=None, has_3d=None, keyword=None, limit=2000,
     ) -> list[dict]:
         """JSON 模式下的视口查询 fallback。全量遍历,性能仅足以支撑千条级。"""
@@ -487,6 +508,8 @@ class DataStore:
         cat_set = {str(v) for v in categories} if categories else None
         out = []
         for r in self.relics:
+            if not relic_in_scope(r, scope):
+                continue
             lng = r.get("center_lng")
             lat = r.get("center_lat")
             if lng is None or lat is None:
@@ -542,17 +565,27 @@ class DataStore:
                 break
         return out
 
-    def search_fulltext(self, keyword: str, limit: int = 20) -> list[dict]:
+    def search_fulltext(
+        self,
+        keyword: str,
+        limit: int = 20,
+        scope: str = SCOPE_PROTECTED,
+    ) -> list[dict]:
         """FTS5 全文搜索,返回格式同 query_bbox。
         关键词 >= 3 字走 FTS5 trigram,< 3 字回退 LIKE。"""
         kw = (keyword or "").strip()
         if not kw:
             return []
+        canonical_scope = normalize_relic_scope(scope)
 
         if not self._use_db:
-            return [r for r in [self._peek_memory(kw, limit)] if r][0] if self._peek_memory(kw, limit) else []
+            return self._peek_memory(kw, limit, canonical_scope)
 
         conn = self._thread_conn()
+        scope_sql = (
+            "AND r.rank IN ('1','2','3','4') "
+            if canonical_scope == SCOPE_PROTECTED else ""
+        )
         if len(kw) >= 3:
             sql = (
                 "SELECT r.id, r.code, r.name, r.category, r.rank, r.lng, r.lat, r.has_3d, r.county "
@@ -560,6 +593,7 @@ class DataStore:
                 "JOIN relics_rtree_map m ON m.id_int = f.rowid "
                 "JOIN relics r ON r.id = m.relic_id "
                 "WHERE f.relics_fts MATCH ? AND r.status = 1 "
+                + scope_sql +
                 "LIMIT ?"
             )
             # FTS5 MATCH 会按 trigram 切分,双引号需要转义。
@@ -568,7 +602,9 @@ class DataStore:
         else:
             sql = (
                 "SELECT id, code, name, category, rank, lng, lat, has_3d, county "
-                "FROM relics WHERE status = 1 AND name LIKE ? LIMIT ?"
+                "FROM relics WHERE status = 1 "
+                + scope_sql +
+                "AND name LIKE ? LIMIT ?"
             )
             rows = conn.execute(sql, (f"%{kw}%", int(limit))).fetchall()
 
@@ -583,10 +619,12 @@ class DataStore:
             for r in rows
         ]
 
-    def _peek_memory(self, kw: str, limit: int) -> list[dict]:
+    def _peek_memory(self, kw: str, limit: int, scope: str = SCOPE_PROTECTED) -> list[dict]:
         """JSON fallback:按 name 子串过滤。"""
         out = []
         for r in self.relics:
+            if not relic_in_scope(r, scope):
+                continue
             if kw in (r.get("name") or ""):
                 out.append({
                     "id": r.get("archive_code"), "code": r.get("archive_code"),

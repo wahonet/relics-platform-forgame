@@ -1,7 +1,7 @@
 {
   "id": "shandong-osm-lite",
   "name": "山东省离线专题矢量底图",
-  "version": "2026-07-10",
+  "version": "2026-07-10-boundary-v2",
   "bounds": [114.21037, 33.59779, 122.55498, 39.05078],
   "layers": [
     { "id": "rivers", "file": "rivers.json", "geometry": "line" },
@@ -13,5 +13,5 @@
   ],
   "attribution": "© OpenStreetMap contributors",
   "license": "ODbL 1.0",
-  "notes": "水系和交通数据由 Overpass/OpenStreetMap 数据抽稀生成；行政边界为项目本地边界数据。"
+  "notes": "水系和交通数据由 Overpass/OpenStreetMap 数据抽稀生成；市界和县界同步自项目方 ArcGIS 标准边界（WGS 84）。"
 }

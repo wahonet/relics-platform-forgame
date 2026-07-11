@@ -9,6 +9,8 @@ import { renderChatMarkdown, escapeStreamPreview } from "../utils/markdown";
 import { categoryCode, rankCode, RANK_MAP } from "../utils/dict";
 import type { ChatMessage } from "../types";
 import { flyTo } from "../map/viewerRegistry";
+import { useCatalogScopeStore } from "../stores/catalogScopeStore";
+import { relicInScope } from "../utils/relicScope";
 
 interface ChatBubble {
   role: "user" | "assistant";
@@ -29,6 +31,7 @@ export function ChatPanel() {
   const setUI = useUIStore((s) => s.set);
   const config = usePlatformStore((s) => s.config);
   const allRelics = useRelicsStore((s) => s.all);
+  const scope = useCatalogScopeStore((s) => s.scope);
 
   const [messages, setMessages] = useState<ChatBubble[]>([]);
   const [input, setInput] = useState("");
@@ -40,6 +43,13 @@ export function ChatPanel() {
       messagesRef.current.scrollTop = messagesRef.current.scrollHeight;
     }
   }, [messages]);
+
+  // 不同数据口径的对话历史不能混用。
+  useEffect(() => {
+    setMessages([]);
+    setInput("");
+    setStreaming(false);
+  }, [scope]);
 
   /** 级别短语("省级"/"全国重点"等) → FilterPanel 的级别显示值。 */
   const levelLabel = (v: string): string => {
@@ -59,6 +69,10 @@ export function ChatPanel() {
           useUIStore.getState().showToast(`未找到编号 ${code} 的文物`);
           return;
         }
+      }
+      if (r && !relicInScope(r, scope)) {
+        useUIStore.getState().showToast("该文物不在当前数据范围，请先切换数据口径");
+        return;
       }
       if (r?.center_lng != null && r.center_lat != null) {
         flyTo(r.center_lng, r.center_lat, 600);
@@ -147,7 +161,7 @@ export function ChatPanel() {
       .filter((m) => !m.streaming)
       .map((m) => ({ role: m.role, content: m.content }));
     try {
-      await streamChat(msg, history.slice(0, -1), {
+      await streamChat(msg, history.slice(0, -1), scope, {
         onChunk: (chunk) => {
           fullText += chunk;
           setMessages((curr) => {
@@ -189,7 +203,11 @@ export function ChatPanel() {
   if (!config?.features?.ai_chat) return null;
 
   const cityName = config?.administrative?.county_name || "本市";
-  const total = config?.stats?.relics_total ?? allRelics.length;
+  const total = (
+    scope === "all"
+      ? config?.stats?.all_total
+      : config?.stats?.protected_total
+  ) ?? allRelics.filter((r) => relicInScope(r, scope)).length;
   const suggests = [
     `${cityName}有哪些全国重点文物保护单位?`,
     "哪些文物保存状况较差需要重点巡查?",

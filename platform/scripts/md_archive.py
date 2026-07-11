@@ -94,6 +94,11 @@ def parse_coordinates(md: str) -> dict:
         desc = cells[6] if len(cells) > 6 else ""
         if lat is None or lng is None:
             continue
+        # 旧档案中有一条表格缺“分组”列，导致纬度/经度整体错位成
+        # lat=117、lng=193。先做全球合法范围校验，避免 all_points
+        # 兜底把这类列错位记录重新带回数据库。
+        if not (-90 <= lat <= 90 and -180 <= lng <= 180):
+            continue
         point = {
             "type": point_type, "lat": lat, "lng": lng,
             "alt": float(alt_m.group(1)) if alt_m else None,
@@ -115,6 +120,18 @@ def parse_coordinates(md: str) -> dict:
         lngs = [p["lng"] for p in result["boundary_points"]]
         result["center_lat"] = round(sum(lats) / len(lats), 8)
         result["center_lng"] = round(sum(lngs) / len(lngs), 8)
+    elif result["center_lat"] is None and result["all_points"]:
+        # 四普导出的少量复合文物把测点类型写成数字代码（如 "9"），
+        # 或者只有标志点。它们仍是有效坐标，取全部有效测点的几何中心
+        # 作为地图代表点，避免整条档案因“没有中心点/边界点”被丢弃。
+        lats = [p["lat"] for p in result["all_points"]]
+        lngs = [p["lng"] for p in result["all_points"]]
+        result["center_lat"] = round(sum(lats) / len(lats), 8)
+        result["center_lng"] = round(sum(lngs) / len(lngs), 8)
+        result["center_alt"] = next(
+            (p["alt"] for p in result["all_points"] if p.get("alt") is not None),
+            None,
+        )
     return result
 
 
@@ -190,6 +207,12 @@ def parse_archive_md(md_path: Path, group_name: str = "") -> dict:
         m = re.search(r"[县区市]([^省市县区]{1,10}?(?:[镇乡]|街道))", address)
         township = m.group(1) if m else ""
 
+    county = get_field(content, bi, "县区") or get_field(content, bi, "区县")
+    # 新增的全市四普 Markdown 以县区为一级目录；兖州部分档案把“区县”
+    # 写成行政代码 370882。目录名比该异常字段更可靠。
+    if (not county or county.isdigit()) and re.search(r"[县区市]$", group_name):
+        county = group_name
+
     return {
         "archive_code": get_field(content, bi, "档案编号"),
         "name": name,
@@ -201,10 +224,17 @@ def parse_archive_md(md_path: Path, group_name: str = "") -> dict:
         "heritage_level": get_field(content, fa, "文物级别"),
         "province": get_field(content, bi, "省份"),
         "city": get_field(content, bi, "地级市"),
-        "county": get_field(content, bi, "县区"),
+        "county": county,
         "township": township,
         "address": get_field(content, "位置信息", "详细地址"),
-        "is_relocated": get_field(content, "位置信息", "是否整体迁移"),
+        "is_relocated": (
+            get_field(content, "位置信息", "是否整体迁移")
+            or get_field(
+                content,
+                "位置信息",
+                "是否整体迁移并在新迁址占有独立地域范围",
+            )
+        ),
         "is_changed": get_field(content, "位置信息", "是否变更或消失"),
         "center_lat": coords["center_lat"],
         "center_lng": coords["center_lng"],

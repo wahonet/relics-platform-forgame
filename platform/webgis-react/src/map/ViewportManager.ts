@@ -11,6 +11,8 @@ export class ViewportManager {
   private viewer: Cesium.Viewer;
   private renderer: PointRenderer;
   private filters: BackendFilters = {};
+  /** 村级下钻:只渲染集合内 code(后端不支持村筛选,前端过滤)。null=不过滤。 */
+  private codeFilter: Set<string> | null = null;
   private cache = new Map<string, BboxRelic[]>();
   private lastURL: string | null = null;
   private moveEndCallback?: () => void;
@@ -58,6 +60,17 @@ export class ViewportManager {
     this.filters = { ...filters };
     this.cache.clear();
     this.refresh();
+  }
+
+  setCodeFilter(codes: Set<string> | null) {
+    this.codeFilter = codes;
+    this.lastURL = null;
+    this.refresh();
+  }
+
+  private applyCodeFilter(data: BboxRelic[]): BboxRelic[] {
+    if (!this.codeFilter) return data;
+    return data.filter((item) => this.codeFilter!.has(item.code));
   }
 
   private currentBBox() {
@@ -127,14 +140,14 @@ export class ViewportManager {
     const url = `/api/relics/by-bbox?${qs}`;
 
     if (url === this.lastURL && this.cache.has(url)) {
-      this.renderer.diffUpdate(this.cache.get(url) || []);
+      this.renderer.diffUpdate(this.applyCodeFilter(this.cache.get(url) || []));
       return;
     }
     this.lastURL = url;
 
     const cached = this.cache.get(url);
     if (cached) {
-      this.renderer.diffUpdate(cached);
+      this.renderer.diffUpdate(this.applyCodeFilter(cached));
       this.cache.delete(url);
       this.cache.set(url, cached);
       return;
@@ -151,8 +164,9 @@ export class ViewportManager {
         if (firstKey !== undefined) this.cache.delete(firstKey);
       }
       if (this.lastURL === url) {
-        this.renderer.diffUpdate(data);
-        this.onUpdated?.(data.length, !!body.truncated);
+        const visible = this.applyCodeFilter(data);
+        this.renderer.diffUpdate(visible);
+        this.onUpdated?.(visible.length, !!body.truncated);
       }
     } catch (e) {
       console.warn("[Viewport] 查询失败:", e);

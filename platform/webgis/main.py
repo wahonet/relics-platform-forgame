@@ -26,11 +26,12 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse  # no
 from fastapi.staticfiles import StaticFiles  # noqa: E402
 from pydantic import BaseModel  # noqa: E402
 from starlette.middleware.base import BaseHTTPMiddleware  # noqa: E402
+from starlette.middleware.gzip import GZipMiddleware  # noqa: E402
 
 from _common import PROJECT_ROOT, detect_features, get_paths, load_config  # noqa: E402
 import crs as _crs_lib  # noqa: E402
 from data_loader import store  # noqa: E402
-from routers import admin as _admin, boundaries as _boundaries, chat, crs as _crs, parcels as _parcels, patrol, relics, stats, weather  # noqa: E402
+from routers import admin as _admin, boundaries as _boundaries, card as _card, chat, crs as _crs, parcels as _parcels, patrol, relics, stats, tts as _tts, weather  # noqa: E402
 from services import ai_service  # noqa: E402
 from tile_routes import TILE_CACHE_DIR, register_tile_routes  # noqa: E402
 
@@ -94,15 +95,15 @@ async def lifespan(app: FastAPI):
     cached = sum(1 for _ in TILE_CACHE_DIR.rglob("*.tile"))
     print(f"[startup] tile cache: {cached} -> {TILE_CACHE_DIR}")
 
-    # 市界/县界底图缺失时(如数据被清除后),从仓库 boundary/ 种子自动恢复
+    # 让四级运行时边界始终与仓库内的标准 ArcGIS 数据版本保持一致。
+    # 版本标记匹配时 restore_seed_boundaries() 会直接返回，不重复写盘。
     try:
-        if not (_PATHS.output_boundaries / "city.geojson").exists():
-            from services.boundary_seed import restore_seed_boundaries
-            seeded = restore_seed_boundaries()
-            if seeded:
-                print(f"[startup] 边界底图已从种子恢复: {', '.join(seeded)}")
+        from services.boundary_seed import restore_seed_boundaries
+        seeded = restore_seed_boundaries()
+        if seeded:
+            print(f"[startup] 四级标准边界已恢复: {', '.join(seeded)}")
     except Exception as e:  # noqa: BLE001
-        print(f"[startup] 边界种子恢复失败: {e}")
+        print(f"[startup] 标准边界恢复失败: {e}")
 
     ai_service.init(_CONFIG)
     patrol.init_patrol(_CONFIG, _PATHS)
@@ -137,6 +138,8 @@ _PUBLIC_PATHS = (
     "/api/m/",
     "/patrol-photos/",
     "/photos/",
+    "/api/card/",   # 文物数字名片(扫码分享,免登录)
+    "/api/tts/",    # 语音讲解(名片页也要播放)
 )
 
 
@@ -228,6 +231,8 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
 
 app.add_middleware(AuthMiddleware)
+# 镇街/村界 GeoJSON 体积较大；响应压缩不改变现有文件及接口约定。
+app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=5)
 # 生产环境前端由本服务同源托管(/app/),CORS 只需放行本地开发端口。
 # 注意: allow_origins=["*"] 与 allow_credentials=True 组合违反 CORS 规范。
 app.add_middleware(
@@ -241,6 +246,8 @@ app.add_middleware(
 app.include_router(relics.router, prefix="/api")
 app.include_router(stats.router, prefix="/api")
 app.include_router(weather.router, prefix="/api")
+app.include_router(_tts.router, prefix="/api")
+app.include_router(_card.router, prefix="/api")
 app.include_router(chat.router, prefix="/api")
 app.include_router(patrol.router, prefix="/api")
 app.include_router(patrol.mobile_router)          # /m/r/{token} 与 /api/m/*
@@ -279,6 +286,7 @@ async def platform_config() -> JSONResponse:
     }
 
     n_full = sum(1 for r in store.relics if (r.get("tier") or "city") == "full")
+    catalog_counts = store.scope_counts()
 
     return JSONResponse({
         "project": {
@@ -302,7 +310,11 @@ async def platform_config() -> JSONResponse:
             "available_models": sf.get("available_models", []),
         },
         "stats": {
-            "relics_total": len(store.relics),
+            # 旧字段保持“文保单位”口径，避免旧客户端在扩容后静默变成全量。
+            "relics_total": catalog_counts["protected"],
+            "protected_total": catalog_counts["protected"],
+            "all_total": catalog_counts["all"],
+            "ungraded_total": catalog_counts["ungraded"],
             "full_tier_total": n_full,
             "has_3d_count": sum(1 for r in store.relics if r.get("has_3d")),
         },

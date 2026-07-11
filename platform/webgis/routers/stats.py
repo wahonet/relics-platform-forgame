@@ -4,19 +4,28 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException, Query
 
 _SCRIPTS_DIR = Path(__file__).resolve().parents[2] / "scripts"
 if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
 
 from data_loader import store  # noqa: E402
+from relic_scope import SCOPE_PROTECTED, normalize_relic_scope  # noqa: E402
 
 router = APIRouter(tags=["统计"])
 
 _RANK_ORDER = ["全国重点文物保护单位", "省级文物保护单位", "市级文物保护单位",
                "县级文物保护单位", "尚未核定公布为文物保护单位的不可移动文物"]
 _COND_ORDER = ["好", "较好", "一般", "较差", "差"]
+
+
+def _scope_or_422(value: str | None) -> str:
+    try:
+        return normalize_relic_scope(value)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
 
 # 年代归一化:原始年代字符串包含关键字 → 标准分期(展示按 _ERA_ORDER)
 _ERA_ORDER = ["史前", "夏商周", "秦汉", "魏晋南北朝", "隋唐五代", "宋金元", "明", "清", "近现代"]
@@ -46,15 +55,22 @@ def _era_bucket(raw: str) -> str:
 
 
 @router.get("/stats")
-async def stats():
-    return store.compute_stats()
+async def stats(
+    scope: str = Query(SCOPE_PROTECTED, description="protected=文保单位 all=全部文物"),
+):
+    return store.compute_stats(_scope_or_422(scope))
 
 
 @router.get("/stats/dashboard")
-async def stats_dashboard():
+async def stats_dashboard(
+    scope: str = Query(SCOPE_PROTECTED, description="protected=文保单位 all=全部文物"),
+):
     """资源概览大屏一次性聚合。"""
-    relics = store.relics
+    canonical_scope = _scope_or_422(scope)
+    relics = store.scoped_relics(canonical_scope)
     total = len(relics)
+    counts = store.scope_counts()
+    scoped_codes = {str(r.get("archive_code") or "") for r in relics}
 
     by_rank: dict[str, int] = {}
     by_county: dict[str, int] = {}
@@ -104,7 +120,11 @@ async def stats_dashboard():
     quality_score = round(sum(completeness.values()) / len(completeness), 1)
 
     return {
+        "scope": canonical_scope,
         "total": total,
+        "all_total": counts["all"],
+        "protected_total": counts["protected"],
+        "ungraded_total": counts["ungraded"],
         "designated_total": designated,
         "tier": {"city": tier_city, "full": tier_full},
         "by_rank": [{"name": k, "value": by_rank.get(k, 0)} for k in _RANK_ORDER if by_rank.get(k)],
@@ -122,8 +142,14 @@ async def stats_dashboard():
             + ([{"name": "未知", "value": by_era["未知"]}] if by_era.get("未知") else [])
         ),
         "assets": {
-            "photos": len(store.photo_index),
-            "drawings": len(store.drawing_index),
+            "photos": sum(
+                1 for row in store.photo_index
+                if str(row.get("archive_code") or "") in scoped_codes
+            ),
+            "drawings": sum(
+                1 for row in store.drawing_index
+                if str(row.get("archive_code") or "") in scoped_codes
+            ),
             "models_3d": n_3d,
             "archive_spu": n_spu,
             "archive_fpu": n_fpu,

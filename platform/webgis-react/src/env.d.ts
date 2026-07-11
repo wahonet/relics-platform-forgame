@@ -34,6 +34,9 @@ interface PlatformConfig {
   };
   stats: {
     relics_total: number;
+    protected_total?: number;
+    all_total?: number;
+    ungraded_total?: number;
     full_tier_total?: number;
     has_3d_count?: number;
   };

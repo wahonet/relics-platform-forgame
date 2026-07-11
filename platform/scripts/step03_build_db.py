@@ -85,6 +85,7 @@ CREATE TABLE relics (
 
 CREATE INDEX idx_relics_cat       ON relics(category);
 CREATE INDEX idx_relics_rank      ON relics(rank);
+CREATE INDEX idx_relics_status_rank ON relics(status, rank);
 CREATE INDEX idx_relics_county    ON relics(county);
 CREATE INDEX idx_relics_township  ON relics(township);
 CREATE INDEX idx_relics_tier      ON relics(tier);

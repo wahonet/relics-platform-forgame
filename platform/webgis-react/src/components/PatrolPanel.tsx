@@ -16,6 +16,8 @@ import type { PatrolRoute, PatrolStats } from "../types";
 import { getRouteLayer } from "../map/RouteLayer";
 import { PatrolReportModal } from "./PatrolReportModal";
 import { confirmDialog } from "./ConfirmModal";
+import { useCatalogScopeStore } from "../stores/catalogScopeStore";
+import { RelicScopeToggle } from "./RelicScopeToggle";
 
 type TabKey = "plan" | "routes";
 
@@ -44,6 +46,7 @@ const STATUS_LABEL: Record<string, string> = {
 export function PatrolPanel() {
   const open = useUIStore((s) => s.patrolPanelOpen);
   const showToast = useUIStore((s) => s.showToast);
+  const scope = useCatalogScopeStore((s) => s.scope);
 
   const picking = usePatrolStore((s) => s.picking);
   const pickingStart = usePatrolStore((s) => s.pickingStart);
@@ -69,12 +72,20 @@ export function PatrolPanel() {
   const [config, setConfig] = useState<PatrolConfig | null>(null);
   const [reportRouteId, setReportRouteId] = useState<number | null>(null);
 
+  const refreshRoutes = useCallback(() => {
+    listRoutes(scope).then(setRoutes).catch(() => undefined);
+  }, [scope]);
+
   // 打开面板 → 进入选点模式 + 拉基础数据;关闭 → 清理地图。
   useEffect(() => {
     const ps = usePatrolStore.getState();
     if (open) {
+      ps.resetAll();
       ps.setPicking(true);
-      fetchPatrolStats().then(setStats).catch(() => undefined);
+      getRouteLayer()?.clearRoute();
+      setActiveRoute(null);
+      setPlanExplain("");
+      fetchPatrolStats(scope).then(setStats).catch(() => undefined);
       fetchPatrolConfig().then(setConfig).catch(() => undefined);
       refreshRoutes();
     } else {
@@ -82,11 +93,7 @@ export function PatrolPanel() {
       getRouteLayer()?.clearRoute();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
-
-  const refreshRoutes = useCallback(() => {
-    listRoutes().then(setRoutes).catch(() => undefined);
-  }, []);
+  }, [open, scope, refreshRoutes]);
 
   const doPlan = async (text?: string) => {
     const t = (text ?? planText).trim();
@@ -94,7 +101,7 @@ export function PatrolPanel() {
     setPlanning(true);
     setPlanExplain("");
     try {
-      const resp = await planPatrol(t);
+      const resp = await planPatrol(t, 30, scope);
       usePatrolStore.getState().setSuggestions(resp.routes);
       setPlanExplain(resp.explanation);
       setPlanParser(resp.parser);
@@ -145,6 +152,7 @@ export function PatrolPanel() {
       const route = await createRoute({
         name: routeName.trim() || sug?.name || "",
         codes: stops.map((s) => s.code),
+        scope,
         plan_date: planDate,
         mode: sug ? "ai" : "manual",
         optimize: sug ? false : optimize,
@@ -215,6 +223,10 @@ export function PatrolPanel() {
           <span className="pp-hint">
             {config?.amap_enabled ? "高德路径已启用" : "直线连接(未配置高德 Key)"}
           </span>
+        </div>
+        <div className="pp-scope-row">
+          <span>规划数据范围</span>
+          <RelicScopeToggle compact />
         </div>
 
         <div className="pp-tabs">
@@ -446,6 +458,7 @@ export function PatrolPanel() {
                       </span>
                     </div>
                     <div className="pp-route-meta">
+                      {r.data_scope === "all" ? "全部文物" : "文保单位"} ·
                       {r.plan_date || "未定日期"} · {r.stop_count} 站 · {fmtKm(r.distance_m)} ·
                       已巡 {r.checked_count}/{r.stop_count}
                     </div>

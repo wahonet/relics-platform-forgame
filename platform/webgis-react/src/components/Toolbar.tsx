@@ -2,12 +2,16 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useUIStore } from "../stores/uiStore";
 import { useFilterStore } from "../stores/filterStore";
 import { useRelicsStore } from "../stores/relicsStore";
+import { useDrillStore } from "../stores/drillStore";
+import { useTimelineStore } from "../stores/timelineStore";
 import { usePlatformStore } from "../stores/platformStore";
 import { flyHomeFn } from "../map/MapView";
 import { getViewer } from "../map/viewerRegistry";
 import { passFilter } from "./FilterPanel";
 import { DIMS, dimValues, rankCode, rankShort } from "../utils/dict";
 import type { BaseLayerType } from "../types";
+import { useCatalogScopeStore } from "../stores/catalogScopeStore";
+import { filterRelicsByScope } from "../utils/relicScope";
 
 const BASE_OPTIONS: { value: BaseLayerType; label: string }[] = [
   { value: "tianditu_img", label: "在线影像 (天地图)" },
@@ -45,25 +49,46 @@ export function Toolbar() {
   const threeD = useFilterStore((s) => s.threeD);
   const activeCats = useFilterStore((s) => s.activeCats);
   const statFilters = useFilterStore((s) => s.statFilters);
+  const scope = useCatalogScopeStore((s) => s.scope);
   const allRelics = useRelicsStore((s) => s.all);
-  const allCount = allRelics.length;
+  const scopedRelics = useMemo(
+    () => filterRelicsByScope(allRelics, scope),
+    [allRelics, scope],
+  );
+  const allCount = scopedRelics.length;
   const cityName = usePlatformStore(
     (s) => s.config?.project?.name || "全市",
   );
 
   const lvDim = DIMS.find((d) => d.id === "heritage_level");
-  // 真实通过筛选的文物数(含统计面板点选),用于徽章与"当前视图"。
+  const villageCodes = useDrillStore((s) => s.villageCodes);
+  const timelineActive = useTimelineStore((s) => s.active);
+  const healthMode = useUIStore((s) => s.healthMode);
+  const heatMode = useUIStore((s) => s.heatMode);
+  // 真实通过筛选的文物数(含统计面板点选与村级下钻),用于徽章与"当前视图"。
   const filteredCount = useMemo(() => {
     const catNames = new Set(
-      allRelics.map((r) => r.category_main).filter(Boolean) as string[],
+      scopedRelics.map((r) => r.category_main).filter(Boolean) as string[],
     );
     const catFilterOn = activeCats.size > 0 && activeCats.size < catNames.size;
     const anyFilter =
       catFilterOn || !!search.trim() || !!county || !!township || !!level ||
-      !!cond || !!tier || !!threeD || Object.keys(statFilters).length > 0;
+      !!cond || !!tier || !!threeD || !!villageCodes ||
+      Object.keys(statFilters).length > 0;
     if (!anyFilter) return allCount;
-    const f = { search, county, township, level, cond, tier, threeD, activeCats };
-    return allRelics.filter((r) => {
+    const f = {
+      search,
+      county,
+      township,
+      level,
+      cond,
+      tier,
+      threeD,
+      scope,
+      activeCats,
+      villageCodes,
+    };
+    return scopedRelics.filter((r) => {
       if (!passFilter(r, f, lvDim)) return false;
       for (const [dimId, val] of Object.entries(statFilters)) {
         const dim = DIMS.find((d) => d.id === dimId);
@@ -72,22 +97,24 @@ export function Toolbar() {
       }
       return true;
     }).length;
-  }, [allRelics, allCount, activeCats, search, county, township, level, cond, tier, threeD, statFilters, lvDim]);
+  }, [scopedRelics, allCount, activeCats, search, county, township, level, cond, tier, threeD, scope, villageCodes, statFilters, lvDim]);
 
   /** 「当前视图」层级:区域 → 级别 → 类别 → 年代 → 保存状况(→ 关键词)。 */
+  const drillVillage = useDrillStore((s) => s.village);
   const viewCrumbs = useMemo(() => {
     const parts: string[] = [];
-    // 1. 区域(县区 + 乡镇)
+    // 1. 区域(县区 + 乡镇 + 村)
     const rgCounty = county || statFilters.county || "";
     const rgTown = (township || statFilters.township || "").replace(/^\d+/, "");
-    if (rgCounty || rgTown) parts.push([rgCounty, rgTown].filter(Boolean).join(" "));
-    else parts.push(cityName);
+    if (rgCounty || rgTown) {
+      parts.push([rgCounty, rgTown, drillVillage].filter(Boolean).join(" "));
+    } else parts.push(cityName);
     // 2. 文物级别(简称:国保/省保/市保/县保/未定级)
     const lv = level || statFilters.heritage_level || "";
     if (lv) parts.push(rankShort(rankCode(lv)));
     // 3. 文物类别
     const catNames = new Set(
-      allRelics.map((r) => r.category_main).filter(Boolean) as string[],
+      scopedRelics.map((r) => r.category_main).filter(Boolean) as string[],
     );
     if (statFilters.category_main) {
       parts.push(statFilters.category_main);
@@ -106,7 +133,7 @@ export function Toolbar() {
     if (search.trim()) parts.push(`“${search.trim()}”`);
     if (threeD === "1") parts.push("有三维模型");
     return parts;
-  }, [county, township, level, cond, search, threeD, activeCats, statFilters, allRelics, cityName]);
+  }, [county, township, drillVillage, level, cond, search, threeD, activeCats, statFilters, scopedRelics, cityName]);
 
   const hasFilter = filteredCount < allCount;
 
@@ -287,6 +314,9 @@ export function Toolbar() {
                 />{" "}
                 村名
               </label>
+              <div className="boundary-lod-note">
+                镇街、村界随比例尺自动显隐
+              </div>
               <div className="dropdown-divider" />
               <label className="dropdown-item" title="保护范围(红)与建设控制地带(蓝)">
                 <input
@@ -299,6 +329,39 @@ export function Toolbar() {
             </div>
           )}
         </div>
+      </div>
+
+      <div className="tb-group boxed">
+        <button
+          className={"tb" + (timelineActive ? " on" : "")}
+          onClick={() => useTimelineStore.getState().toggle()}
+          title="年代时间轴:按朝代逐档点亮文物分布"
+        >
+          <svg viewBox="0 0 24 24">
+            <path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm0 18a8 8 0 1 1 8-8 8 8 0 0 1-8 8zm.5-13H11v6l5.2 3.1.8-1.3-4.5-2.7z" />
+          </svg>
+          时间轴
+        </button>
+        <button
+          className={"tb" + (healthMode ? " on" : "")}
+          onClick={() => setUI({ healthMode: !healthMode })}
+          title="健康度一张图:按保存状况/巡查/天气综合评分红黄绿着色"
+        >
+          <svg viewBox="0 0 24 24">
+            <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" />
+          </svg>
+          健康度
+        </button>
+        <button
+          className={"tb" + (heatMode ? " on" : "")}
+          onClick={() => setUI({ heatMode: !heatMode })}
+          title="文物密度热力图(跟随筛选与年代时间轴)"
+        >
+          <svg viewBox="0 0 24 24">
+            <path d="M13.5 0.67s0.74 2.65 0.74 4.8c0 2.06-1.35 3.73-3.41 3.73-2.07 0-3.63-1.67-3.63-3.73l0.03-0.36C5.21 7.51 4 10.62 4 14c0 4.42 3.58 8 8 8s8-3.58 8-8C20 8.61 17.41 3.8 13.5 0.67zM11.71 19c-1.78 0-3.22-1.4-3.22-3.14 0-1.62 1.05-2.76 2.81-3.12 1.77-0.36 3.6-1.21 4.62-2.58 0.39 1.29 0.59 2.65 0.59 4.04 0 2.65-2.15 4.8-4.8 4.8z" />
+          </svg>
+          热力图
+        </button>
       </div>
 
       <div className="status-summary">

@@ -10,6 +10,8 @@ import { ChatPanel } from "./components/ChatPanel";
 import { PatrolPanel } from "./components/PatrolPanel";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { CoordReadout } from "./components/CoordReadout";
+import { DrillBreadcrumb } from "./components/DrillBreadcrumb";
+import { EraTimeline } from "./components/EraTimeline";
 import { MapLegend } from "./components/MapLegend";
 import { CoordReadoutRestore } from "./components/CoordReadoutRestore";
 import { CrsInspectorPanel } from "./components/CrsInspectorPanel";
@@ -23,6 +25,7 @@ import { usePlatformStore } from "./stores/platformStore";
 import { useRelicsStore } from "./stores/relicsStore";
 import { useUIStore } from "./stores/uiStore";
 import { useParcelStore } from "./stores/parcelStore";
+import { useWeatherStore } from "./stores/weatherStore";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 
 export type AppTab = "map" | "dashboard" | "parcels" | "patrol" | "admin";
@@ -63,6 +66,11 @@ function App() {
   useEffect(() => {
     if (!relicsLoaded && !relicsLoading) relicsLoad();
   }, [relicsLoaded, relicsLoading, relicsLoad]);
+
+  // 天气数据全局加载(右侧天气面板即使被设置隐藏,地图氛围层仍可用)
+  useEffect(() => {
+    useWeatherStore.getState().start();
+  }, []);
 
   // 旧链接 /?patrol=1 → 跳到独立巡查页。
   useEffect(() => {
@@ -109,6 +117,8 @@ function App() {
       {/* 地图总览专属 UI,巡查页不显示 */}
       <div style={{ display: isMap ? "contents" : "none" }}>
         <ErrorBoundary label="Toolbar"><Toolbar /></ErrorBoundary>
+        <ErrorBoundary label="DrillBreadcrumb"><DrillBreadcrumb /></ErrorBoundary>
+        <ErrorBoundary label="EraTimeline"><EraTimeline /></ErrorBoundary>
         <ErrorBoundary label="FilterPanel"><FilterPanel /></ErrorBoundary>
         <ErrorBoundary label="Dashboard"><Dashboard /></ErrorBoundary>
         <ErrorBoundary label="InfoPanel"><InfoPanel /></ErrorBoundary>

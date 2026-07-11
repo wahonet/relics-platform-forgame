@@ -39,6 +39,9 @@ export class PointRenderer {
   private iconsReady = false;
   private destroyed = false;
   private cameraCallback: () => void;
+  /** 健康度着色模式:点位按健康色(绿/黄/红)渲染,并停用近景图标。 */
+  private healthMode = false;
+  private healthColors = new Map<string, string>();
 
   constructor(viewer: Cesium.Viewer) {
     this.viewer = viewer;
@@ -83,6 +86,8 @@ export class PointRenderer {
   }
 
   private desiredMode(): RenderMode {
+    // 健康度模式统一用色点表达,不切近景图标(图标无法承载健康色)
+    if (this.healthMode) return "dot";
     let h = Infinity;
     try {
       h = this.viewer.camera.positionCartographic.height;
@@ -93,6 +98,29 @@ export class PointRenderer {
       return h > BADGE_EXIT_HEIGHT ? "dot" : "badge";
     }
     return h < BADGE_ENTER_HEIGHT ? "badge" : "dot";
+  }
+
+  /** 切换健康度着色(colors: code → css 颜色)。 */
+  setHealthMode(enabled: boolean, colors: Map<string, string>) {
+    this.healthMode = enabled;
+    this.healthColors = colors;
+    this.mode = this.desiredMode();
+    this.rebuild();
+  }
+
+  /** 整体显隐(热力图模式下隐藏点位,保留数据)。 */
+  setVisible(visible: boolean) {
+    this.dots.show = visible;
+    this.badges.show = visible;
+    this.labels.show = visible;
+    if (!this.viewer.isDestroyed()) this.viewer.scene.requestRender();
+  }
+
+  private dotColor(r: BboxRelic): string {
+    if (this.healthMode) {
+      return this.healthColors.get(r.code) || "#8b99ad";
+    }
+    return RANK_COLOR[r.rank] || RANK_COLOR["5"];
   }
 
   destroy() {
@@ -182,8 +210,8 @@ export class PointRenderer {
         } else {
           dot = this.dots.add({
             position: pos,
-            color: Cesium.Color.fromCssColorString(RANK_COLOR[r.rank] || RANK_COLOR["5"]),
-            pixelSize: rankSize(r.rank) || 3,
+            color: Cesium.Color.fromCssColorString(this.dotColor(r)),
+            pixelSize: (rankSize(r.rank) || 3) + (this.healthMode ? 1 : 0),
             outlineColor: Cesium.Color.fromCssColorString("rgba(13,17,23,0.85)"),
             outlineWidth: 1,
             id: pickId,
@@ -212,10 +240,8 @@ export class PointRenderer {
         if (meta.dot) {
           meta.dot.position = pos;
           if (meta.rank !== r.rank) {
-            meta.dot.color = Cesium.Color.fromCssColorString(
-              RANK_COLOR[r.rank] || RANK_COLOR["5"],
-            );
-            meta.dot.pixelSize = rankSize(r.rank) || 3;
+            meta.dot.color = Cesium.Color.fromCssColorString(this.dotColor(r));
+            meta.dot.pixelSize = (rankSize(r.rank) || 3) + (this.healthMode ? 1 : 0);
           }
         }
         if (meta.badge) {

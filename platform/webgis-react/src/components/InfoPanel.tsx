@@ -4,6 +4,12 @@ import { fetchPhotos, fetchDrawings, fetchRelicDetail } from "../api/relics";
 import { fetchRelicArchives } from "../api/stats";
 import type { Drawing, Photo, RelicSummary, RelicArchives } from "../types";
 import { COND_CLS } from "../utils/dict";
+import {
+  playNarration,
+  stopNarration,
+  type NarrationLang,
+  type NarrationPhase,
+} from "../utils/narration";
 import { Lightbox } from "./Lightbox";
 import { useDraggableResizable } from "../hooks/useDraggableResizable";
 
@@ -23,7 +29,38 @@ export function InfoPanel() {
   const [lightbox, setLightbox] = useState<{ urls: string[]; captions: string[]; index: number } | null>(
     null,
   );
+  const [qrOpen, setQrOpen] = useState(false);
+  const [voicePhase, setVoicePhase] = useState<NarrationPhase>("idle");
+  const [voiceLang, setVoiceLang] = useState<NarrationLang | null>(null);
   const { panelStyle, onDragStart, onResizeStart } = useDraggableResizable(!!selected);
+
+  // 切换文物或关闭面板时停止朗读、收起二维码
+  useEffect(() => {
+    stopNarration();
+    setVoicePhase("idle");
+    setVoiceLang(null);
+    setQrOpen(false);
+  }, [selected?.archive_code]);
+  useEffect(() => () => stopNarration(), []);
+
+  const toggleNarration = (lang: NarrationLang) => {
+    if (!selected) return;
+    // 同语言再点 = 停止;换语言 = 直接切播
+    if (voicePhase !== "idle" && voiceLang === lang) {
+      stopNarration();
+      setVoicePhase("idle");
+      setVoiceLang(null);
+      return;
+    }
+    setVoiceLang(lang);
+    playNarration(selected, intro, lang, {
+      onPhase: (phase) => {
+        setVoicePhase(phase);
+        if (phase === "idle") setVoiceLang(null);
+      },
+      onNotice: (text) => useUIStore.getState().showToast(text, "warning"),
+    });
+  };
 
   useEffect(() => {
     if (!selected?.archive_code) return;
@@ -89,6 +126,40 @@ export function InfoPanel() {
       <div className="info-panel" style={panelStyle}>
         <div className="pi-hdr" onMouseDown={onDragStart} title="拖动标题栏移动面板">
           <h2>{r.name || "-"}</h2>
+          {(["zh", "en"] as NarrationLang[]).map((lang) => {
+            const active = voiceLang === lang && voicePhase !== "idle";
+            const loading = active && voicePhase === "loading";
+            return (
+              <button
+                key={lang}
+                className={"pi-voice" + (active ? " on" : "") + (loading ? " loading" : "")}
+                onMouseDown={(e) => e.stopPropagation()}
+                onClick={() => toggleNarration(lang)}
+                title={
+                  active
+                    ? "停止讲解"
+                    : lang === "zh"
+                    ? "AI 语音讲解(中文)"
+                    : "AI narration (English)"
+                }
+                aria-label={lang === "zh" ? "中文语音讲解" : "英文语音讲解"}
+              >
+                {loading ? (
+                  <svg className="pi-voice-spin" viewBox="0 0 24 24">
+                    <path d="M12 4V1L8 5l4 4V6a6 6 0 1 1-6 6H4a8 8 0 1 0 8-8z" />
+                  </svg>
+                ) : active ? (
+                  <svg viewBox="0 0 24 24"><path d="M6 6h12v12H6z" /></svg>
+                ) : lang === "zh" ? (
+                  <svg viewBox="0 0 24 24">
+                    <path d="M3 10v4h4l5 5V5L7 10H3zm13.5 2c0-1.77-1-3.29-2.5-4.03v8.05c1.5-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z" />
+                  </svg>
+                ) : (
+                  <span className="pi-voice-en">EN</span>
+                )}
+              </button>
+            );
+          })}
           <button className="pi-close" onClick={() => setUI({ selectedRelic: null })}>
             ×
           </button>
@@ -148,8 +219,17 @@ export function InfoPanel() {
               </div>
             ) : null}
 
-            {(r.has_3d || archives) && (
-              <div className="pi-action-bar">
+            <div className="pi-action-bar">
+                <button
+                  className="pi-act-btn pi-btn-card"
+                  onClick={() => setQrOpen(true)}
+                  title="生成手机扫码访问的文物数字名片"
+                >
+                  <svg viewBox="0 0 24 24">
+                    <path d="M3 11h8V3H3v8zm2-6h4v4H5V5zM3 21h8v-8H3v8zm2-6h4v4H5v-4zM13 3v8h8V3h-8zm6 6h-4V5h4v4zM13 13h2v2h-2zM17 13h2v2h-2zM21 13h-2v2h2zM13 17h2v2h-2zM17 17h2v2h-2zM21 17h-2v2h2zM13 21h2v-2h-2zM17 21h2v-2h-2z" />
+                  </svg>
+                  数字名片
+                </button>
                 {r.has_3d && (
                   <button className="pi-act-btn pi-btn-3d" onClick={open3D}>
                     <svg viewBox="0 0 24 24">
@@ -180,8 +260,7 @@ export function InfoPanel() {
                     四普档案
                   </button>
                 ) : null}
-              </div>
-            )}
+            </div>
           </div>
         )}
         {tab === "photo" && (
@@ -267,6 +346,29 @@ export function InfoPanel() {
           onChangeIndex={(i) => setLightbox({ ...lightbox, index: i })}
           onClose={() => setLightbox(null)}
         />
+      ) : null}
+      {qrOpen ? (
+        <div className="card-qr-mask" onClick={() => setQrOpen(false)}>
+          <div className="card-qr-modal" onClick={(e) => e.stopPropagation()}>
+            <h3>{r.name} · 数字名片</h3>
+            <img
+              src={`/api/card/${encodeURIComponent(r.archive_code)}/qr.png?_=${r.archive_code}`}
+              alt="名片二维码"
+            />
+            <p>手机扫码查看图文与语音讲解<br />(手机需与平台处于同一网络)</p>
+            <div className="card-qr-actions">
+              <button
+                className="pp-btn sm"
+                onClick={() => window.open(`#/card/${encodeURIComponent(r.archive_code)}`, "_blank")}
+              >
+                本机预览
+              </button>
+              <button className="pp-btn sm primary" onClick={() => setQrOpen(false)}>
+                关闭
+              </button>
+            </div>
+          </div>
+        </div>
       ) : null}
     </>
   );

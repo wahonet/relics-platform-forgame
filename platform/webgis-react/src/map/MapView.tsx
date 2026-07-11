@@ -5,28 +5,36 @@ import { applyBaseLayer, setBaseLayerAlpha } from "./baseLayer";
 import { PointRenderer } from "./PointRenderer";
 import { ViewportManager } from "./ViewportManager";
 import { BoundaryLayer } from "./BoundaryLayer";
+import { HeatmapLayer } from "./HeatmapLayer";
 import { OfflineCoverageLayer } from "./OfflineCoverageLayer";
 import { OfflineVectorBasemapLayer } from "./OfflineVectorBasemapLayer";
-import { CountyNavigationController } from "./CountyNavigationController";
+import { AdminDrillController } from "./AdminDrillController";
+import { invalidateRegionIndex } from "./adminRegionIndex";
 import { RouteLayer, setRouteLayer } from "./RouteLayer";
 import { TwoLineLayer } from "./TwoLineLayer";
 import { ParcelLayer, setParcelLayer } from "./ParcelLayer";
 import { useParcelStore } from "../stores/parcelStore";
+import { useWeatherStore } from "../stores/weatherStore";
+import { useDrillStore } from "../stores/drillStore";
+import { useTimelineStore } from "../stores/timelineStore";
 import { useUIStore, isLightTheme } from "../stores/uiStore";
 import { useFilterStore } from "../stores/filterStore";
+import { useCatalogScopeStore } from "../stores/catalogScopeStore";
 import { useRelicsStore } from "../stores/relicsStore";
 import { usePlatformStore } from "../stores/platformStore";
 import { useHomeViewStore } from "../stores/homeViewStore";
 import { useMouseCoordStore } from "../stores/mouseCoordStore";
 import { usePatrolStore } from "../stores/patrolStore";
 import { fetchRelicDetail, fetchPolygon } from "../api/relics";
+import { computeHealth, todayWeatherRisk, HEALTH_COLOR } from "../utils/health";
+import { passFilter } from "../components/FilterPanel";
+import { relicInTimeline } from "../stores/timelineStore";
+import { DIMS } from "../utils/dict";
 
 interface MapViewProps {
   onCompassRotate?: (deg: number) => void;
   onScaleUpdate?: (label: string) => void;
 }
-
-let clearCountyNavigationHistory: (() => void) | null = null;
 
 export function MapView({ onCompassRotate, onScaleUpdate }: MapViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -35,9 +43,10 @@ export function MapView({ onCompassRotate, onScaleUpdate }: MapViewProps) {
   const pointRendererRef = useRef<PointRenderer | null>(null);
   const viewportRef = useRef<ViewportManager | null>(null);
   const boundaryRef = useRef<BoundaryLayer | null>(null);
+  const heatmapRef = useRef<HeatmapLayer | null>(null);
   const offlineCoverageRef = useRef<OfflineCoverageLayer | null>(null);
   const offlineVectorRef = useRef<OfflineVectorBasemapLayer | null>(null);
-  const countyNavigationRef = useRef<CountyNavigationController | null>(null);
+  const drillControllerRef = useRef<AdminDrillController | null>(null);
   const routeLayerRef = useRef<RouteLayer | null>(null);
   const twoLineRef = useRef<TwoLineLayer | null>(null);
   const parcelLayerRef = useRef<ParcelLayer | null>(null);
@@ -63,6 +72,9 @@ export function MapView({ onCompassRotate, onScaleUpdate }: MapViewProps) {
   const filterThreeD = useFilterStore((s) => s.threeD);
   const filterSearch = useFilterStore((s) => s.search);
   const filterStatFilters = useFilterStore((s) => s.statFilters);
+  const catalogScope = useCatalogScopeStore((s) => s.scope);
+  const timelineActive = useTimelineStore((s) => s.active);
+  const timelineIndex = useTimelineStore((s) => s.index);
 
   const selectedRelic = useUIStore((s) => s.selectedRelic);
   const patrolStops = usePatrolStore((s) => s.stops);
@@ -108,22 +120,13 @@ export function MapView({ onCompassRotate, onScaleUpdate }: MapViewProps) {
     const renderer = new PointRenderer(viewer);
     const viewport = new ViewportManager(viewer, renderer);
     const boundary = new BoundaryLayer(viewer);
+    const heatmap = new HeatmapLayer(viewer);
     const offlineCoverage = new OfflineCoverageLayer(viewer);
     const offlineVector = new OfflineVectorBasemapLayer(viewer);
-    const countyNavigation = new CountyNavigationController(viewer, offlineVector, {
+    const drillController = new AdminDrillController(viewer, {
       canNavigate: () => {
         const patrol = usePatrolStore.getState();
         return !patrol.picking && !patrol.pickingStart;
-      },
-      onEnter: (county) => {
-        useUIStore
-          .getState()
-          .showToast(`已进入 ${county} · 单击右键返回上一视角`);
-      },
-      onBack: (county) => {
-        useUIStore
-          .getState()
-          .showToast(county ? `已返回 ${county} 视角` : "已返回上一视角");
       },
     });
     const routeLayer = new RouteLayer(viewer);
@@ -133,21 +136,25 @@ export function MapView({ onCompassRotate, onScaleUpdate }: MapViewProps) {
     pointRendererRef.current = renderer;
     viewportRef.current = viewport;
     boundaryRef.current = boundary;
+    heatmapRef.current = heatmap;
     offlineCoverageRef.current = offlineCoverage;
     offlineVectorRef.current = offlineVector;
-    countyNavigationRef.current = countyNavigation;
+    drillControllerRef.current = drillController;
     routeLayerRef.current = routeLayer;
     twoLineRef.current = twoLine;
     setRouteLayer(routeLayer);
     parcelLayerRef.current = parcels;
     setParcelLayer(parcels);
-    const resetCountyNavigation = () => countyNavigation.clearHistory();
-    clearCountyNavigationHistory = resetCountyNavigation;
 
-    offlineVector.setAlpha(useUIStore.getState().baseLayerAlpha);
-    const vectorBasemapActive = useUIStore.getState().baseLayer === "offline_vector";
-    offlineVector.setVisible(vectorBasemapActive);
-    countyNavigation.setEnabled(vectorBasemapActive);
+    const initialUi = useUIStore.getState();
+    offlineVector.setAlpha(initialUi.baseLayerAlpha);
+    offlineVector.setCountyVisualSuppressed(
+      initialUi.bndCounty,
+      initialUi.bndCountyName,
+    );
+    offlineVector.setVisible(initialUi.baseLayer === "offline_vector");
+    drillController.setEnabled(initialUi.drillEnabled);
+    viewport.setCodeFilter(useDrillStore.getState().villageCodes);
     // 已导入过图斑时(刷新页面后),恢复渲染;refresh 会 bump reloadTick 触发 sync
     useParcelStore.getState().refresh();
     twoLine.setVisible(useUIStore.getState().twoLineVisible);
@@ -253,7 +260,7 @@ export function MapView({ onCompassRotate, onScaleUpdate }: MapViewProps) {
         lat: +Cesium.Math.toDegrees(c.latitude).toFixed(8),
         name: "自定义起点",
       });
-      countyNavigation.suppressNextDoubleClick();
+      drillController.suppressNextDoubleClick();
       ps.setPickingStart(false);
       useUIStore.getState().showToast("出发起点已设置");
     }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
@@ -315,11 +322,10 @@ export function MapView({ onCompassRotate, onScaleUpdate }: MapViewProps) {
       } catch {
         /* ignore */
       }
-      countyNavigation.destroy();
+      drillController.destroy();
+      boundary.destroy();
+      heatmap.destroy();
       offlineVector.destroy();
-      if (clearCountyNavigationHistory === resetCountyNavigation) {
-        clearCountyNavigationHistory = null;
-      }
       useMouseCoordStore.getState().set(null, null, null);
       viewport.stop();
       renderer.destroy();
@@ -337,13 +343,97 @@ export function MapView({ onCompassRotate, onScaleUpdate }: MapViewProps) {
       pointRendererRef.current = null;
       viewportRef.current = null;
       boundaryRef.current = null;
+      heatmapRef.current = null;
       offlineCoverageRef.current = null;
       offlineVectorRef.current = null;
-      countyNavigationRef.current = null;
+      drillControllerRef.current = null;
       routeLayerRef.current = null;
       twoLineRef.current = null;
     };
   }, [viewerRef, onCompassRotate, onScaleUpdate, setUI]);
+
+  /** 双击下钻开关(系统管理 → 设置)。 */
+  const drillEnabled = useUIStore((s) => s.drillEnabled);
+  useEffect(() => {
+    drillControllerRef.current?.setEnabled(drillEnabled);
+  }, [drillEnabled]);
+
+  /** 村级下钻:地图点位只保留村内文物(前端 code 集合过滤)。 */
+  const villageCodes = useDrillStore((s) => s.villageCodes);
+  useEffect(() => {
+    viewportRef.current?.setCodeFilter(villageCodes);
+  }, [villageCodes]);
+
+  /** 健康度一张图:按健康分给点位红黄绿着色。 */
+  const healthMode = useUIStore((s) => s.healthMode);
+  const weatherForecast = useWeatherStore((s) => s.forecast);
+  const allRelics = useRelicsStore((s) => s.all);
+  useEffect(() => {
+    const renderer = pointRendererRef.current;
+    if (!renderer) return;
+    if (!healthMode) {
+      renderer.setHealthMode(false, new Map());
+      return;
+    }
+    const risk = todayWeatherRisk(weatherForecast?.days, weatherForecast?.timezone);
+    const colors = new Map<string, string>();
+    allRelics.forEach((r) => {
+      colors.set(r.archive_code, HEALTH_COLOR[computeHealth(r, risk).level]);
+    });
+    renderer.setHealthMode(true, colors);
+  }, [healthMode, weatherForecast, allRelics]);
+
+  /** 文物密度热力图:与当前筛选/时间轴/下钻同源,开启时隐藏点位。 */
+  const heatMode = useUIStore((s) => s.heatMode);
+  useEffect(() => {
+    const heatmap = heatmapRef.current;
+    const renderer = pointRendererRef.current;
+    if (!heatmap || !renderer) return;
+    if (!heatMode) {
+      heatmap.clear();
+      renderer.setVisible(true);
+      return;
+    }
+    const filter = useFilterStore.getState();
+    const timeline = useTimelineStore.getState();
+    const lvDim = DIMS.find((d) => d.id === "heritage_level");
+    const fstate = {
+      search: filter.search,
+      county: filter.county,
+      township: filter.township,
+      level: filter.level,
+      cond: filter.cond,
+      tier: filter.tier,
+      threeD: filter.threeD,
+      scope: catalogScope,
+      activeCats: filter.activeCats,
+      villageCodes,
+    };
+    const points: [number, number][] = [];
+    allRelics.forEach((r) => {
+      if (r.center_lng == null || r.center_lat == null) return;
+      if (timeline.active && !relicInTimeline(r, timeline.index)) return;
+      if (!passFilter(r, fstate, lvDim)) return;
+      points.push([r.center_lng, r.center_lat]);
+    });
+    renderer.setVisible(false);
+    heatmap.update(points);
+  }, [
+    heatMode,
+    allRelics,
+    villageCodes,
+    timelineActive,
+    timelineIndex,
+    filterActiveCats,
+    filterCounty,
+    filterTownship,
+    filterLevel,
+    filterTier,
+    filterCond,
+    filterThreeD,
+    filterSearch,
+    catalogScope,
+  ]);
 
   useEffect(() => {
     const viewer = viewerRef.current;
@@ -352,7 +442,6 @@ export function MapView({ onCompassRotate, onScaleUpdate }: MapViewProps) {
     const vectorBasemap = offlineVectorRef.current;
     vectorBasemap?.setVisible(baseLayer === "offline_vector");
     vectorBasemap?.setAlpha(baseLayerAlpha);
-    countyNavigationRef.current?.setEnabled(baseLayer === "offline_vector");
     if (baseLayer === "offline_vector") {
       vectorBasemap?.load().catch((error) => {
         console.warn("[OfflineVectorBasemap] 加载失败:", error);
@@ -386,6 +475,10 @@ export function MapView({ onCompassRotate, onScaleUpdate }: MapViewProps) {
   }, [viewerRef, baseLayerAlpha]);
 
   useEffect(() => {
+    offlineVectorRef.current?.setCountyVisualSuppressed(
+      bndCounty,
+      bndCountyName,
+    );
     const b = boundaryRef.current;
     if (!b) return;
     b.setVisibility({
@@ -409,6 +502,7 @@ export function MapView({ onCompassRotate, onScaleUpdate }: MapViewProps) {
    * 首次挂载时 boundaryReloadTick=0,跳过(避免重复 load,因为初始化 effect 已经 load 过一次)。 */
   useEffect(() => {
     if (boundaryReloadTick === 0) return;
+    invalidateRegionIndex();
     const b = boundaryRef.current;
     if (!b) return;
     b.reload().then(() => {
@@ -449,6 +543,9 @@ export function MapView({ onCompassRotate, onScaleUpdate }: MapViewProps) {
     filterThreeD,
     filterSearch,
     filterStatFilters,
+    catalogScope,
+    timelineActive,
+    timelineIndex,
     allRelicsLen,
   ]);
 
@@ -502,9 +599,16 @@ export function MapView({ onCompassRotate, onScaleUpdate }: MapViewProps) {
     homeAppliedRef.current = true;
   }, [viewerRef, homeView, platformLoaded]);
 
+  // 今日天气氛围(雨/雪/阴):在地图上叠一层极淡的效果,数据由天气面板写入
+  const weatherAmbience = useWeatherStore((s) => s.ambience);
+  const weatherFxEnabled = useUIStore((s) => s.weatherFxEnabled);
+
   return (
     <>
       <div ref={containerRef} className="map-container" />
+      {weatherFxEnabled && weatherAmbience ? (
+        <div className={`map-weather-fx ${weatherAmbience}`} aria-hidden="true" />
+      ) : null}
       {baseLayer === "offline_vector" ? (
         <div className="offline-vector-attribution">
           <span>双击县区进入 · 单击右键返回</span>
@@ -544,7 +648,8 @@ function configHomeDestination(): Cesium.Cartesian3 | Cesium.Rectangle | null {
 
 export function flyHomeFn(viewer: Cesium.Viewer | null): void {
   if (!viewer) return;
-  clearCountyNavigationHistory?.();
+  // 回家同时退出行政区下钻(自己飞 home,不再按区域飞)
+  useDrillStore.getState().reset({ fly: false });
   const home = useHomeViewStore.getState().view;
   const dest = home
     ? Cesium.Cartesian3.fromDegrees(home.lng, home.lat, home.h)
