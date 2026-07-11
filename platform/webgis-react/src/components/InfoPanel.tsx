@@ -126,6 +126,17 @@ export function InfoPanel() {
       <div className="info-panel" style={panelStyle}>
         <div className="pi-hdr" onMouseDown={onDragStart} title="拖动标题栏移动面板">
           <h2>{r.name || "-"}</h2>
+          <button
+            className="pi-voice"
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={() => setQrOpen(true)}
+            title="文物数字名片(手机扫码查看)"
+            aria-label="数字名片"
+          >
+            <svg viewBox="0 0 24 24">
+              <path d="M3 11h8V3H3v8zm2-6h4v4H5V5zM3 21h8v-8H3v8zm2-6h4v4H5v-4zM13 3v8h8V3h-8zm6 6h-4V5h4v4zM13 13h2v2h-2zM17 13h2v2h-2zM21 13h-2v2h2zM13 17h2v2h-2zM17 17h2v2h-2zM21 17h-2v2h2zM13 21h2v-2h-2zM17 21h2v-2h-2z" />
+            </svg>
+          </button>
           {(["zh", "en"] as NarrationLang[]).map((lang) => {
             const active = voiceLang === lang && voicePhase !== "idle";
             const loading = active && voicePhase === "loading";
@@ -220,17 +231,8 @@ export function InfoPanel() {
               </div>
             ) : null}
 
+            {r.has_3d || archives?.sanpu?.length || archives?.sipu?.length ? (
             <div className="pi-action-bar">
-                <button
-                  className="pi-act-btn pi-btn-card"
-                  onClick={() => setQrOpen(true)}
-                  title="生成手机扫码访问的文物数字名片"
-                >
-                  <svg viewBox="0 0 24 24">
-                    <path d="M3 11h8V3H3v8zm2-6h4v4H5V5zM3 21h8v-8H3v8zm2-6h4v4H5v-4zM13 3v8h8V3h-8zm6 6h-4V5h4v4zM13 13h2v2h-2zM17 13h2v2h-2zM21 13h-2v2h2zM13 17h2v2h-2zM17 17h2v2h-2zM21 17h-2v2h2zM13 21h2v-2h-2zM17 21h2v-2h-2z" />
-                  </svg>
-                  数字名片
-                </button>
                 {r.has_3d && (
                   <button className="pi-act-btn pi-btn-3d" onClick={open3D}>
                     <svg viewBox="0 0 24 24">
@@ -262,6 +264,7 @@ export function InfoPanel() {
                   </button>
                 ) : null}
             </div>
+            ) : null}
           </div>
         )}
         {tab === "photo" && (
