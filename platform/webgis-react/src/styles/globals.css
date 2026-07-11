@@ -1048,6 +1048,11 @@ body.parcel-mode .drill-bar { display: none; }
   transition: background var(--dur-1);
 }
 .card-voice button.on { background: color-mix(in srgb, var(--accent) 26%, transparent); }
+.card-notice {
+  margin: -4px 0 10px; padding: 6px 10px; border-radius: 8px;
+  font-size: 11.5px; line-height: 1.6; color: var(--t2);
+  background: var(--accent-dim); border: 1px solid var(--accent-bd);
+}
 .card-intro { padding-bottom: 12px; }
 .card-intro p {
   font-size: 13.5px; line-height: 1.85; color: var(--t1);

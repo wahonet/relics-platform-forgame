@@ -191,6 +191,22 @@ async def narrate(body: NarrateBody):
     )
 
 
+@router.get("/tts/narrate")
+async def narrate_get(
+    code: str,
+    lang: Literal["zh", "en"] = "zh",
+    voice: str | None = None,
+    speed: float | None = None,
+    scope: Literal["full", "brief", "intro"] = "full",
+):
+    """GET 版音频直链(与 POST 同逻辑)。
+
+    移动端浏览器要求 audio.play() 必须在用户手势内同步调用,
+    无法先 POST 拿 blob 再播;名片页把本接口 URL 直接赋给 <audio src>。
+    """
+    return await narrate(NarrateBody(code=code, lang=lang, voice=voice, speed=speed, scope=scope))
+
+
 _PREVIEW_TEXT = {
     "zh": "欢迎使用文物保护利用平台，这是当前音色与语速的试听效果。",
     "en": "Welcome to the heritage platform. 这是 preview voice, reading English with Chinese names like 周公庙.",
